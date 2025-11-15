@@ -1,5 +1,4 @@
 datasets/tvqa
-datasets/__pycache__
-
+__pycache__/
 
 outputs/datasets/*
