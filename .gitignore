@@ -2,3 +2,4 @@ datasets/tvqa
 __pycache__/
 
 outputs/datasets/*
+venv/
