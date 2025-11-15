@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from collections import defaultdict
 
-class TVQA:
+class TVQALong:
     """API for accessing TVQA dataset from local files."""
     
     def __init__(self, dataset_path: Optional[str] = None):
@@ -421,7 +421,7 @@ class TVQA:
 
 # Example usage
 if __name__ == "__main__":
-    dataset = TVQA(dataset_path="./tvqa")
+    dataset = TVQALong(dataset_path="./tvqa")
     
     print("=" * 70)
     print("TVQA Dataset Example")

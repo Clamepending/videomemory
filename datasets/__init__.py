@@ -4,7 +4,7 @@ TVQA Dataset API Package
 This package provides access to the TVQA dataset.
 """
 
-from .tvqa import TVQA
+from .tvqa_long import TVQALong
 
-__all__ = ['TVQA']
+__all__ = ['TVQALong']
 
