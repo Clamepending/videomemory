@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 from transformers import AutoProcessor, PaliGemmaForConditionalGeneration
+from tqdm import tqdm
 
 from .base import Captioner
 
@@ -27,7 +28,7 @@ class PaligemmaCaptioner(Captioner):
         device: str = "cuda:0",
         dtype: torch.dtype = torch.bfloat16,
         stride: int = 1,
-        prompt: str = "Describe the image in detail.",
+        prompt: str = "caption is",
         max_new_tokens: int = 100,
         revision: str = "bfloat16"
     ):
@@ -103,7 +104,8 @@ class PaligemmaCaptioner(Captioner):
         captions = [""] * len(frames)
         
         # Process frames at stride intervals
-        for i in range(0, len(frames), self.stride):
+        frame_indices = list(range(0, len(frames), self.stride))
+        for i in tqdm(frame_indices, desc="Captioning frames"):
             try:
                 # Load the image
                 image = self._load_image(frames[i])
