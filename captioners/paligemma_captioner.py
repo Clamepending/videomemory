@@ -17,6 +17,8 @@ class PaligemmaCaptioner(Captioner):
     
     Uses a stride parameter to control how often frames are sampled for captioning.
     Only frames at stride intervals are actually processed through the model.
+    
+    Model designed for a single round of image and text input only (cant do multi-frame captioning).
     """
     
     def __init__(
@@ -88,8 +90,7 @@ class PaligemmaCaptioner(Captioner):
         Other frames receive empty string captions.
         
         Args:
-            frames: List of image frames. Each frame can be a PIL Image, numpy array,
-                   file path (str), or any other image format supported by PIL.
+            frames: List of file paths to images.
         
         Returns:
             List of text captions, one for each input frame.

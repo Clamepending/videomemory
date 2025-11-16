@@ -19,8 +19,7 @@ class Captioner(ABC):
         Generate captions for a list of image frames.
         
         Args:
-            frames: List of image frames. Each frame can be a PIL Image, numpy array,
-                   file path (str), or any other image format supported by the implementation.
+            frames: List of file paths to images.
         
         Returns:
             List of text captions, one for each input frame.
