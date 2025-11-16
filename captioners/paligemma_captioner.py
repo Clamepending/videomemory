@@ -26,7 +26,7 @@ class PaligemmaCaptioner(Captioner):
         model_id: str = "google/paligemma-3b-mix-224",
         device: str = "cuda:0",
         dtype: torch.dtype = torch.bfloat16,
-        stride: int = 6,
+        stride: int = 1,
         prompt: str = "Describe the image in detail.",
         max_new_tokens: int = 100,
         revision: str = "bfloat16"

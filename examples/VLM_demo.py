@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from datasets import TVQALong
 from captioners import PaligemmaCaptioner
 
-# Get 30th frame from first episode
+# Get frames 30, 130, 230, 330 from first episode
 dataset = TVQALong()
 episode = dataset.get_episode("bbt", "s01", "e01", split="train")
 
@@ -16,17 +16,22 @@ for clip_name in episode['clips']:
     all_frames.extend(dataset.get_clip_frames(clip_name, show='bbt'))
 all_frames.sort()
 
-frame_path = all_frames[29]
+frame_indices = [29, 129, 229, 329]  # 0-based indexing
+frame_paths = [(i, all_frames[i]) for i in frame_indices if i < len(all_frames)]
 
-# Save frame
+# Save frames
 output_dir = Path("outputs/captioners")
 output_dir.mkdir(parents=True, exist_ok=True)
-output_path = output_dir / "frame_30.jpg"
-shutil.copy2(frame_path, output_path)
-print(f"Saved frame to: {output_path}")
+for frame_idx, frame_path in frame_paths:
+    output_path = output_dir / f"frame_{frame_idx+1}.jpg"
+    shutil.copy2(frame_path, output_path)
+    print(f"Saved frame {frame_idx+1} to: {output_path}")
 
-# Caption frame
-captioner = PaligemmaCaptioner()
-caption = captioner.caption([frame_path])[0]
-print(f"\nCaption: {caption}")
+# Caption frames
+captioner = PaligemmaCaptioner(stride=1)
+captions = captioner.caption([fp for _, fp in frame_paths])
+
+# Print captions
+for (frame_idx, _), caption in zip(frame_paths, captions):
+    print(f"\nFrame {frame_idx+1} caption: {caption}")
 
