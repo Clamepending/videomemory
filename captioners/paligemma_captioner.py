@@ -60,7 +60,7 @@ class PaligemmaCaptioner(Captioner):
             revision=revision,
         ).eval()
         
-        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.processor = AutoProcessor.from_pretrained(model_id, use_fast=True)
         print("✓ Model loaded successfully")
     
     def _load_image(self, frame: Union[str, Path, Image.Image]) -> Image.Image:
@@ -108,9 +108,10 @@ class PaligemmaCaptioner(Captioner):
                 # Load the image
                 image = self._load_image(frames[i])
                 
-                # Prepare inputs
+                # Prepare inputs - PaliGemma expects <image> token in the prompt
+                prompt_with_image = f"<image>{self.prompt}"
                 model_inputs = self.processor(
-                    text=self.prompt,
+                    text=prompt_with_image,
                     images=image,
                     return_tensors="pt"
                 ).to(self.model.device)
