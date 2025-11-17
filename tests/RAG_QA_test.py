@@ -12,7 +12,7 @@ Settings.embed_model = HuggingFaceEmbedding(
 if __name__ == '__main__':
     # Get the project root directory (parent of tests folder)
     project_root = Path(__file__).parent.parent
-    caption_dir = project_root / "outputs" / "captioners" / "paligemma-3b-mix-224"
+    caption_dir = project_root / "outputs" / "captioners" / "paligemma-3b-mix-224" / "default_caption"
 
     # Load documents and create index
     print("Loading documents and creating index...")

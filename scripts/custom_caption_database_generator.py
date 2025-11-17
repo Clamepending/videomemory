@@ -80,7 +80,7 @@ output_dir.mkdir(parents=True, exist_ok=True)
 for i, caption in enumerate(captions):
     if caption:  # Only save non-empty captions
         output_path = output_dir / f"frame_{i:06d}.md"
-        output_path.write_text(caption)
+        output_path.write_text(f"Frame {i}: {caption}")
 
 print(f"Saved {sum(1 for c in captions if c)} captions to {output_dir}")
 

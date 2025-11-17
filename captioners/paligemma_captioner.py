@@ -28,7 +28,7 @@ class PaligemmaCaptioner(Captioner):
         device: str = "cuda:0",
         dtype: torch.dtype = torch.bfloat16,
         stride: int = 1,
-        prompt: str = "caption is",
+        prompt: str = "describe en\n",
         max_new_tokens: int = 100,
         revision: str = "bfloat16"
     ):
