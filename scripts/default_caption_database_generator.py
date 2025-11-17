@@ -1,4 +1,5 @@
 import sys
+import shutil
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -28,7 +29,10 @@ captions = CAPTIONER.caption(all_frames)
 
 # Save each caption as markdown file
 model_name = CAPTIONER.model_id.split("/")[-1]
-output_dir = Path(f"outputs/captioners/{model_name}")
+output_dir = Path(f"outputs/captioners/{model_name}/default_caption")
+# Clear the output directory if it exists
+if output_dir.exists():
+    shutil.rmtree(output_dir)
 output_dir.mkdir(parents=True, exist_ok=True)
 
 for i, caption in enumerate(captions):
