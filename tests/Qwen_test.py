@@ -1,5 +1,7 @@
 from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor
 from qwen_vl_utils import process_vision_info
+import glob
+import os
 
 # default: Load the model on the available device(s)
 model = Qwen2VLForConditionalGeneration.from_pretrained(
@@ -22,15 +24,22 @@ processor = AutoProcessor.from_pretrained("Qwen/Qwen2-VL-7B-Instruct")
 # max_pixels = 1280*28*28
 # processor = AutoProcessor.from_pretrained("Qwen/Qwen2-VL-7B-Instruct", min_pixels=min_pixels, max_pixels=max_pixels)
 
+# Get all frame files from the video directory
+video_dir = "datasets/tvqa/videos/frames_hq/bbt_frames/s01e01_seg01_clip_00"
+frame_files = sorted(glob.glob(os.path.join(video_dir, "*.jpg")))
+# Convert to file:// URLs
+frame_urls = [f"file://{os.path.abspath(frame)}" for frame in frame_files][:30]
+
 messages = [
     {
         "role": "user",
         "content": [
             {
-                "type": "image",
-                "image": "outputs/captioners/frame_30.jpg",
+                "type": "video",
+                "video": frame_urls,
+                "fps": 3.0,
             },
-            {"type": "text", "text": "Describe this image."},
+            {"type": "text", "text": "Describe this video."},
         ],
     }
 ]
