@@ -53,7 +53,7 @@ class Qwen2VLCaptioner(Captioner):
             device_map="auto" if device == "cuda" else device,
         ).eval()
         
-        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.processor = AutoProcessor.from_pretrained(model_id, use_fast=False)
         print("✓ Model loaded successfully")
     
     def _get_frame_path(self, frame: Union[str, Path]) -> str:

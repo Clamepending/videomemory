@@ -12,8 +12,7 @@ python scripts/default_caption_database_generator.py --captioner qwen2vl
 ```
 custom prompt:
 ```
-python scripts/custom_caption_database_generator.py \
-    --prompt "Describe this video."
+python scripts/custom_caption_database_generator.py --captioner qwen2vl --prompt "Focus on the people in the video and exactly how many there are. Describe this video."
 ```
 
 

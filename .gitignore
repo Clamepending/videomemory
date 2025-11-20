@@ -5,3 +5,5 @@ outputs/datasets/*
 venv/
 
 outputs/captioners/*
+
+apps/Qwen2-VL-7B-Instruct/
