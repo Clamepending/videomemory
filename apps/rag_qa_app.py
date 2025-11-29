@@ -51,15 +51,24 @@ def initialize_rag_system(caption_model="Qwen2-VL-7B-Instruct", llm_model="Qwen/
     """Initialize the RAG system with both caption types."""
     global default_index, custom_index, llm, sampling_params, init_status_message
     
-    root = Path(__file__).parent.parent
-    default_dir = root / "outputs" / "captioners" / caption_model / "default_caption"
-    custom_dir = root / "outputs" / "captioners" / caption_model / "custom_caption"
+    apps_dir = Path(__file__).parent
+    default_dir = apps_dir / caption_model / "default_caption"
+    custom_dir = apps_dir / caption_model / "custom_caption"
     
     # Load default captions
     if default_dir.exists():
         print(f"Loading default captions from {default_dir}...")
-        documents = SimpleDirectoryReader(str(default_dir)).load_data()
-        default_index = VectorStoreIndex.from_documents(documents)
+        try:
+            documents = SimpleDirectoryReader(str(default_dir)).load_data()
+            if documents:
+                default_index = VectorStoreIndex.from_documents(documents)
+                print(f"✓ Loaded {len(documents)} default caption documents")
+            else:
+                print(f"Warning: No files found in {default_dir}")
+                default_index = None
+        except Exception as e:
+            print(f"Warning: Failed to load default captions: {e}")
+            default_index = None
     else:
         print(f"Warning: Default caption directory not found: {default_dir}")
         default_index = None
@@ -67,8 +76,17 @@ def initialize_rag_system(caption_model="Qwen2-VL-7B-Instruct", llm_model="Qwen/
     # Load custom captions
     if custom_dir.exists():
         print(f"Loading custom captions from {custom_dir}...")
-        documents = SimpleDirectoryReader(str(custom_dir)).load_data()
-        custom_index = VectorStoreIndex.from_documents(documents)
+        try:
+            documents = SimpleDirectoryReader(str(custom_dir)).load_data()
+            if documents:
+                custom_index = VectorStoreIndex.from_documents(documents)
+                print(f"✓ Loaded {len(documents)} custom caption documents")
+            else:
+                print(f"Warning: No files found in {custom_dir}")
+                custom_index = None
+        except Exception as e:
+            print(f"Warning: Failed to load custom captions: {e}")
+            custom_index = None
     else:
         print(f"Warning: Custom caption directory not found: {custom_dir}")
         custom_index = None
@@ -186,6 +204,17 @@ with gr.Blocks(title="RAG QA over Video Captions") as demo:
                 lines=2
             )
             submit_btn = gr.Button("Submit", variant="primary")
+            
+            # Add example questions
+            gr.Examples(
+                examples=[
+                    "What is each person doing in the car at the end?",
+                    "How many people are in the car at the end?",
+                    "How many people are in the room in the reception area scene?",
+                ],
+                inputs=query_input,
+                label="Example Questions (click to use)"
+            )
     
     with gr.Row():
         with gr.Column():

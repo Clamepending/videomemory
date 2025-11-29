@@ -6,6 +6,7 @@ from typing import List, Union
 from pathlib import Path
 import torch
 import os
+import time
 from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
 from tqdm import tqdm
@@ -106,7 +107,10 @@ class Qwen2VLCaptioner(Captioner):
             chunk_frames = frames[start_idx:end_idx]
             
             try:
+                start_time = time.time()
                 caption = self._caption_chunk(chunk_frames)
+                elapsed_time = time.time() - start_time
+                print(f"Chunk {chunk_idx + 1}/{num_chunks} processed in {elapsed_time:.2f}s")
                 captions.append(caption)
             except Exception as e:
                 print(f"Warning: Failed to caption chunk {chunk_idx + 1}/{num_chunks} (frames {start_idx}-{end_idx-1}): {e}")
