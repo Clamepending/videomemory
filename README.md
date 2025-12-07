@@ -5,7 +5,7 @@ A system for generating captions from video frames and performing Retrieval-Augm
 ## Overview
 
 This repository provides tools for:
-- **Video Captioning**: Generate text captions from video frames using vision-language models (Qwen2-VL, Paligemma)
+- **Video Captioning**: Generate text captions from video frames using vision-language models (Qwen2-VL, Paligemma, SmolVLM)
 - **RAG QA**: Ask questions about video content using both default and custom captions
 - **Dataset Management**: Access and process the TVQA dataset
 
@@ -17,6 +17,7 @@ This repository provides tools for:
    - **`base.py`**: Abstract base class `Captioner` interface
    - **`paligemma_captioner.py`**: Paligemma-based captioner (processes frames individually)
    - **`qwen2vl_captioner.py`**: Qwen2-VL captioner (processes video chunks)
+   - **`smolvlm_captioner.py`**: SmolVLM captioner (supports both single-frame and multi-frame processing)
    - **`__init__.py`**: Exports all captioners
 
 #### 2. **`datasets/`** — Dataset Handling
@@ -203,6 +204,12 @@ For Paligemma with a custom prompt:
 
 ```bash
 python scripts/custom_caption_database_generator.py --captioner paligemma --prompt "describe en\n"
+```
+
+For SmolVLM with a custom prompt:
+
+```bash
+python scripts/custom_caption_database_generator.py --captioner smolvlm --prompt "Describe this video in detail." --chunk-size 30
 ```
 
 ### Run RAG QA (Command Line)

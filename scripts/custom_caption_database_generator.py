@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from datasets import TVQALong
-from captioners import PaligemmaCaptioner, Qwen2VLCaptioner
+from captioners import PaligemmaCaptioner, Qwen2VLCaptioner, SmolVLMCaptioner
 
 parser = argparse.ArgumentParser(description="Generate captions with a custom prompt")
 parser.add_argument("--prompt", type=str, required=True, help="Custom prompt for the captioning model")
@@ -15,8 +15,8 @@ parser.add_argument("--season", type=str, default="s01", help="Season (default: 
 parser.add_argument("--episode", type=str, default="e01", help="Episode (default: e01)")
 parser.add_argument("--split", type=str, default="train", help="Dataset split (default: train)")
 parser.add_argument("--stride", type=int, default=30, help="Frame stride for Paligemma (default: 30)")
-parser.add_argument("--captioner", type=str, choices=["paligemma", "qwen2vl"], default="qwen2vl", help="Captioner to use")
-parser.add_argument("--chunk-size", type=int, default=30, help="Video chunk size for Qwen2VL (default: 30)")
+parser.add_argument("--captioner", type=str, choices=["paligemma", "qwen2vl", "smolvlm"], default="qwen2vl", help="Captioner to use")
+parser.add_argument("--chunk-size", type=int, default=30, help="Video chunk size for Qwen2VL/SmolVLM (default: 30)")
 parser.add_argument("--fps", type=float, default=3.0, help="FPS for Qwen2VL (default: 3.0)")
 
 args = parser.parse_args()
@@ -26,6 +26,8 @@ if args.captioner == "paligemma":
     CAPTIONER = PaligemmaCaptioner(stride=args.stride, prompt=args.prompt)
 elif args.captioner == "qwen2vl":
     CAPTIONER = Qwen2VLCaptioner(prompt=args.prompt, chunk_size=args.chunk_size, fps=args.fps)
+elif args.captioner == "smolvlm":
+    CAPTIONER = SmolVLMCaptioner(prompt=args.prompt, chunk_size=args.chunk_size)
 
 # Delete existing output directory and create fresh one
 model_name = CAPTIONER.model_id.split("/")[-1]

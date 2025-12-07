@@ -6,10 +6,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from datasets import TVQALong
-from captioners import PaligemmaCaptioner, Qwen2VLCaptioner
+from captioners import PaligemmaCaptioner, Qwen2VLCaptioner, SmolVLMCaptioner
 
 parser = argparse.ArgumentParser(description="Generate default captions")
-parser.add_argument("--captioner", type=str, choices=["paligemma", "qwen2vl"], default="qwen2vl", help="Captioner to use")
+parser.add_argument("--captioner", type=str, choices=["paligemma", "qwen2vl", "smolvlm"], default="qwen2vl", help="Captioner to use")
 
 args = parser.parse_args()
 
@@ -24,6 +24,8 @@ if args.captioner == "paligemma":
     CAPTIONER = PaligemmaCaptioner(stride=30)
 elif args.captioner == "qwen2vl":
     CAPTIONER = Qwen2VLCaptioner(chunk_size=30, fps=3.0)
+elif args.captioner == "smolvlm":
+    CAPTIONER = SmolVLMCaptioner(chunk_size=30, prompt="Describe this video.")
     
 # Save each caption as markdown file
 model_name = CAPTIONER.model_id.split("/")[-1]
