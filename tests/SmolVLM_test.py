@@ -10,7 +10,7 @@ from captioners import SmolVLMCaptioner
 
 # Option 1: Test with multiple frames from a video directory
 video_dir = "datasets/tvqa/videos/frames_hq/bbt_frames/s01e01_seg01_clip_00"
-frame_files = sorted(glob.glob(os.path.join(video_dir, "*.jpg")))[50:51]
+frame_files = sorted(glob.glob(os.path.join(video_dir, "*.jpg")))[40:51]
 
 # Option 2: Test with a single image (uncomment to use)
 # frame_files = ["outputs/captioners/frame_30.jpg"]
@@ -20,7 +20,7 @@ frame_files = sorted(glob.glob(os.path.join(video_dir, "*.jpg")))[50:51]
 # For single frame, chunk_size=1 processes individually
 captioner = SmolVLMCaptioner(
     chunk_size=len(frame_files) if len(frame_files) > 1 else 1,
-    prompt="Describe this video. Be concise." if len(frame_files) > 1 else "Describe this image. Be concise.",
+    prompt="Describe this video. Focus on the main action. Be concise." if len(frame_files) > 1 else "Describe this image. Focus on the main action. Be concise.",
     max_new_tokens=500,
 )
 
