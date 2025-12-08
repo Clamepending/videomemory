@@ -172,6 +172,53 @@
             font-size: 0.9em;
         }
 
+        .prompt-section {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .prompt-section h3 {
+            margin-bottom: 10px;
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        .prompt-input-wrapper {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+
+        .prompt-input {
+            flex: 1;
+            padding: 12px;
+            font-size: 1em;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .prompt-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn-update {
+            background: #667eea;
+            color: white;
+            padding: 12px 20px;
+            font-size: 0.95em;
+        }
+
+        .btn-update:hover {
+            background: #5568d3;
+        }
+
         @media (max-width: 768px) {
             .video-container {
                 flex-direction: column;
@@ -179,6 +226,10 @@
 
             h1 {
                 font-size: 2em;
+            }
+
+            .prompt-input-wrapper {
+                flex-direction: column;
             }
         }
     </style>
@@ -190,6 +241,24 @@
         
         <div id="status" class="status disconnected">
             ⚫ Disconnected - Click "Start Captioning" to begin
+        </div>
+
+        <div class="prompt-section">
+            <h3>📝 Caption Prompt:</h3>
+            <div class="prompt-input-wrapper">
+                <textarea 
+                    id="promptInput" 
+                    class="prompt-input" 
+                    placeholder="Describe this image in 2 sentences."
+                    rows="2"
+                >Describe this image in 2 sentences.</textarea>
+                <button id="updatePromptBtn" class="btn-update" onclick="updatePrompt()">
+                    Update Prompt
+                </button>
+            </div>
+            <p style="margin-top: 8px; color: #666; font-size: 0.9em;">
+                Change the prompt to customize how the AI describes the images.
+            </p>
         </div>
 
         <div class="video-container">
@@ -224,11 +293,14 @@
         let statusDiv = document.getElementById('status');
         let startBtn = document.getElementById('startBtn');
         let stopBtn = document.getElementById('stopBtn');
+        let promptInput = document.getElementById('promptInput');
+        let updatePromptBtn = document.getElementById('updatePromptBtn');
         
         let stream = null;
         let websocket = null;
         let captureInterval = null;
         let canvas = null;
+        let currentPrompt = "Describe this image in 2 sentences.";
 
         // Create canvas for frame capture
         canvas = document.createElement('canvas');
@@ -246,8 +318,28 @@
             };
             
             websocket.onmessage = (event) => {
-                const caption = event.data;
-                displayCaption(caption);
+                const data = event.data;
+                
+                // Try to parse as JSON (for prompt updates)
+                try {
+                    const message = JSON.parse(data);
+                    if (message.type === 'prompt_updated') {
+                        currentPrompt = message.prompt;
+                        promptInput.value = currentPrompt;
+                        updateStatus('connected', '🟢 Prompt updated successfully');
+                        setTimeout(() => {
+                            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                                updateStatus('connected', '🟢 Connected - Ready to caption');
+                            }
+                        }, 2000);
+                        return;
+                    }
+                } catch (e) {
+                    // Not JSON, treat as caption text
+                }
+                
+                // Display caption
+                displayCaption(data);
             };
             
             websocket.onerror = (error) => {
@@ -300,17 +392,37 @@
                     }
                 });
                 
-                // Set up canvas dimensions
-                canvas.width = video.videoWidth || 640;
-                canvas.height = video.videoHeight || 480;
+                // Send initial prompt
+                if (promptInput.value.trim()) {
+                    websocket.send(JSON.stringify({
+                        type: 'prompt',
+                        prompt: promptInput.value.trim()
+                    }));
+                    currentPrompt = promptInput.value.trim();
+                }
+                
+                // Wait for video to be ready and set up canvas dimensions
+                await new Promise((resolve) => {
+                    const checkVideo = () => {
+                        if (video.videoWidth > 0 && video.videoHeight > 0) {
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                            console.log(`Canvas initialized: ${canvas.width}x${canvas.height}`);
+                            resolve();
+                        } else {
+                            setTimeout(checkVideo, 100);
+                        }
+                    };
+                    checkVideo();
+                });
                 
                 // Start capturing frames every 2 seconds
                 captureInterval = setInterval(() => {
                     captureAndSendFrame();
                 }, 2000); // 2 seconds
                 
-                // Capture first frame immediately
-                setTimeout(captureAndSendFrame, 500);
+                // Capture first frame after a short delay to ensure everything is ready
+                setTimeout(captureAndSendFrame, 1000);
                 
                 updateStatus('captioning', '🟡 Captioning active - Processing frames...');
                 startBtn.disabled = true;
@@ -323,9 +435,59 @@
             }
         }
 
+        // Update prompt
+        function updatePrompt() {
+            const newPrompt = promptInput.value.trim();
+            if (!newPrompt) {
+                alert('Please enter a prompt');
+                return;
+            }
+            
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                alert('Not connected. Please start captioning first.');
+                return;
+            }
+            
+            // Send prompt update as JSON
+            websocket.send(JSON.stringify({
+                type: 'prompt',
+                prompt: newPrompt
+            }));
+            
+            currentPrompt = newPrompt;
+            updatePromptBtn.disabled = true;
+            updatePromptBtn.textContent = 'Updating...';
+            
+            // Re-enable button after a moment
+            setTimeout(() => {
+                updatePromptBtn.disabled = false;
+                updatePromptBtn.textContent = 'Update Prompt';
+            }, 1000);
+        }
+
         // Capture frame and send via WebSocket
         function captureAndSendFrame() {
             if (!video || !websocket || websocket.readyState !== WebSocket.OPEN) {
+                console.log('Cannot capture: video or websocket not ready');
+                return;
+            }
+            
+            // Check if video is ready
+            if (video.readyState !== video.HAVE_ENOUGH_DATA) {
+                console.log('Video not ready, skipping frame');
+                return;
+            }
+            
+            // Ensure canvas dimensions match video
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                console.log(`Canvas resized to ${canvas.width}x${canvas.height}`);
+            }
+            
+            // Check for valid dimensions
+            if (canvas.width === 0 || canvas.height === 0) {
+                console.log('Invalid canvas dimensions, skipping frame');
                 return;
             }
             
@@ -337,8 +499,16 @@
                 // Convert canvas to base64 JPEG
                 const imageData = canvas.toDataURL('image/jpeg', 0.85);
                 
-                // Send to server via WebSocket
-                websocket.send(imageData);
+                if (!imageData || imageData.length < 100) {
+                    console.error('Invalid image data generated');
+                    return;
+                }
+                
+                // Send to server via WebSocket as JSON
+                websocket.send(JSON.stringify({
+                    type: 'frame',
+                    data: imageData
+                }));
                 
             } catch (error) {
                 console.error('Error capturing frame:', error);
@@ -380,6 +550,14 @@
         window.addEventListener('load', () => {
             // Don't connect until user clicks start
             console.log('Page loaded. Click "Start Captioning" to begin.');
+        });
+
+        // Allow Enter key to update prompt (Ctrl+Enter or Cmd+Enter)
+        promptInput.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                updatePrompt();
+            }
         });
 
         // Cleanup on page unload
