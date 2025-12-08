@@ -94,23 +94,77 @@
         .caption-wrapper {
             flex: 1;
             min-width: 300px;
+            display: flex;
+            flex-direction: column;
         }
 
-        .caption-box {
+        .caption-container {
             background: #f8f9fa;
             border: 2px solid #e0e0e0;
             border-radius: 10px;
-            padding: 20px;
+            padding: 15px;
             min-height: 200px;
-            font-size: 1.1em;
-            line-height: 1.6;
-            color: #333;
+            max-height: 500px;
+            overflow-y: auto;
             box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.1);
         }
 
-        .caption-box.empty {
+        .caption-container.empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .caption-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .caption-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 12px 15px;
+            font-size: 0.95em;
+            line-height: 1.5;
+            color: #333;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            animation: slideIn 0.3s ease-out;
+            border-left: 3px solid #667eea;
+        }
+
+        .caption-item:first-child {
+            border-left-color: #4CAF50;
+            background: #f0f9f0;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .caption-timestamp {
+            font-size: 0.75em;
+            color: #999;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .caption-text {
+            color: #333;
+        }
+
+        .empty-message {
             color: #999;
             font-style: italic;
+            text-align: center;
         }
 
         .controls {
@@ -266,9 +320,9 @@
                 <video id="video" autoplay playsinline></video>
             </div>
             <div class="caption-wrapper">
-                <h3 style="margin-bottom: 10px; color: #333;">Caption:</h3>
-                <div id="caption" class="caption-box empty">
-                    No caption yet. Start captioning to see results.
+                <h3 style="margin-bottom: 10px; color: #333;">Captions:</h3>
+                <div id="captionContainer" class="caption-container empty">
+                    <div class="empty-message">No captions yet. Start captioning to see results.</div>
                 </div>
             </div>
         </div>
@@ -289,7 +343,7 @@
 
     <script>
         let video = document.getElementById('video');
-        let captionDiv = document.getElementById('caption');
+        let captionContainer = document.getElementById('captionContainer');
         let statusDiv = document.getElementById('status');
         let startBtn = document.getElementById('startBtn');
         let stopBtn = document.getElementById('stopBtn');
@@ -301,6 +355,8 @@
         let captureInterval = null;
         let canvas = null;
         let currentPrompt = "Describe this image in 2 sentences.";
+        let captionCount = 0;
+        const MAX_CAPTIONS = 50; // Maximum number of captions to keep
 
         // Create canvas for frame capture
         canvas = document.createElement('canvas');
@@ -359,10 +415,50 @@
             statusDiv.textContent = message;
         }
 
-        // Display caption
+        // Display caption in queue (newest at top)
         function displayCaption(text) {
-            captionDiv.textContent = text;
-            captionDiv.classList.remove('empty');
+            // Remove empty message if present
+            if (captionContainer.classList.contains('empty')) {
+                captionContainer.innerHTML = '';
+                captionContainer.classList.remove('empty');
+            }
+            
+            // Create caption list if it doesn't exist
+            let captionList = captionContainer.querySelector('.caption-list');
+            if (!captionList) {
+                captionList = document.createElement('div');
+                captionList.className = 'caption-list';
+                captionContainer.appendChild(captionList);
+            }
+            
+            // Create new caption item
+            const captionItem = document.createElement('div');
+            captionItem.className = 'caption-item';
+            
+            // Add timestamp
+            const timestamp = document.createElement('div');
+            timestamp.className = 'caption-timestamp';
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            timestamp.textContent = timeStr;
+            
+            // Add caption text
+            const captionText = document.createElement('div');
+            captionText.className = 'caption-text';
+            captionText.textContent = text;
+            
+            captionItem.appendChild(timestamp);
+            captionItem.appendChild(captionText);
+            
+            // Insert at the top of the list
+            captionList.insertBefore(captionItem, captionList.firstChild);
+            
+            // Limit the number of captions to prevent memory issues
+            captionCount++;
+            const items = captionList.querySelectorAll('.caption-item');
+            if (items.length > MAX_CAPTIONS) {
+                items[items.length - 1].remove();
+            }
         }
 
         // Start webcam and captioning
@@ -540,8 +636,9 @@
             
             // Reset UI
             updateStatus('disconnected', '⚫ Stopped');
-            captionDiv.textContent = 'No caption yet. Start captioning to see results.';
-            captionDiv.classList.add('empty');
+            captionContainer.innerHTML = '<div class="empty-message">No captions yet. Start captioning to see results.</div>';
+            captionContainer.classList.add('empty');
+            captionCount = 0;
             startBtn.disabled = false;
             stopBtn.disabled = true;
         }
