@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Webcam Captioner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 1200px;
+            width: 100%;
+            padding: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .status {
+            text-align: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .status.disconnected {
+            background: #fee;
+            color: #c33;
+        }
+
+        .status.connected {
+            background: #efe;
+            color: #3c3;
+        }
+
+        .status.captioning {
+            background: #eef;
+            color: #33c;
+        }
+
+        .video-container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .video-wrapper {
+            flex: 1;
+            min-width: 300px;
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .caption-wrapper {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .caption-box {
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 20px;
+            min-height: 200px;
+            font-size: 1.1em;
+            line-height: 1.6;
+            color: #333;
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .caption-box.empty {
+            color: #999;
+            font-style: italic;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 1.1em;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .btn-start {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-start:hover {
+            background: #45a049;
+        }
+
+        .btn-stop {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-stop:hover {
+            background: #da190b;
+        }
+
+        .btn-stop:disabled,
+        .btn-start:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .info {
+            text-align: center;
+            color: #666;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        @media (max-width: 768px) {
+            .video-container {
+                flex-direction: column;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 Real-time Webcam Captioner</h1>
+        <p class="subtitle">AI-powered live captioning from your webcam</p>
+        
+        <div id="status" class="status disconnected">
+            ⚫ Disconnected - Click "Start Captioning" to begin
+        </div>
+
+        <div class="video-container">
+            <div class="video-wrapper">
+                <video id="video" autoplay playsinline></video>
+            </div>
+            <div class="caption-wrapper">
+                <h3 style="margin-bottom: 10px; color: #333;">Caption:</h3>
+                <div id="caption" class="caption-box empty">
+                    No caption yet. Start captioning to see results.
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" class="btn-start" onclick="startCaptioning()">
+                ▶ Start Captioning
+            </button>
+            <button id="stopBtn" class="btn-stop" onclick="stopCaptioning()" disabled>
+                ⏹ Stop Captioning
+            </button>
+        </div>
+
+        <p class="info">
+            Frames are captured every 2 seconds and sent to the AI model for captioning.
+        </p>
+    </div>
+
+    <script>
+        let video = document.getElementById('video');
+        let captionDiv = document.getElementById('caption');
+        let statusDiv = document.getElementById('status');
+        let startBtn = document.getElementById('startBtn');
+        let stopBtn = document.getElementById('stopBtn');
+        
+        let stream = null;
+        let websocket = null;
+        let captureInterval = null;
+        let canvas = null;
+
+        // Create canvas for frame capture
+        canvas = document.createElement('canvas');
+
+        // WebSocket connection
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/captioning`;
+            
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = () => {
+                console.log('WebSocket connected');
+                updateStatus('connected', '🟢 Connected - Ready to caption');
+            };
+            
+            websocket.onmessage = (event) => {
+                const caption = event.data;
+                displayCaption(caption);
+            };
+            
+            websocket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('disconnected', '🔴 Connection Error');
+            };
+            
+            websocket.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateStatus('disconnected', '⚫ Disconnected');
+            };
+        }
+
+        // Update status display
+        function updateStatus(type, message) {
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+        }
+
+        // Display caption
+        function displayCaption(text) {
+            captionDiv.textContent = text;
+            captionDiv.classList.remove('empty');
+        }
+
+        // Start webcam and captioning
+        async function startCaptioning() {
+            try {
+                // Request webcam access
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: 'user'
+                    } 
+                });
+                
+                video.srcObject = stream;
+                await video.play();
+                
+                // Connect WebSocket
+                connectWebSocket();
+                
+                // Wait for WebSocket to be ready
+                await new Promise((resolve) => {
+                    if (websocket && websocket.readyState === WebSocket.OPEN) {
+                        resolve();
+                    } else {
+                        websocket.addEventListener('open', resolve, { once: true });
+                    }
+                });
+                
+                // Set up canvas dimensions
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                
+                // Start capturing frames every 2 seconds
+                captureInterval = setInterval(() => {
+                    captureAndSendFrame();
+                }, 2000); // 2 seconds
+                
+                // Capture first frame immediately
+                setTimeout(captureAndSendFrame, 500);
+                
+                updateStatus('captioning', '🟡 Captioning active - Processing frames...');
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                
+            } catch (error) {
+                console.error('Error starting captioning:', error);
+                alert('Error accessing webcam: ' + error.message);
+                updateStatus('disconnected', '🔴 Error: ' + error.message);
+            }
+        }
+
+        // Capture frame and send via WebSocket
+        function captureAndSendFrame() {
+            if (!video || !websocket || websocket.readyState !== WebSocket.OPEN) {
+                return;
+            }
+            
+            try {
+                // Draw video frame to canvas
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Convert canvas to base64 JPEG
+                const imageData = canvas.toDataURL('image/jpeg', 0.85);
+                
+                // Send to server via WebSocket
+                websocket.send(imageData);
+                
+            } catch (error) {
+                console.error('Error capturing frame:', error);
+            }
+        }
+
+        // Stop captioning
+        function stopCaptioning() {
+            // Stop frame capture
+            if (captureInterval) {
+                clearInterval(captureInterval);
+                captureInterval = null;
+            }
+            
+            // Stop webcam stream
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            // Close WebSocket
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
+            
+            // Clear video
+            video.srcObject = null;
+            
+            // Reset UI
+            updateStatus('disconnected', '⚫ Stopped');
+            captionDiv.textContent = 'No caption yet. Start captioning to see results.';
+            captionDiv.classList.add('empty');
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        }
+
+        // Connect WebSocket on page load (but don't start captioning yet)
+        window.addEventListener('load', () => {
+            // Don't connect until user clicks start
+            console.log('Page loaded. Click "Start Captioning" to begin.');
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            stopCaptioning();
+        });
+    </script>
+</body>
+</html>
+
