@@ -25,7 +25,7 @@
             background: white;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 1200px;
+            max-width: 1600px;
             width: 100%;
             padding: 30px;
         }
@@ -42,6 +42,30 @@
             color: #666;
             margin-bottom: 30px;
             font-size: 1.1em;
+        }
+
+        .instances-container {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .instance {
+            flex: 1;
+            min-width: 500px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .instance-header {
+            text-align: center;
+            font-size: 1.3em;
+            font-weight: 600;
+            color: #333;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
         }
 
         .status {
@@ -68,21 +92,13 @@
             color: #33c;
         }
 
-        .video-container {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 30px;
-            flex-wrap: wrap;
-        }
-
         .video-wrapper {
-            flex: 1;
-            min-width: 300px;
             position: relative;
             background: #000;
             border-radius: 10px;
             overflow: hidden;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            width: 100%;
         }
 
         video {
@@ -92,10 +108,9 @@
         }
 
         .caption-wrapper {
-            flex: 1;
-            min-width: 300px;
             display: flex;
             flex-direction: column;
+            flex: 1;
         }
 
         .caption-container {
@@ -227,8 +242,7 @@
         }
 
         .prompt-section {
-            margin-bottom: 20px;
-            padding: 20px;
+            padding: 15px;
             background: #f8f9fa;
             border-radius: 10px;
             border: 2px solid #e0e0e0;
@@ -237,7 +251,38 @@
         .prompt-section h3 {
             margin-bottom: 10px;
             color: #333;
-            font-size: 1.1em;
+            font-size: 1em;
+        }
+
+        .device-selector {
+            margin-bottom: 15px;
+            padding: 12px;
+            background: #f0f0f0;
+            border-radius: 8px;
+        }
+
+        .device-selector label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+            font-size: 0.95em;
+        }
+
+        .device-select {
+            width: 100%;
+            padding: 10px;
+            font-size: 0.95em;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            background: white;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .device-select:focus {
+            outline: none;
+            border-color: #667eea;
         }
 
         .prompt-input-wrapper {
@@ -273,11 +318,17 @@
             background: #5568d3;
         }
 
-        @media (max-width: 768px) {
-            .video-container {
+        @media (max-width: 1200px) {
+            .instances-container {
                 flex-direction: column;
             }
 
+            .instance {
+                min-width: 100%;
+            }
+        }
+
+        @media (max-width: 768px) {
             h1 {
                 font-size: 2em;
             }
@@ -293,47 +344,110 @@
         <h1>🎥 Real-time Webcam Captioner</h1>
         <p class="subtitle">AI-powered live captioning from your webcam</p>
         
-        <div id="status" class="status disconnected">
-            ⚫ Disconnected - Click "Start Captioning" to begin
-        </div>
-
-        <div class="prompt-section">
-            <h3>📝 Caption Prompt:</h3>
-            <div class="prompt-input-wrapper">
-                <textarea 
-                    id="promptInput" 
-                    class="prompt-input" 
-                    placeholder="Describe this image in 2 sentences."
-                    rows="2"
-                >Describe this image in 2 sentences.</textarea>
-                <button id="updatePromptBtn" class="btn-update" onclick="updatePrompt()">
-                    Update Prompt
-                </button>
-            </div>
-            <p style="margin-top: 8px; color: #666; font-size: 0.9em;">
-                Change the prompt to customize how the AI describes the images.
-            </p>
-        </div>
-
-        <div class="video-container">
-            <div class="video-wrapper">
-                <video id="video" autoplay playsinline></video>
-            </div>
-            <div class="caption-wrapper">
-                <h3 style="margin-bottom: 10px; color: #333;">Captions:</h3>
-                <div id="captionContainer" class="caption-container empty">
-                    <div class="empty-message">No captions yet. Start captioning to see results.</div>
+        <div class="instances-container">
+            <!-- Instance 1 -->
+            <div class="instance" id="instance1">
+                <div class="instance-header">Instance 1</div>
+                
+                <!-- Device Selector -->
+                <div class="device-selector">
+                    <label for="deviceSelect1">📹 Camera:</label>
+                    <select id="deviceSelect1" class="device-select">
+                        <option value="">Loading devices...</option>
+                    </select>
+                </div>
+                
+                <!-- Video Feed -->
+                <div class="video-wrapper">
+                    <video id="video1" autoplay playsinline></video>
+                </div>
+                
+                <!-- Prompt Section -->
+                <div class="prompt-section">
+                    <h3>📝 Caption Prompt:</h3>
+                    <div class="prompt-input-wrapper">
+                        <textarea 
+                            id="promptInput1" 
+                            class="prompt-input" 
+                            placeholder="Describe this image in 2 sentences."
+                            rows="2"
+                        >Describe this image in 2 sentences.</textarea>
+                        <button id="updatePromptBtn1" class="btn-update" onclick="updatePrompt('1')">
+                            Update Prompt
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Controls -->
+                <div class="controls">
+                    <button id="startBtn1" class="btn-start" onclick="startCaptioning('1')">
+                        ▶ Start Captioning
+                    </button>
+                    <button id="stopBtn1" class="btn-stop" onclick="stopCaptioning('1')" disabled>
+                        ⏹ Stop Captioning
+                    </button>
+                </div>
+                
+                <!-- Caption Queue -->
+                <div class="caption-wrapper">
+                    <h3 style="margin-bottom: 10px; color: #333;">Captions:</h3>
+                    <div id="captionContainer1" class="caption-container empty">
+                        <div class="empty-message">No captions yet. Start captioning to see results.</div>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div class="controls">
-            <button id="startBtn" class="btn-start" onclick="startCaptioning()">
-                ▶ Start Captioning
-            </button>
-            <button id="stopBtn" class="btn-stop" onclick="stopCaptioning()" disabled>
-                ⏹ Stop Captioning
-            </button>
+            <!-- Instance 2 -->
+            <div class="instance" id="instance2">
+                <div class="instance-header">Instance 2</div>
+                
+                <!-- Device Selector -->
+                <div class="device-selector">
+                    <label for="deviceSelect2">📹 Camera:</label>
+                    <select id="deviceSelect2" class="device-select">
+                        <option value="">Loading devices...</option>
+                    </select>
+                </div>
+                
+                <!-- Video Feed -->
+                <div class="video-wrapper">
+                    <video id="video2" autoplay playsinline></video>
+                </div>
+                
+                <!-- Prompt Section -->
+                <div class="prompt-section">
+                    <h3>📝 Caption Prompt:</h3>
+                    <div class="prompt-input-wrapper">
+                        <textarea 
+                            id="promptInput2" 
+                            class="prompt-input" 
+                            placeholder="Describe this image in 2 sentences."
+                            rows="2"
+                        >Describe this image in 2 sentences.</textarea>
+                        <button id="updatePromptBtn2" class="btn-update" onclick="updatePrompt('2')">
+                            Update Prompt
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Controls -->
+                <div class="controls">
+                    <button id="startBtn2" class="btn-start" onclick="startCaptioning('2')">
+                        ▶ Start Captioning
+                    </button>
+                    <button id="stopBtn2" class="btn-stop" onclick="stopCaptioning('2')" disabled>
+                        ⏹ Stop Captioning
+                    </button>
+                </div>
+                
+                <!-- Caption Queue -->
+                <div class="caption-wrapper">
+                    <h3 style="margin-bottom: 10px; color: #333;">Captions:</h3>
+                    <div id="captionContainer2" class="caption-container empty">
+                        <div class="empty-message">No captions yet. Start captioning to see results.</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <p class="info">
@@ -342,324 +456,436 @@
     </div>
 
     <script>
-        let video = document.getElementById('video');
-        let captionContainer = document.getElementById('captionContainer');
-        let statusDiv = document.getElementById('status');
-        let startBtn = document.getElementById('startBtn');
-        let stopBtn = document.getElementById('stopBtn');
-        let promptInput = document.getElementById('promptInput');
-        let updatePromptBtn = document.getElementById('updatePromptBtn');
-        
-        let stream = null;
-        let websocket = null;
-        let captureInterval = null;
-        let canvas = null;
-        let currentPrompt = "Describe this image in 2 sentences.";
-        let captionCount = 0;
         const MAX_CAPTIONS = 50; // Maximum number of captions to keep
 
-        // Create canvas for frame capture
-        canvas = document.createElement('canvas');
-
-        // WebSocket connection
-        function connectWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/captioning`;
-            
-            websocket = new WebSocket(wsUrl);
-            
-            websocket.onopen = () => {
-                console.log('WebSocket connected');
-                updateStatus('connected', '🟢 Connected - Ready to caption');
-            };
-            
-            websocket.onmessage = (event) => {
-                const data = event.data;
+        // Instance manager class
+        class CaptionerInstance {
+            constructor(id) {
+                this.id = id;
+                this.video = document.getElementById(`video${id}`);
+                this.captionContainer = document.getElementById(`captionContainer${id}`);
+                this.startBtn = document.getElementById(`startBtn${id}`);
+                this.stopBtn = document.getElementById(`stopBtn${id}`);
+                this.promptInput = document.getElementById(`promptInput${id}`);
+                this.updatePromptBtn = document.getElementById(`updatePromptBtn${id}`);
+                this.deviceSelect = document.getElementById(`deviceSelect${id}`);
                 
-                // Try to parse as JSON (for prompt updates)
+                this.stream = null;
+                this.websocket = null;
+                this.captureInterval = null;
+                this.canvas = document.createElement('canvas');
+                this.currentPrompt = "Describe this image in 2 sentences.";
+                this.captionCount = 0;
+                this.availableDevices = [];
+                this.pendingCaption = false; // Track if a caption request is in progress
+                this.captureTimeout = null; // Track the timeout for next capture
+            }
+
+            connectWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/captioning`;
+                
+                this.websocket = new WebSocket(wsUrl);
+                
+                this.websocket.onopen = () => {
+                    console.log(`Instance ${this.id}: WebSocket connected`);
+                };
+                
+                this.websocket.onmessage = (event) => {
+                    const data = event.data;
+                    
+                    // Try to parse as JSON (for prompt updates)
+                    try {
+                        const message = JSON.parse(data);
+                        if (message.type === 'prompt_updated') {
+                            this.currentPrompt = message.prompt;
+                            this.promptInput.value = this.currentPrompt;
+                            return;
+                        }
+                    } catch (e) {
+                        // Not JSON, treat as caption text
+                    }
+                    
+                    // Display caption
+                    this.displayCaption(data);
+                    
+                    // Mark caption as received, ready for next frame
+                    this.pendingCaption = false;
+                    
+                    // Schedule next capture after receiving this caption
+                    this.scheduleNextCapture();
+                };
+                
+                this.websocket.onerror = (error) => {
+                    console.error(`Instance ${this.id}: WebSocket error:`, error);
+                };
+                
+                this.websocket.onclose = () => {
+                    console.log(`Instance ${this.id}: WebSocket disconnected`);
+                };
+            }
+
+            displayCaption(text) {
+                // Remove empty message if present
+                if (this.captionContainer.classList.contains('empty')) {
+                    this.captionContainer.innerHTML = '';
+                    this.captionContainer.classList.remove('empty');
+                }
+                
+                // Create caption list if it doesn't exist
+                let captionList = this.captionContainer.querySelector('.caption-list');
+                if (!captionList) {
+                    captionList = document.createElement('div');
+                    captionList.className = 'caption-list';
+                    this.captionContainer.appendChild(captionList);
+                }
+                
+                // Create new caption item
+                const captionItem = document.createElement('div');
+                captionItem.className = 'caption-item';
+                
+                // Add timestamp
+                const timestamp = document.createElement('div');
+                timestamp.className = 'caption-timestamp';
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString();
+                timestamp.textContent = timeStr;
+                
+                // Add caption text
+                const captionText = document.createElement('div');
+                captionText.className = 'caption-text';
+                captionText.textContent = text;
+                
+                captionItem.appendChild(timestamp);
+                captionItem.appendChild(captionText);
+                
+                // Insert at the top of the list
+                captionList.insertBefore(captionItem, captionList.firstChild);
+                
+                // Limit the number of captions to prevent memory issues
+                this.captionCount++;
+                const items = captionList.querySelectorAll('.caption-item');
+                if (items.length > MAX_CAPTIONS) {
+                    items[items.length - 1].remove();
+                }
+            }
+
+            async startCaptioning() {
                 try {
-                    const message = JSON.parse(data);
-                    if (message.type === 'prompt_updated') {
-                        currentPrompt = message.prompt;
-                        promptInput.value = currentPrompt;
-                        updateStatus('connected', '🟢 Prompt updated successfully');
-                        setTimeout(() => {
-                            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                                updateStatus('connected', '🟢 Connected - Ready to caption');
-                            }
-                        }, 2000);
-                        return;
-                    }
-                } catch (e) {
-                    // Not JSON, treat as caption text
-                }
-                
-                // Display caption
-                displayCaption(data);
-            };
-            
-            websocket.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                updateStatus('disconnected', '🔴 Connection Error');
-            };
-            
-            websocket.onclose = () => {
-                console.log('WebSocket disconnected');
-                updateStatus('disconnected', '⚫ Disconnected');
-            };
-        }
-
-        // Update status display
-        function updateStatus(type, message) {
-            statusDiv.className = `status ${type}`;
-            statusDiv.textContent = message;
-        }
-
-        // Display caption in queue (newest at top)
-        function displayCaption(text) {
-            // Remove empty message if present
-            if (captionContainer.classList.contains('empty')) {
-                captionContainer.innerHTML = '';
-                captionContainer.classList.remove('empty');
-            }
-            
-            // Create caption list if it doesn't exist
-            let captionList = captionContainer.querySelector('.caption-list');
-            if (!captionList) {
-                captionList = document.createElement('div');
-                captionList.className = 'caption-list';
-                captionContainer.appendChild(captionList);
-            }
-            
-            // Create new caption item
-            const captionItem = document.createElement('div');
-            captionItem.className = 'caption-item';
-            
-            // Add timestamp
-            const timestamp = document.createElement('div');
-            timestamp.className = 'caption-timestamp';
-            const now = new Date();
-            const timeStr = now.toLocaleTimeString();
-            timestamp.textContent = timeStr;
-            
-            // Add caption text
-            const captionText = document.createElement('div');
-            captionText.className = 'caption-text';
-            captionText.textContent = text;
-            
-            captionItem.appendChild(timestamp);
-            captionItem.appendChild(captionText);
-            
-            // Insert at the top of the list
-            captionList.insertBefore(captionItem, captionList.firstChild);
-            
-            // Limit the number of captions to prevent memory issues
-            captionCount++;
-            const items = captionList.querySelectorAll('.caption-item');
-            if (items.length > MAX_CAPTIONS) {
-                items[items.length - 1].remove();
-            }
-        }
-
-        // Start webcam and captioning
-        async function startCaptioning() {
-            try {
-                // Request webcam access
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
+                    // Get selected device ID
+                    const deviceId = this.deviceSelect.value;
+                    
+                    // Build video constraints
+                    const videoConstraints = {
                         width: { ideal: 1280 },
-                        height: { ideal: 720 },
-                        facingMode: 'user'
-                    } 
-                });
-                
-                video.srcObject = stream;
-                await video.play();
-                
-                // Connect WebSocket
-                connectWebSocket();
-                
-                // Wait for WebSocket to be ready
-                await new Promise((resolve) => {
-                    if (websocket && websocket.readyState === WebSocket.OPEN) {
-                        resolve();
+                        height: { ideal: 720 }
+                    };
+                    
+                    // Use selected device if available
+                    if (deviceId) {
+                        videoConstraints.deviceId = { exact: deviceId };
                     } else {
-                        websocket.addEventListener('open', resolve, { once: true });
+                        // Fallback to default (facingMode for front camera)
+                        videoConstraints.facingMode = 'user';
                     }
-                });
-                
-                // Send initial prompt
-                if (promptInput.value.trim()) {
-                    websocket.send(JSON.stringify({
-                        type: 'prompt',
-                        prompt: promptInput.value.trim()
-                    }));
-                    currentPrompt = promptInput.value.trim();
-                }
-                
-                // Wait for video to be ready and set up canvas dimensions
-                await new Promise((resolve) => {
-                    const checkVideo = () => {
-                        if (video.videoWidth > 0 && video.videoHeight > 0) {
-                            canvas.width = video.videoWidth;
-                            canvas.height = video.videoHeight;
-                            console.log(`Canvas initialized: ${canvas.width}x${canvas.height}`);
+                    
+                    // Request webcam access
+                    this.stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: videoConstraints
+                    });
+                    
+                    this.video.srcObject = this.stream;
+                    await this.video.play();
+                    
+                    // Connect WebSocket
+                    this.connectWebSocket();
+                    
+                    // Wait for WebSocket to be ready
+                    await new Promise((resolve) => {
+                        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
                             resolve();
                         } else {
-                            setTimeout(checkVideo, 100);
+                            this.websocket.addEventListener('open', resolve, { once: true });
                         }
-                    };
-                    checkVideo();
-                });
-                
-                // Start capturing frames every 2 seconds
-                captureInterval = setInterval(() => {
-                    captureAndSendFrame();
-                }, 2000); // 2 seconds
-                
-                // Capture first frame after a short delay to ensure everything is ready
-                setTimeout(captureAndSendFrame, 1000);
-                
-                updateStatus('captioning', '🟡 Captioning active - Processing frames...');
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-                
-            } catch (error) {
-                console.error('Error starting captioning:', error);
-                alert('Error accessing webcam: ' + error.message);
-                updateStatus('disconnected', '🔴 Error: ' + error.message);
+                    });
+                    
+                    // Send initial prompt
+                    if (this.promptInput.value.trim()) {
+                        this.websocket.send(JSON.stringify({
+                            type: 'prompt',
+                            prompt: this.promptInput.value.trim()
+                        }));
+                        this.currentPrompt = this.promptInput.value.trim();
+                    }
+                    
+                    // Wait for video to be ready and set up canvas dimensions
+                    await new Promise((resolve) => {
+                        const checkVideo = () => {
+                            if (this.video.videoWidth > 0 && this.video.videoHeight > 0) {
+                                this.canvas.width = this.video.videoWidth;
+                                this.canvas.height = this.video.videoHeight;
+                                console.log(`Instance ${this.id}: Canvas initialized: ${this.canvas.width}x${this.canvas.height}`);
+                                resolve();
+                            } else {
+                                setTimeout(checkVideo, 100);
+                            }
+                        };
+                        checkVideo();
+                    });
+                    
+                    // Start capturing frames (first frame after a short delay)
+                    // Subsequent frames will be scheduled after each caption is received
+                    this.pendingCaption = false;
+                    setTimeout(() => this.captureAndSendFrame(), 1000);
+                    
+                    this.startBtn.disabled = true;
+                    this.stopBtn.disabled = false;
+                    this.deviceSelect.disabled = true;
+                    
+                } catch (error) {
+                    console.error(`Instance ${this.id}: Error starting captioning:`, error);
+                    alert(`Error accessing webcam: ${error.message}`);
+                }
             }
-        }
 
-        // Update prompt
-        function updatePrompt() {
-            const newPrompt = promptInput.value.trim();
-            if (!newPrompt) {
-                alert('Please enter a prompt');
-                return;
-            }
-            
-            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
-                alert('Not connected. Please start captioning first.');
-                return;
-            }
-            
-            // Send prompt update as JSON
-            websocket.send(JSON.stringify({
-                type: 'prompt',
-                prompt: newPrompt
-            }));
-            
-            currentPrompt = newPrompt;
-            updatePromptBtn.disabled = true;
-            updatePromptBtn.textContent = 'Updating...';
-            
-            // Re-enable button after a moment
-            setTimeout(() => {
-                updatePromptBtn.disabled = false;
-                updatePromptBtn.textContent = 'Update Prompt';
-            }, 1000);
-        }
-
-        // Capture frame and send via WebSocket
-        function captureAndSendFrame() {
-            if (!video || !websocket || websocket.readyState !== WebSocket.OPEN) {
-                console.log('Cannot capture: video or websocket not ready');
-                return;
-            }
-            
-            // Check if video is ready
-            if (video.readyState !== video.HAVE_ENOUGH_DATA) {
-                console.log('Video not ready, skipping frame');
-                return;
-            }
-            
-            // Ensure canvas dimensions match video
-            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-                canvas.width = video.videoWidth || 640;
-                canvas.height = video.videoHeight || 480;
-                console.log(`Canvas resized to ${canvas.width}x${canvas.height}`);
-            }
-            
-            // Check for valid dimensions
-            if (canvas.width === 0 || canvas.height === 0) {
-                console.log('Invalid canvas dimensions, skipping frame');
-                return;
-            }
-            
-            try {
-                // Draw video frame to canvas
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            stopCaptioning() {
+                // Stop frame capture
+                if (this.captureInterval) {
+                    clearInterval(this.captureInterval);
+                    this.captureInterval = null;
+                }
                 
-                // Convert canvas to base64 JPEG
-                const imageData = canvas.toDataURL('image/jpeg', 0.85);
+                // Clear any pending capture timeout
+                if (this.captureTimeout) {
+                    clearTimeout(this.captureTimeout);
+                    this.captureTimeout = null;
+                }
                 
-                if (!imageData || imageData.length < 100) {
-                    console.error('Invalid image data generated');
+                // Stop webcam stream
+                if (this.stream) {
+                    this.stream.getTracks().forEach(track => track.stop());
+                    this.stream = null;
+                }
+                
+                // Close WebSocket
+                if (this.websocket) {
+                    this.websocket.close();
+                    this.websocket = null;
+                }
+                
+                // Clear video
+                this.video.srcObject = null;
+                
+                // Reset UI and state
+                this.captionContainer.innerHTML = '<div class="empty-message">No captions yet. Start captioning to see results.</div>';
+                this.captionContainer.classList.add('empty');
+                this.captionCount = 0;
+                this.pendingCaption = false;
+                this.startBtn.disabled = false;
+                this.stopBtn.disabled = true;
+                this.deviceSelect.disabled = false;
+            }
+            
+            scheduleNextCapture() {
+                // Only schedule if captioning is active and no request is pending
+                if (this.pendingCaption || !this.stream || !this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
                     return;
                 }
                 
-                // Send to server via WebSocket as JSON
-                websocket.send(JSON.stringify({
-                    type: 'frame',
-                    data: imageData
+                // Schedule next capture after 2 seconds (or minimum interval)
+                this.captureTimeout = setTimeout(() => {
+                    this.captureAndSendFrame();
+                }, 2000); // 2 seconds between captures
+            }
+
+            captureAndSendFrame() {
+                // Don't send if a request is already pending
+                if (this.pendingCaption) {
+                    console.log(`Instance ${this.id}: Skipping capture - previous request still pending`);
+                    return;
+                }
+                
+                if (!this.video || !this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+                    console.log(`Instance ${this.id}: Cannot capture: video or websocket not ready`);
+                    return;
+                }
+                
+                // Check if video is ready
+                if (this.video.readyState !== this.video.HAVE_ENOUGH_DATA) {
+                    console.log(`Instance ${this.id}: Video not ready, skipping frame`);
+                    // Retry after a short delay
+                    this.captureTimeout = setTimeout(() => this.captureAndSendFrame(), 500);
+                    return;
+                }
+                
+                // Ensure canvas dimensions match video
+                if (this.canvas.width !== this.video.videoWidth || this.canvas.height !== this.video.videoHeight) {
+                    this.canvas.width = this.video.videoWidth || 640;
+                    this.canvas.height = this.video.videoHeight || 480;
+                    console.log(`Instance ${this.id}: Canvas resized to ${this.canvas.width}x${this.canvas.height}`);
+                }
+                
+                // Check for valid dimensions
+                if (this.canvas.width === 0 || this.canvas.height === 0) {
+                    console.log(`Instance ${this.id}: Invalid canvas dimensions, skipping frame`);
+                    // Retry after a short delay
+                    this.captureTimeout = setTimeout(() => this.captureAndSendFrame(), 500);
+                    return;
+                }
+                
+                try {
+                    // Draw video frame to canvas
+                    const ctx = this.canvas.getContext('2d');
+                    ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+                    
+                    // Convert canvas to base64 JPEG
+                    const imageData = this.canvas.toDataURL('image/jpeg', 0.85);
+                    
+                    if (!imageData || imageData.length < 100) {
+                        console.error(`Instance ${this.id}: Invalid image data generated`);
+                        return;
+                    }
+                    
+                    // Mark that we have a pending caption request
+                    this.pendingCaption = true;
+                    
+                    // Send to server via WebSocket as JSON
+                    this.websocket.send(JSON.stringify({
+                        type: 'frame',
+                        data: imageData
+                    }));
+                    
+                    console.log(`Instance ${this.id}: Frame sent, waiting for caption...`);
+                    
+                } catch (error) {
+                    console.error(`Instance ${this.id}: Error capturing frame:`, error);
+                    this.pendingCaption = false; // Reset on error
+                }
+            }
+
+            updatePrompt() {
+                const newPrompt = this.promptInput.value.trim();
+                if (!newPrompt) {
+                    alert('Please enter a prompt');
+                    return;
+                }
+                
+                if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+                    alert('Not connected. Please start captioning first.');
+                    return;
+                }
+                
+                // Send prompt update as JSON
+                this.websocket.send(JSON.stringify({
+                    type: 'prompt',
+                    prompt: newPrompt
                 }));
                 
+                this.currentPrompt = newPrompt;
+                this.updatePromptBtn.disabled = true;
+                this.updatePromptBtn.textContent = 'Updating...';
+                
+                // Re-enable button after a moment
+                setTimeout(() => {
+                    this.updatePromptBtn.disabled = false;
+                    this.updatePromptBtn.textContent = 'Update Prompt';
+                }, 1000);
+            }
+        }
+
+        // Function to enumerate and populate device selectors
+        async function enumerateDevices() {
+            try {
+                // First request permission to access devices (required for device labels)
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                
+                // Enumerate all devices
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                
+                // Filter video input devices
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                // Populate both device selectors
+                instance1.populateDeviceSelector(videoDevices);
+                instance2.populateDeviceSelector(videoDevices);
+                
+                console.log(`Found ${videoDevices.length} video device(s)`);
             } catch (error) {
-                console.error('Error capturing frame:', error);
+                console.error('Error enumerating devices:', error);
+                // Still populate with default option
+                instance1.deviceSelect.innerHTML = '<option value="">Default Camera</option>';
+                instance2.deviceSelect.innerHTML = '<option value="">Default Camera</option>';
             }
         }
 
-        // Stop captioning
-        function stopCaptioning() {
-            // Stop frame capture
-            if (captureInterval) {
-                clearInterval(captureInterval);
-                captureInterval = null;
-            }
+        // Add method to populate device selector
+        CaptionerInstance.prototype.populateDeviceSelector = function(devices) {
+            this.deviceSelect.innerHTML = '<option value="">Default Camera</option>';
             
-            // Stop webcam stream
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
+            devices.forEach((device, index) => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                // Use label if available, otherwise use a generic name
+                option.textContent = device.label || `Camera ${index + 1}`;
+                this.deviceSelect.appendChild(option);
+            });
             
-            // Close WebSocket
-            if (websocket) {
-                websocket.close();
-                websocket = null;
-            }
-            
-            // Clear video
-            video.srcObject = null;
-            
-            // Reset UI
-            updateStatus('disconnected', '⚫ Stopped');
-            captionContainer.innerHTML = '<div class="empty-message">No captions yet. Start captioning to see results.</div>';
-            captionContainer.classList.add('empty');
-            captionCount = 0;
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-        }
+            this.availableDevices = devices;
+        };
 
-        // Connect WebSocket on page load (but don't start captioning yet)
+        // Initialize instances
+        const instance1 = new CaptionerInstance('1');
+        const instance2 = new CaptionerInstance('2');
+        
+        // Enumerate devices on page load
         window.addEventListener('load', () => {
-            // Don't connect until user clicks start
-            console.log('Page loaded. Click "Start Captioning" to begin.');
+            enumerateDevices();
         });
 
+        // Global functions for onclick handlers
+        function startCaptioning(id) {
+            if (id === '1') {
+                instance1.startCaptioning();
+            } else if (id === '2') {
+                instance2.startCaptioning();
+            }
+        }
+
+        function stopCaptioning(id) {
+            if (id === '1') {
+                instance1.stopCaptioning();
+            } else if (id === '2') {
+                instance2.stopCaptioning();
+            }
+        }
+
+        function updatePrompt(id) {
+            if (id === '1') {
+                instance1.updatePrompt();
+            } else if (id === '2') {
+                instance2.updatePrompt();
+            }
+        }
+
         // Allow Enter key to update prompt (Ctrl+Enter or Cmd+Enter)
-        promptInput.addEventListener('keydown', (e) => {
+        instance1.promptInput.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault();
-                updatePrompt();
+                instance1.updatePrompt();
+            }
+        });
+
+        instance2.promptInput.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                instance2.updatePrompt();
             }
         });
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', () => {
-            stopCaptioning();
+            instance1.stopCaptioning();
+            instance2.stopCaptioning();
         });
     </script>
 </body>
