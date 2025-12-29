@@ -57,80 +57,150 @@ def get_weather(city: str) -> dict:
 
 
 
-# --- using GPT 4o model
+# @title Define and Test GPT Agent
+# --- Agent using GPT-4o ---
+weather_agent_gpt = None
+runner_gpt = None
+
 try:
-    weather_agent_gpt_4o = Agent(
-        name = "weather_agent_v1",
-        model=MODEL_GPT_4O,
-        description="An agent that provides weather information for specified cities.",
-        instruction="""You are a helpful assistant that provides weather information for specified cities.
-    When the user asks for weather information, you should use the 'get_weather' tool to get the weather information.
-    If the tool returns an error, inform the user politely.
-    If the tool is successful, present the report clearly and concisely.""",
+    weather_agent_gpt = Agent(
+        name="weather_agent_gpt",
+        # Key change: Wrap the LiteLLM model identifier
+        model=LiteLlm(model=MODEL_GPT_4O),
+        description="Provides weather information (using GPT-4o).",
+        instruction="You are a helpful weather assistant powered by GPT-4o. "
+                    "Use the 'get_weather' tool for city weather requests. "
+                    "Clearly present successful reports or polite error messages based on the tool's output status.",
         tools=[get_weather],
     )
-    
-    session_service_gpt_4o = InMemorySessionService()
-    APP_NAME_GPT_4O = "weather_app_gpt_4o"
-    USER_ID_GPT_4O = "user_123_gpt_4o"
-    SESSION_ID_GPT_4O = "session_123_gpt_4o"
+    print(f"Agent '{weather_agent_gpt.name}' created using model '{MODEL_GPT_4O}'.")
 
-    async def init_session_gpt_4o():
-        session = await session_service_gpt_4o.create_session(app_name=APP_NAME_GPT_4O, user_id=USER_ID_GPT_4O, session_id=SESSION_ID_GPT_4O)
-        return session
+    # InMemorySessionService is simple, non-persistent storage for this tutorial.
+    session_service_gpt = InMemorySessionService()
+
+    # Define constants for identifying the interaction context
+    APP_NAME_GPT = "weather_tutorial_app_gpt"
+    USER_ID_GPT = "user_1_gpt"
+    SESSION_ID_GPT = "session_001_gpt"
+
+    # Create the specific session where the conversation will happen
+    async def init_session_gpt():
+        return await session_service_gpt.create_session(
+            app_name=APP_NAME_GPT,
+            user_id=USER_ID_GPT,
+            session_id=SESSION_ID_GPT
+        )
     
-    session_gpt_4o = asyncio.run(init_session_gpt_4o())
-    print(f"session {session_gpt_4o.id} created successfully")
-    
-    runner_gpt_4o = Runner(
-        agent=weather_agent_gpt_4o,
-        session_service=session_service_gpt_4o,
-        app_name=APP_NAME_GPT_4O,
+    session_gpt = asyncio.run(init_session_gpt())
+    print(f"Session created: App='{APP_NAME_GPT}', User='{USER_ID_GPT}', Session='{SESSION_ID_GPT}'")
+
+    # Create a runner specific to this agent and its session service
+    runner_gpt = Runner(
+        agent=weather_agent_gpt,
+        app_name=APP_NAME_GPT,
+        session_service=session_service_gpt
     )
-    
-    print(f"runner {runner_gpt_4o.agent.name} created successfully")
+    print(f"Runner created for agent '{runner_gpt.agent.name}'.")
 
 except Exception as e:
-    print(f"Error creating weather agent GPT 4o: {e}")
+    print(f"❌ Could not create GPT agent '{MODEL_GPT_4O}'. Check API Key and model name. Error: {e}")
+
+# @title Define and Test Gemini Agent
+# --- Agent using Gemini 2.0 Flash ---
+weather_agent_gemini = None
+runner_gemini = None
+
+try:
+    weather_agent_gemini = Agent(
+        name="weather_agent_gemini",
+        # Key change: Wrap the LiteLLM model identifier
+        model=MODEL_GEMINI_2_0_FLASH,
+        description="Provides weather information (using Gemini 2.0 Flash).",
+        instruction="You are a helpful weather assistant powered by Gemini 2.0 Flash. "
+                    "Use the 'get_weather' tool for city weather requests. "
+                    "Clearly present successful reports or polite error messages based on the tool's output status.",
+        tools=[get_weather],
+    )
+    print(f"Agent '{weather_agent_gemini.name}' created using model '{MODEL_GEMINI_2_0_FLASH}'.")
+
+    # InMemorySessionService is simple, non-persistent storage for this tutorial.
+    session_service_gemini = InMemorySessionService()
+
+    # Define constants for identifying the interaction context
+    APP_NAME_GEMINI = "weather_tutorial_app_gemini"
+    USER_ID_GEMINI = "user_1_gemini"
+    SESSION_ID_GEMINI = "session_001_gemini"
+
+    # Create the specific session where the conversation will happen
+    async def init_session_gemini():
+        return await session_service_gemini.create_session(
+            app_name=APP_NAME_GEMINI,
+            user_id=USER_ID_GEMINI,
+            session_id=SESSION_ID_GEMINI
+        )
     
+    session_gemini = asyncio.run(init_session_gemini())
+    print(f"Session created: App='{APP_NAME_GEMINI}', User='{USER_ID_GEMINI}', Session='{SESSION_ID_GEMINI}'")
 
-# # --- using gemini 2.0 flash model
-# weather_agent = Agent(
-#     name = "weather_agent_v1",
-#     model=MODEL_GEMINI_2_0_FLASH,
-#     description="An agent that provides weather information for specified cities.",
-#     instruction="""You are a helpful assistant that provides weather information for specified cities.
-# When the user asks for weather information, you should use the 'get_weather' tool to get the weather information.
-# If the tool returns an error, inform the user politely.
-# If the tool is successful, present the report clearly and concisely.""",
-#     tools=[get_weather],
-# )
+    # Create a runner specific to this agent and its session service
+    runner_gemini = Runner(
+        agent=weather_agent_gemini,
+        app_name=APP_NAME_GEMINI,
+        session_service=session_service_gemini
+    )
+    print(f"Runner created for agent '{runner_gemini.agent.name}'.")
 
-# print(f"weather agent {weather_agent.name} created successfully")
+except Exception as e:
+    print(f"❌ Could not create Gemini agent '{MODEL_GEMINI_2_0_FLASH}'. Check API Key and model name. Error: {e}")
 
+# @title Define and Test Claude Agent
+# --- Agent using Claude Sonnet ---
+weather_agent_claude = None
+runner_claude = None
 
-# session_service = InMemorySessionService()
+try:
+    weather_agent_claude = Agent(
+        name="weather_agent_claude",
+        # Key change: Wrap the LiteLLM model identifier
+        model=LiteLlm(model=MODEL_CLAUDE_SONNET),
+        description="Provides weather information (using Claude Sonnet).",
+        instruction="You are a helpful weather assistant powered by Claude Sonnet. "
+                    "Use the 'get_weather' tool for city weather requests. "
+                    "Analyze the tool's dictionary output ('status', 'report'/'error_message'). "
+                    "Clearly present successful reports or polite error messages.",
+        tools=[get_weather],
+    )
+    print(f"Agent '{weather_agent_claude.name}' created using model '{MODEL_CLAUDE_SONNET}'.")
 
-# APP_NAME = "weather_app"
-# USER_ID = "user_123"
-# SESSION_ID = "session_123"
+    # InMemorySessionService is simple, non-persistent storage for this tutorial.
+    session_service_claude = InMemorySessionService()
 
-# async def init_session(APP_NAME: str, USER_ID: str, SESSION_ID: str) -> InMemorySessionService:
-#     session = await session_service.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID)
-#     return session
+    # Define constants for identifying the interaction context
+    APP_NAME_CLAUDE = "weather_tutorial_app_claude"
+    USER_ID_CLAUDE = "user_1_claude"
+    SESSION_ID_CLAUDE = "session_001_claude"
 
-# session = asyncio.run(init_session(APP_NAME, USER_ID, SESSION_ID))
-# print(f"session {session.id} created successfully")
+    # Create the specific session where the conversation will happen
+    async def init_session_claude():
+        return await session_service_claude.create_session(
+            app_name=APP_NAME_CLAUDE,
+            user_id=USER_ID_CLAUDE,
+            session_id=SESSION_ID_CLAUDE
+        )
+    
+    session_claude = asyncio.run(init_session_claude())
+    print(f"Session created: App='{APP_NAME_CLAUDE}', User='{USER_ID_CLAUDE}', Session='{SESSION_ID_CLAUDE}'")
 
-# runner = Runner(
-#     agent=weather_agent,
-#     session_service=session_service,
-#     app_name=APP_NAME,
-# )
+    # Create a runner specific to this agent and its session service
+    runner_claude = Runner(
+        agent=weather_agent_claude,
+        app_name=APP_NAME_CLAUDE,
+        session_service=session_service_claude
+    )
+    print(f"Runner created for agent '{runner_claude.agent.name}'.")
 
-# print(f"runner created successfully")
-
-from google.genai import types
+except Exception as e:
+    print(f"❌ Could not create Claude agent '{MODEL_CLAUDE_SONNET}'. Check API Key and model name. Error: {e}")
 
 async def call_agent_async(query: str, runner: Runner, user_id: str, session_id: str):
     
@@ -154,21 +224,48 @@ async def call_agent_async(query: str, runner: Runner, user_id: str, session_id:
 
 
 async def run_conversation():
-    print("asking for the weather in New York")
-    await call_agent_async(query="What is the weather in New York?", runner=runner_gpt_4o, user_id=USER_ID_GPT_4O, session_id=SESSION_ID_GPT_4O)
-    
-    print("asking for the weather in Paris")
-    await call_agent_async(query="How about Paris?",
-                                       runner=runner_gpt_4o,
-                                       user_id=USER_ID_GPT_4O,
-                                       session_id=SESSION_ID_GPT_4O) # Expecting the tool's error message
-    
-    print("asking for the weather in London")
-    await call_agent_async(query="What is the weather like in London?",
-                                       runner=runner_gpt_4o,
-                                       user_id=USER_ID_GPT_4O,
-                                       session_id=SESSION_ID_GPT_4O)
-    
+    # --- Test OpenAI GPT Agent ---
+    if runner_gpt:
+        print("\n" + "="*60)
+        print("--- Testing OpenAI GPT Agent ---")
+        print("="*60)
+        await call_agent_async(
+            query="What's the weather in Tokyo?",
+            runner=runner_gpt,
+            user_id=USER_ID_GPT,
+            session_id=SESSION_ID_GPT
+        )
+    else:
+        print("\n⚠️ Skipping GPT agent test (agent not initialized)")
+
+    # --- Test Gemini Agent ---
+    if runner_gemini:
+        print("\n" + "="*60)
+        print("--- Testing Gemini Agent ---")
+        print("="*60)
+        await call_agent_async(
+            query="What's the weather in Tokyo?",
+            runner=runner_gemini,
+            user_id=USER_ID_GEMINI,
+            session_id=SESSION_ID_GEMINI
+        )
+    else:
+        print("\n⚠️ Skipping Gemini agent test (agent not initialized)")
+
+    # --- Test Claude Agent ---
+    if runner_claude:
+        print("\n" + "="*60)
+        print("--- Testing Claude Agent ---")
+        print("="*60)
+        await call_agent_async(
+            query="What's the weather in Tokyo?",
+            runner=runner_claude,
+            user_id=USER_ID_CLAUDE,
+            session_id=SESSION_ID_CLAUDE
+        )
+    else:
+        print("\n⚠️ Skipping Claude agent test (agent not initialized)")
+
 if __name__ == "__main__":
     try:
         asyncio.run(run_conversation())
