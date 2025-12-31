@@ -1,6 +1,6 @@
 """Tools for the conversational agent."""
 
-from tools.input_streams import get_available_input_streams
+from tools.tasks import add_task, list_input_devices_with_ids
 
-__all__ = ['get_available_input_streams']
+__all__ = ['add_task', 'list_input_devices_with_ids']
 

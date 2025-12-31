@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """Simple conversational AI agent using Gemini 2.0 Flash with Google ADK."""
 
-import os
 import asyncio
 from dotenv import load_dotenv
-from google.adk.agents import Agent
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
 from google.genai import types
+import agents
+import system
 import tools
 
 # Load environment variables from .env file
 load_dotenv()
 
 async def main():
-    # Create the agent
-    agent = Agent(
-        name="system_administrator",
-        model="gemini-2.0-flash",
-        description="A helpful system administrator. It controls the system on behalf of the user.",
-        instruction="You are a helpful and friendly system administrator. Be concise and clear in your responses. "
-                   "You have access to tools that can help you check available input streams on the system.",
-        tools=[tools.get_available_input_streams],
-    )
+    # Initialize system managers
+    io_manager = system.IOmanager()
+    task_manager = system.TaskManager()
+    
+    # Set managers in tools so they can access them
+    tools.tasks.set_managers(io_manager, task_manager)
+    
+    # Use the admin agent
+    agent = agents.admin_agent
     
     # Set up session service
     session_service = InMemorySessionService()
