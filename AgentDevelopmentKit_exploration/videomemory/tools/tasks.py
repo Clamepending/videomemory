@@ -128,3 +128,84 @@ def add_task(io_id: str, task_description: str) -> dict:
             "message": f"Failed to add task: {str(e)}",
         }
 
+
+def list_tasks(io_id: Optional[str] = None) -> dict:
+    """Lists all tasks, optionally filtered by io_id.
+    
+    Args:
+        io_id: Optional filter to list only tasks for a specific input device.
+    
+    Returns:
+        dict: A dictionary containing the list of tasks and status.
+    """
+    print(f"--- list_tasks(io_id={io_id}) was called ---")
+    if _context is None:
+        return {
+            "status": "error",
+            "message": "Tool context not initialized. System managers not available.",
+        }
+    
+    if _context.task_manager is None:
+        return {
+            "status": "error",
+            "message": "Task manager not available in context",
+        }
+    
+    try:
+        tasks = _context.task_manager.list_tasks(io_id)
+        
+        return {
+            "status": "success",
+            "tasks": tasks,
+            "count": len(tasks),
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to list tasks: {str(e)}",
+        }
+
+
+def remove_task(task_id: str) -> dict:
+    """Removes a task by its task_id.
+    
+    Args:
+        task_id: The unique identifier of the task to remove.
+    
+    Returns:
+        dict: A dictionary containing the removal status and message.
+    """
+    print(f"--- remove_task(task_id={task_id}) was called ---")
+    if _context is None:
+        return {
+            "status": "error",
+            "message": "Tool context not initialized. System managers not available.",
+        }
+    
+    if _context.task_manager is None:
+        return {
+            "status": "error",
+            "message": "Task manager not available in context",
+        }
+    
+    try:
+        success = _context.task_manager.remove_task(task_id)
+        
+        if success:
+            return {
+                "status": "success",
+                "message": f"Task '{task_id}' removed successfully",
+                "task_id": task_id,
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"Task '{task_id}' not found",
+                "task_id": task_id,
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to remove task: {str(e)}",
+        }
+

@@ -10,8 +10,10 @@ admin_agent = Agent(
     description="A helpful system administrator. It controls the system on behalf of the user.",
     instruction="You are a helpful and friendly system administrator. Be concise and clear in your responses. "
                "You have access to tools that can help you check available input devices on the system "
-               "and add tasks for specific input devices. Use list_input_devices_with_ids to get io_ids, "
-               "then use add_task with the io_id to create tasks.",
-    tools=[tools.list_input_devices_with_ids, tools.add_task],
+               "and manage tasks. Use list_input_devices_with_ids to get io_ids, "
+               "use add_task with the io_id to create tasks, "
+               "use list_tasks to view all tasks (optionally filtered by io_id), "
+               "and use remove_task to delete a task by its task_id.",
+    tools=[tools.list_input_devices_with_ids, tools.add_task, tools.list_tasks, tools.remove_task],
 )
 
