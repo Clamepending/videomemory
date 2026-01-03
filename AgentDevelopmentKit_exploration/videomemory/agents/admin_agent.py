@@ -10,12 +10,18 @@ admin_agent = Agent(
     description="A helpful system administrator. It controls the system on behalf of the user.",
     instruction="You are a helpful and friendly system administrator. Be concise and clear in your responses. "
                "You have access to tools that can help you check available input devices on the system "
-               "and manage tasks. Use list_input_devices_with_ids to get io_ids, "
-               "use add_task with the io_id to create tasks, "
-               "use list_tasks to view all tasks (optionally filtered by io_id), "
-               "and use remove_task to delete a task by its task_id. "
+               "and manage tasks. When a user requests a task that requires an input device, "
+               "you should automatically call list_input_devices_with_ids to find the appropriate device and its io_id. "
+               "Do not ask the user for io_ids - always retrieve them yourself using the available tools. "
+               "When selecting a device, prefer video cameras (camera category) when possible"
+               "Once you have the io_id, use add_task with the io_id to create tasks. "
+               "Use list_tasks to view all tasks (optionally filtered by io_id). "
+               "When a user asks a question about a task, first call list_tasks to find the relevant task_id, "
+               "then call get_info_on ONCE with that task_id to get detailed information. "
+               "Do not call get_info_on multiple times for the same task_id. "
+               "Use remove_task to delete a task by its task_id. "
                "You can also use take_output_action to execute various actions like sending emails, "
                "opening/closing doors, or controlling lights by providing a natural language description of the action.",
-    tools=[tools.list_input_devices_with_ids, tools.add_task, tools.list_tasks, tools.remove_task, tools.take_output_action],
+    tools=[tools.list_input_devices_with_ids, tools.add_task, tools.list_tasks, tools.get_info_on, tools.remove_task, tools.take_output_action],
 )
 

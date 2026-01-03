@@ -89,7 +89,7 @@ def add_task(io_id: str, task_description: str) -> dict:
     Returns:
         dict: A dictionary containing the task information and status.
     """
-    print("--- add_task({io_id}, {task_description}) was called ---")
+    print(f"--- add_task({io_id} ({_context.io_manager.get_stream_info(io_id)['name']}), {task_description}) was called ---")
     if _context is None:
         return {
             "status": "error",
@@ -208,4 +208,57 @@ def remove_task(task_id: str) -> dict:
             "status": "error",
             "message": f"Failed to remove task: {str(e)}",
         }
+
+
+def get_info_on(task_id: str) -> dict:
+    """Gets detailed information about a task including current status and notes.
+    
+    Args:
+        task_id: The unique identifier of the task to get information about.
+    
+    Returns:
+        dict: A dictionary containing the task information including notes, status, and current info.
+    """
+    print(f"--- get_info_on(task_id={task_id}) was called ---")
+    if _context is None:
+        result = {
+            "status": "error",
+            "message": "Tool context not initialized. System managers not available.",
+        }
+        print(f"[DEBUG] get_info_on returning: {result}")
+        return result
+    
+    if _context.task_manager is None:
+        result = {
+            "status": "error",
+            "message": "Task manager not available in context",
+        }
+        print(f"[DEBUG] get_info_on returning: {result}")
+        return result
+    
+    try:
+        task_info = _context.task_manager.get_task(task_id)
+        
+        if task_info is None:
+            result = {
+                "status": "error",
+                "message": f"Task '{task_id}' not found",
+                "task_id": task_id,
+            }
+            print(f"[DEBUG] get_info_on returning: {result}")
+            return result
+        
+        result = {
+            "status": "success",
+            "task": task_info,
+        }
+        print(f"[DEBUG] get_info_on returning success with task_info keys: {list(task_info.keys())}")
+        return result
+    except Exception as e:
+        result = {
+            "status": "error",
+            "message": f"Failed to get task info: {str(e)}",
+        }
+        print(f"[DEBUG] get_info_on exception: {e}")
+        return result
 

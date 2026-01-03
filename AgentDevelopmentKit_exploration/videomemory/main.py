@@ -16,7 +16,7 @@ load_dotenv()
 async def main():
     # Initialize system managers
     io_manager = system.IOmanager()
-    task_manager = system.TaskManager()
+    task_manager = system.TaskManager(io_manager=io_manager)
     
     # Set managers in tools so they can access them
     tools.tasks.set_managers(io_manager, task_manager)
