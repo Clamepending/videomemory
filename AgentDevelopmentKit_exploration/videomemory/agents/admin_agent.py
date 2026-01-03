@@ -13,7 +13,9 @@ admin_agent = Agent(
                "and manage tasks. Use list_input_devices_with_ids to get io_ids, "
                "use add_task with the io_id to create tasks, "
                "use list_tasks to view all tasks (optionally filtered by io_id), "
-               "and use remove_task to delete a task by its task_id.",
-    tools=[tools.list_input_devices_with_ids, tools.add_task, tools.list_tasks, tools.remove_task],
+               "and use remove_task to delete a task by its task_id. "
+               "You can also use take_output_action to execute various actions like sending emails, "
+               "opening/closing doors, or controlling lights by providing a natural language description of the action.",
+    tools=[tools.list_input_devices_with_ids, tools.add_task, tools.list_tasks, tools.remove_task, tools.take_output_action],
 )
 
