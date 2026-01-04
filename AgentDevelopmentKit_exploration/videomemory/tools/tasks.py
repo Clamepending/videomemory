@@ -252,7 +252,7 @@ def get_info_on(task_id: str) -> dict:
             "status": "success",
             "task": task_info,
         }
-        print(f"[DEBUG] get_info_on returning success with task_info keys: {list(task_info.keys())}")
+        print(f"[DEBUG] get_info_on returning success with task_info: {task_info}")
         return result
     except Exception as e:
         result = {

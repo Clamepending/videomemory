@@ -72,6 +72,7 @@ class TaskManager:
         self._tasks[task_id] = task_info
         
         # Add task to the ingestor, passing the task_notes dictionary
+        # This will automatically start the ingestor if not already running
         self._ingestors[io_id].add_task(task_description, task_notes)
         
         return {

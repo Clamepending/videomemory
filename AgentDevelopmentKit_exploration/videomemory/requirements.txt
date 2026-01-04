@@ -1,4 +1,4 @@
 google-adk
 python-dotenv
 pyserial
-
+opencv-python
