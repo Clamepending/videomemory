@@ -92,8 +92,8 @@ class VideoStreamIngestor:
                             self._frame_queue.put_nowait(frame)
                         except asyncio.QueueEmpty:
                             pass
-                    print(f"[VideoStreamIngestor] Frame put in queue for io_id={self.io_id}")
-                await asyncio.sleep(0.033)  # ~30fps
+                    
+                await asyncio.sleep(0.1)  # 10fps
             
             self._camera.release()
             self._camera = None
@@ -117,11 +117,10 @@ class VideoStreamIngestor:
                     # Use timeout to allow checking _running flag periodically
                     frame = await asyncio.wait_for(
                         self._frame_queue.get(),
-                        timeout=0.1
+                        timeout=0.5
                     )
                     if frame is None:
                         continue
-                    print(f"[VideoStreamIngestor] Process loop: Frame got from process loop queue for io_id={self.io_id}")
                     # Run ML processing (placeholder - replace with actual ML model)
                     results = await self._run_ml_inference(frame, self._task_notes)
                     
@@ -157,7 +156,7 @@ class VideoStreamIngestor:
                     # Use timeout to allow checking _running flag periodically
                     action = await asyncio.wait_for(
                         self._action_queue.get(),
-                        timeout=0.1
+                        timeout=0.5
                     )
                     print(f"[VideoStreamIngestor] Action loop: Action {action} got from action loop queue for io_id={self.io_id}")
                     if action is not None:
@@ -194,7 +193,7 @@ class VideoStreamIngestor:
         # 3. Post-process results
         # 4. Return structured results
         
-        await asyncio.sleep(0.01)  # Simulate processing time
+        await asyncio.sleep(0.07)  # Simulate processing time
         
         return {
             "task description": "count number of claps and then send an email to example@hotmail.com",
@@ -295,6 +294,31 @@ class VideoStreamIngestor:
                     loop.run_until_complete(self.stop())
             except RuntimeError:
                 print(f"[VideoStreamIngestor] Warning: Could not stop ingestor - no event loop")
+    
+    def edit_task(self, old_task_desc: str, new_task_desc: str):
+        """Edit/update a task description in the video stream ingestor.
+        
+        This preserves the task_notes dictionary while updating the description.
+        
+        Args:
+            old_task_desc: The current description of the task to be edited
+            new_task_desc: The new description for the task
+        """
+        if old_task_desc not in self._task_notes:
+            print(f"[VideoStreamIngestor] Task '{old_task_desc}' not found for io_id={self.io_id}, cannot edit")
+            return False
+        
+        # Get the existing task_notes
+        task_notes = self._task_notes[old_task_desc]
+        
+        # Remove old task description
+        del self._task_notes[old_task_desc]
+        
+        # Add new task description with same task_notes
+        self._task_notes[new_task_desc] = task_notes
+        
+        print(f"[VideoStreamIngestor] Edited task from '{old_task_desc}' to '{new_task_desc}' for io_id={self.io_id}")
+        return True
     
     async def stop(self):
         """Clean shutdown of all loops and tasks."""

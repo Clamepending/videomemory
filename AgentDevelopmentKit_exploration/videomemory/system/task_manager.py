@@ -166,4 +166,48 @@ class TaskManager:
             del self._ingestors[io_id]
         
         return True
+    
+    def edit_task(self, task_id: str, new_description: str) -> Dict:
+        """Edit/update a task's description.
+        
+        Args:
+            task_id: The unique identifier of the task
+            new_description: The new description for the task
+        
+        Returns:
+            Dictionary containing the updated task information and status
+        """
+        if task_id not in self._tasks:
+            return {
+                "status": "error",
+                "message": f"Task '{task_id}' not found",
+                "task_id": task_id,
+            }
+        
+        # Get task info
+        task_info = self._tasks[task_id]
+        io_id = task_info["io_id"]
+        old_description = task_info["description"]
+        
+        # Update task description in ingestor
+        if io_id in self._ingestors:
+            success = self._ingestors[io_id].edit_task(old_description, new_description)
+            if not success:
+                return {
+                    "status": "error",
+                    "message": f"Failed to update task in ingestor for io_id '{io_id}'",
+                    "task_id": task_id,
+                }
+        
+        # Update task description in manager
+        self._tasks[task_id]["description"] = new_description
+        
+        return {
+            "status": "success",
+            "message": f"Task updated successfully",
+            "task_id": task_id,
+            "io_id": io_id,
+            "old_description": old_description,
+            "new_description": new_description,
+        }
 

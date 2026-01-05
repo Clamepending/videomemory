@@ -262,3 +262,40 @@ def get_info_on(task_id: str) -> dict:
         print(f"[DEBUG] get_info_on exception: {e}")
         return result
 
+
+def edit_task(task_id: str, new_description: str) -> dict:
+    """Edits/updates a task's description.
+    
+    This is useful when you want to amend an existing task, for example, to add an action
+    to be triggered when a condition is met. The task will continue running with the same
+    task_notes and status, but with the updated description.
+    
+    Args:
+        task_id: The unique identifier of the task to edit.
+        new_description: The new description for the task.
+    
+    Returns:
+        dict: A dictionary containing the update status and updated task information.
+    """
+    print(f"--- edit_task(task_id={task_id}, new_description={new_description}) was called ---")
+    if _context is None:
+        return {
+            "status": "error",
+            "message": "Tool context not initialized. System managers not available.",
+        }
+    
+    if _context.task_manager is None:
+        return {
+            "status": "error",
+            "message": "Task manager not available in context",
+        }
+    
+    try:
+        result = _context.task_manager.edit_task(task_id, new_description)
+        return result
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to edit task: {str(e)}",
+        }
+

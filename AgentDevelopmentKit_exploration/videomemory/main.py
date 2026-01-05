@@ -49,7 +49,10 @@ async def main():
     
     # Conversation loop
     while True:
-        user_input = input("You: ").strip()
+        # Use asyncio.to_thread to run blocking input() in a thread pool
+        # This allows the event loop to continue processing other tasks
+        user_input = await asyncio.to_thread(input, "You: ")
+        user_input = user_input.strip()
         
         if user_input.lower() in ['quit', 'exit']:
             print("Goodbye!")
