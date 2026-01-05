@@ -1,8 +1,12 @@
 """Task Manager for managing tasks associated with IO streams."""
 
 import uuid
+import logging
 from typing import Dict, List, Optional
 from system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
+
+# Set up logger for this module
+logger = logging.getLogger('TaskManager')
 
 
 class TaskManager:
@@ -162,7 +166,7 @@ class TaskManager:
         remaining_tasks = [task for task in self._tasks.values() if task["io_id"] == io_id]
         if len(remaining_tasks) == 0 and io_id in self._ingestors:
             # Delete the ingestor if no tasks remain
-            print(f"VideoStreamIngestor for io_id={io_id} has no tasks remaining. Deleting ingestor.")
+            logger.info(f"VideoStreamIngestor for io_id={io_id} has no tasks remaining. Deleting ingestor.")
             del self._ingestors[io_id]
         
         return True

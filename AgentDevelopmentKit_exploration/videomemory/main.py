@@ -9,9 +9,13 @@ from google.genai import types
 import agents
 import system
 import tools
+from system.logging_config import setup_logging
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Initialize logging
+setup_logging()
 
 async def main():
     # Initialize system managers

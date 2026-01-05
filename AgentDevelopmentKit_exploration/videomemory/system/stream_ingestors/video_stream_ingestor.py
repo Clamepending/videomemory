@@ -1,10 +1,14 @@
 """Video stream ingestor for managing video input streams - Approach 4: Event-Driven with Message Queue."""
 
 import asyncio
+import logging
 from typing import Dict, Optional, Any
 from asyncio import Queue as AsyncQueue
 from tools.output_actions import take_output_action
 import cv2
+
+# Set up logger for this module
+logger = logging.getLogger('VideoStreamIngestor')
 
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
@@ -22,16 +26,16 @@ class VideoStreamIngestor:
         self._running = False
         self._tasks: list[asyncio.Task] = []
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
-        print(f"[VideoStreamIngestor] Initialized for io_id={self.io_id}")
+        logger.info(f"Initialized for io_id={self.io_id}")
     
     async def start(self):
         """Start the video stream ingestor and all processing loops."""
         if self._running:
-            print(f"[VideoStreamIngestor] Already running for io_id={self.io_id}")
+            logger.info(f"Already running for io_id={self.io_id}")
             return
         
         self._running = True
-        print(f"[VideoStreamIngestor] Starting ingestor for io_id={self.io_id}")
+        logger.info(f"Starting ingestor for io_id={self.io_id}")
         
         # Start all processing loops
         # Note: These tasks run concurrently in the background
@@ -41,8 +45,8 @@ class VideoStreamIngestor:
             asyncio.create_task(self._action_loop(), name=f"action_{self.io_id}"),
         ]
         
-        print(f"[VideoStreamIngestor] Started {len(self._tasks)} processing loops for io_id={self.io_id}")
-        print(f"[VideoStreamIngestor] Task status: {[t.get_name() for t in self._tasks]}")
+        logger.info(f"Started {len(self._tasks)} processing loops for io_id={self.io_id}")
+        logger.info(f"Task status: {[t.get_name() for t in self._tasks]}")
         
         # Give tasks a moment to start and report any immediate errors
         await asyncio.sleep(0.1)
@@ -63,7 +67,7 @@ class VideoStreamIngestor:
             # Check if camera opened successfully (for all platforms)
             if not self._camera.isOpened():
                 error_msg = (
-                    f"[VideoStreamIngestor] ERROR: Could not open camera {camera_index} for io_id={self.io_id}\n"
+                    f"ERROR: Could not open camera {camera_index} for io_id={self.io_id}\n"
                     f"  This is likely a macOS camera permission issue.\n"
                     f"  To fix:\n"
                     f"  1. Go to System Settings > Privacy & Security > Camera\n"
@@ -71,13 +75,13 @@ class VideoStreamIngestor:
                     f"  3. Restart the application\n"
                     f"  Alternatively, the camera may be in use by another application."
                 )
-                print(error_msg)
+                logger.error(error_msg)
                 # Update task notes to indicate camera failure
                 for task_desc, task_notes in self._task_notes.items():
                     task_notes["error"] = "Camera access denied. Please grant camera permissions in System Settings."
                 return
             
-            print(f"[VideoStreamIngestor] Started capture loop for io_id={self.io_id}")
+            logger.info(f"Started capture loop for io_id={self.io_id}")
             
             while self._running:
                 ret, frame = self._camera.read()
@@ -97,20 +101,20 @@ class VideoStreamIngestor:
             
             self._camera.release()
             self._camera = None
-            print(f"[VideoStreamIngestor] Stopped capture loop for io_id={self.io_id}")
+            logger.info(f"Stopped capture loop for io_id={self.io_id}")
         except asyncio.CancelledError:
-            print(f"[VideoStreamIngestor] Capture loop cancelled for io_id={self.io_id}")
+            logger.info(f"Capture loop cancelled for io_id={self.io_id}")
             if self._camera:
                 self._camera.release()
                 self._camera = None
         except Exception as e:
-            print(f"[VideoStreamIngestor] Error in capture loop for io_id={self.io_id}: {e}")
+            logger.error(f"Error in capture loop for io_id={self.io_id}: {e}", exc_info=True)
             self._running = False
     
     async def _process_loop(self):
         """Process frames through ML pipeline and update task notes."""
         try:
-            print(f"[VideoStreamIngestor] Started process loop for io_id={self.io_id}")
+            logger.info(f"Started process loop for io_id={self.io_id}")
             
             while self._running:
                 try:
@@ -121,6 +125,8 @@ class VideoStreamIngestor:
                     )
                     if frame is None:
                         continue
+                    # Use DEBUG level for frequent frame processing messages
+                    logger.debug(f"Process loop: Frame got from process loop queue for io_id={self.io_id}")
                     # Run ML processing (placeholder - replace with actual ML model)
                     results = await self._run_ml_inference(frame, self._task_notes)
                     
@@ -137,19 +143,19 @@ class VideoStreamIngestor:
                     # Timeout allows us to check _running flag
                     continue
                 except Exception as e:
-                    print(f"[VideoStreamIngestor] Error processing frame for io_id={self.io_id}: {e}")
+                    logger.error(f"Error processing frame for io_id={self.io_id}: {e}", exc_info=True)
                     continue
                     
         except asyncio.CancelledError:
-            print(f"[VideoStreamIngestor] Process loop cancelled for io_id={self.io_id}")
+            logger.info(f"Process loop cancelled for io_id={self.io_id}")
         except Exception as e:
-            print(f"[VideoStreamIngestor] Error in process loop for io_id={self.io_id}: {e}")
+            logger.error(f"Error in process loop for io_id={self.io_id}: {e}", exc_info=True)
             self._running = False
     
     async def _action_loop(self):
         """Execute actions based on task conditions."""
         try:
-            print(f"[VideoStreamIngestor] Started action loop for io_id={self.io_id}")
+            logger.info(f"Started action loop for io_id={self.io_id}")
             
             while self._running:
                 try:
@@ -158,7 +164,7 @@ class VideoStreamIngestor:
                         self._action_queue.get(),
                         timeout=0.5
                     )
-                    print(f"[VideoStreamIngestor] Action loop: Action {action} got from action loop queue for io_id={self.io_id}")
+                    logger.debug(f"Action loop: Action {action} got from action loop queue for io_id={self.io_id}")
                     if action is not None:
                         await self._execute_action(action)
                     
@@ -166,13 +172,13 @@ class VideoStreamIngestor:
                     # Timeout allows us to check _running flag
                     continue
                 except Exception as e:
-                    print(f"[VideoStreamIngestor] Error executing action for io_id={self.io_id}: {e}")
+                    logger.error(f"Error executing action for io_id={self.io_id}: {e}", exc_info=True)
                     continue
                     
         except asyncio.CancelledError:
-            print(f"[VideoStreamIngestor] Action loop cancelled for io_id={self.io_id}")
+            logger.info(f"Action loop cancelled for io_id={self.io_id}")
         except Exception as e:
-            print(f"[VideoStreamIngestor] Error in action loop for io_id={self.io_id}: {e}")
+            logger.error(f"Error in action loop for io_id={self.io_id}: {e}", exc_info=True)
     
     async def _run_ml_inference(self, frame: Any, task_notes: dict) -> Dict[str, Any]:
         """Run ML inference on a frame (placeholder for custom ML architecture).
@@ -241,9 +247,9 @@ class VideoStreamIngestor:
         """
         try:
             result = await take_output_action(action)
-            print(f"[VideoStreamIngestor] Action result: {result}")
+            logger.info(f"Action result: {result}")
         except Exception as e:
-            print(f"[VideoStreamIngestor] Error calling take_output_action: {e}")
+            logger.error(f"Error calling take_output_action: {e}", exc_info=True)
     
     def add_task(self, task_desc: str, task_notes: dict):
         """Add a task to the video stream ingestor.
@@ -257,7 +263,7 @@ class VideoStreamIngestor:
         # Initialize task notes
         task_notes["note"] = "" # want to use a string for simplicity but dictionary is more flexible and is passed by reference
         
-        print(f"[VideoStreamIngestor] Added task '{task_desc}' for io_id={self.io_id}")
+        logger.info(f"Added task '{task_desc}' for io_id={self.io_id}")
         
         # Start the ingestor if not already running
         if not self._running:
@@ -270,7 +276,7 @@ class VideoStreamIngestor:
                     loop.run_until_complete(self.start())
             except RuntimeError:
                 # No event loop running, will need to be started manually
-                print(f"[VideoStreamIngestor] Warning: No event loop available. Call start() manually.")
+                logger.warning(f"No event loop available. Call start() manually.")
     
     def remove_task(self, task_desc: str):
         """Remove a task from the video stream ingestor.
@@ -280,9 +286,9 @@ class VideoStreamIngestor:
         """
         if task_desc in self._task_notes:
             del self._task_notes[task_desc]
-            print(f"[VideoStreamIngestor] Removed task '{task_desc}' for io_id={self.io_id}")
+            logger.info(f"Removed task '{task_desc}' for io_id={self.io_id}")
         else:
-            print(f"[VideoStreamIngestor] Task '{task_desc}' not found for io_id={self.io_id}")
+            logger.warning(f"Task '{task_desc}' not found for io_id={self.io_id}")
         
         # Stop ingestor if no tasks remain (async call)
         if len(self._task_notes) == 0:
@@ -293,7 +299,7 @@ class VideoStreamIngestor:
                 else:
                     loop.run_until_complete(self.stop())
             except RuntimeError:
-                print(f"[VideoStreamIngestor] Warning: Could not stop ingestor - no event loop")
+                logger.warning(f"Could not stop ingestor - no event loop")
     
     def edit_task(self, old_task_desc: str, new_task_desc: str):
         """Edit/update a task description in the video stream ingestor.
@@ -305,7 +311,7 @@ class VideoStreamIngestor:
             new_task_desc: The new description for the task
         """
         if old_task_desc not in self._task_notes:
-            print(f"[VideoStreamIngestor] Task '{old_task_desc}' not found for io_id={self.io_id}, cannot edit")
+            logger.warning(f"Task '{old_task_desc}' not found for io_id={self.io_id}, cannot edit")
             return False
         
         # Get the existing task_notes
@@ -317,16 +323,16 @@ class VideoStreamIngestor:
         # Add new task description with same task_notes
         self._task_notes[new_task_desc] = task_notes
         
-        print(f"[VideoStreamIngestor] Edited task from '{old_task_desc}' to '{new_task_desc}' for io_id={self.io_id}")
+        logger.info(f"Edited task from '{old_task_desc}' to '{new_task_desc}' for io_id={self.io_id}")
         return True
     
     async def stop(self):
         """Clean shutdown of all loops and tasks."""
         if not self._running:
-            print(f"[VideoStreamIngestor] Already stopped for io_id={self.io_id}")
+            logger.info(f"Already stopped for io_id={self.io_id}")
             return
         
-        print(f"[VideoStreamIngestor] Stopping ingestor for io_id={self.io_id}")
+        logger.info(f"Stopping ingestor for io_id={self.io_id}")
         
         # 1. Signal shutdown
         self._running = False
@@ -344,7 +350,7 @@ class VideoStreamIngestor:
                     timeout=5.0
                 )
             except asyncio.TimeoutError:
-                print(f"[VideoStreamIngestor] Warning: Tasks didn't complete within timeout for io_id={self.io_id}")
+                logger.warning(f"Tasks didn't complete within timeout for io_id={self.io_id}")
         
         # 4. Drain queues (prevents memory leaks)
         # Drain frame queue
@@ -357,7 +363,7 @@ class VideoStreamIngestor:
                 break
         
         if drained_frames > 0:
-            print(f"[VideoStreamIngestor] Drained {drained_frames} frames from queue for io_id={self.io_id}")
+            logger.debug(f"Drained {drained_frames} frames from queue for io_id={self.io_id}")
         
         # Drain action queue
         remaining_actions = []
@@ -369,7 +375,7 @@ class VideoStreamIngestor:
                 break
         
         if remaining_actions:
-            print(f"[VideoStreamIngestor] Discarding {len(remaining_actions)} queued actions for io_id={self.io_id}")
+            logger.info(f"Discarding {len(remaining_actions)} queued actions for io_id={self.io_id}")
         
         # 5. Clear task list
         self._tasks = []
@@ -379,4 +385,4 @@ class VideoStreamIngestor:
             self._camera.release()
             self._camera = None
         
-        print(f"[VideoStreamIngestor] Stopped ingestor for io_id={self.io_id}")
+        logger.info(f"Stopped ingestor for io_id={self.io_id}")
