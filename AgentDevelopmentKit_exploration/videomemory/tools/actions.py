@@ -1,6 +1,9 @@
 """Mock action tools for executing various actions like sending emails, controlling doors, etc."""
 
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def send_email(to: str, subject: Optional[str] = None, content: str = "") -> dict:
@@ -14,7 +17,7 @@ def send_email(to: str, subject: Optional[str] = None, content: str = "") -> dic
     Returns:
         dict: A dictionary containing the status and details of the email send operation.
     """
-    print(f"--- send_email(to={to}, subject={subject}, content={content}) was called ---")
+    logger.info(f"send_email(to={to}, subject={subject}, content={content}) was called")
     
     # Mock implementation - in a real system, this would actually send an email
     return {
@@ -35,7 +38,7 @@ def open_door(door_name: str) -> dict:
     Returns:
         dict: A dictionary containing the status and details of the door operation.
     """
-    print(f"--- open_door(door_name={door_name}) was called ---")
+    logger.info(f"open_door(door_name={door_name}) was called")
     
     # Mock implementation - in a real system, this would control actual door hardware
     return {
@@ -54,7 +57,7 @@ def close_door(door_name: str) -> dict:
     Returns:
         dict: A dictionary containing the status and details of the door operation.
     """
-    print(f"--- close_door(door_name={door_name}) was called ---")
+    logger.info(f"close_door(door_name={door_name}) was called")
     
     # Mock implementation - in a real system, this would control actual door hardware
     return {
@@ -73,7 +76,7 @@ def turn_on_light(light_name: str) -> dict:
     Returns:
         dict: A dictionary containing the status and details of the light operation.
     """
-    print(f"--- turn_on_light(light_name={light_name}) was called ---")
+    logger.info(f"turn_on_light(light_name={light_name}) was called")
     
     # Mock implementation
     return {
@@ -92,7 +95,7 @@ def turn_off_light(light_name: str) -> dict:
     Returns:
         dict: A dictionary containing the status and details of the light operation.
     """
-    print(f"--- turn_off_light(light_name={light_name}) was called ---")
+    logger.info(f"turn_off_light(light_name={light_name}) was called")
     
     # Mock implementation
     return {
@@ -101,3 +104,16 @@ def turn_off_light(light_name: str) -> dict:
         "light_name": light_name,
     }
 
+def print_to_user(message: str) -> dict:
+    """Prints a message to the user.
+    
+    Args:
+        message: The message to print to the user. This will be printed to the console.
+    
+    Returns:
+        dict: A dictionary containing the status and details of the print operation.
+    """
+    logger.info(f"print_to_user(message={message}) was called")
+    
+    print("[System] ", message)
+    return {"status": "success", "message": message}

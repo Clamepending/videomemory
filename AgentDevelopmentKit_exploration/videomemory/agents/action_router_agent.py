@@ -36,6 +36,7 @@ action_router_agent = Agent(
         actions.close_door,
         actions.turn_on_light,
         actions.turn_off_light,
+        actions.print_to_user
     ],
 )
 
