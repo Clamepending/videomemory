@@ -270,7 +270,6 @@ class VideoStreamIngestor:
             return ""
     
     def _build_prompt(self) -> str:
-        return "output an update to say hello for task number 0 in the notes and take the action of opening the door"
         """Build the prompt for the LLM based on tasks and history."""
         # Build tasks section
         tasks_lines = ["<tasks>"]
@@ -295,19 +294,33 @@ class VideoStreamIngestor:
 
 You are the video ingestor. Your job is to output two lists of json objects.
 
-The first list is to update the task notes to keep track of each task based on the latest image in the stream. Use the history of your own outputs to prevent double counting.
+The first list is to update task notes when you observe something relevant to a task in the current image. IMPORTANT: If you can provide a meaningful update to a task note based on what you see in the image, you MUST include it. This includes:
+- New observations related to the task
+- Changes in status or progress
+- Updates to counts, positions, or states
+- Any relevant information that advances tracking of the task
 
-The second list is to take system actions if a task specifies to and it fits the video stream.
+Use the history of your own outputs to prevent double counting or repeating the same observations. Only update tasks when there's something new or relevant to report. If nothing has changed and there's nothing new to observe, you can return an empty task_updates list.
+
+The second list is for system actions - only include actions if a task explicitly requires taking an action and the conditions are met in the video stream.
 
 Write your output in this format and ONLY this format. Do not write anything but in exactly this format and nothing else.
 [{task_number: <task number>, task_note: <new_description>, task_done: <True or False>}, ...], [{take_action: action_description}, ...]
 
 examples:
-[{task_number: 1, task_note: "The squirrel count is 5, last squirrel spotted at 10am PST, squirrel was wearing a beanie", task_done: False}], [{take_action: "send email to example@gmail.com with contents 'Hello! This is the video ingester.'"}]
+When you observe a clap for "Count claps" task: [{task_number: 0, task_note: "Clap detected. Total count: 1 clap.", task_done: False}], []
 
-[{task_number: 0, task_note: "purple book was seen on living room table, then kitchen sink, then on bedroom carpet", task_done: False}, {task_number: 3, task_note: "The ball was swapped from the second cup to the third cup", task_done: True}], []
+When you observe 4 more claps: [{task_number: 0, task_note: "4 more claps detected. Total count: 5 claps.", task_done: False}], []
 
-[], [{take_action: "open front door"}]
+When you observe people for "Keep track of number of people": [{task_number: 1, task_note: "Currently 2 people visible in frame.", task_done: False}], []
+
+When the person is not visible: [{task_number: 1, task_note: "1 person was visible, but now no one is visible.", task_done: False}], []
+
+When nothing relevant is observed: [], []
+
+For multiple task updates: [{task_number: 0, task_note: "Clap count: 5", task_done: False}, {task_number: 1, task_note: "2 people visible", task_done: False}], []
+
+When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps counted", task_done: True}], [{take_action: "send notification that clap counting task is complete"}]
 </instructions>"""
         
         return "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines) + "\n\n" + instructions

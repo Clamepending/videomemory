@@ -94,12 +94,12 @@ class DeviceDetector:
             dict: A dictionary containing lists of available input devices by category
         """
         return {
-            "keyboard": self.detect_keyboards(),
-            "mouse": self.detect_mice(),
-            "screen": self.detect_screens(),
+            # "keyboard": self.detect_keyboards(),
+            # "mouse": self.detect_mice(),
+            # "screen": self.detect_screens(),
             "camera": self.detect_cameras(),
-            "com_ports": self.detect_com_ports(),
-            "audio_input": self.detect_audio_input(),
+            # "com_ports": self.detect_com_ports(),
+            # "audio_input": self.detect_audio_input(),
         }
     
     # Linux-specific detection methods
