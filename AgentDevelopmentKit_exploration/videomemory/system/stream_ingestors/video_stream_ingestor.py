@@ -2,30 +2,96 @@
 
 import asyncio
 import logging
-from typing import Dict, Optional, Any
+import base64
+import json
+import os
+import time
+from typing import Dict, Optional, Any, List
 from asyncio import Queue as AsyncQueue
-from tools.output_actions import take_output_action
+from collections import deque
+from google.adk.runners import Runner
+from google.adk.sessions import BaseSessionService
+from google.genai import types as genai_types
 import cv2
+from pydantic import BaseModel, Field
+from google import genai
+from google.genai import types
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Set up logger for this module
 logger = logging.getLogger('VideoStreamIngestor')
 
+
+# Pydantic models for structured output
+class TaskUpdate(BaseModel):
+    """Model for task update output."""
+    task_number: int = Field(..., description="The task number")
+    task_note: str = Field(..., description="Updated description/note for the task")
+    task_done: bool = Field(..., description="Whether the task is completed")
+
+
+class SystemAction(BaseModel):
+    """Model for system action output."""
+    take_action: str = Field(..., description="Description of the action to take")
+
+
+class VideoIngestorOutput(BaseModel):
+    """Model for the complete output structure."""
+    task_updates: List[TaskUpdate] = Field(default_factory=list, description="List of task updates")
+    system_actions: List[SystemAction] = Field(default_factory=list, description="List of system actions to take")
+
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
     
-    def __init__(self, io_id: str):
+    def __init__(self, io_id: str, action_runner: Runner, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app"):
         """Initialize the video stream ingestor.
         
         Args:
             io_id: The unique identifier of the IO stream
+            action_runner: The runner for executing actions (see google adk: https://google.github.io/adk-docs/runtime/#key-components-of-the-runtime)
+            session_service: The session service used by the runner (required to create sessions)
+            app_name: The app name used by the runner (must match the runner's app_name)
         """
         self.io_id = io_id
         self._task_notes: Dict[str, dict] = {}  # task_desc -> task_notes dict
+        self._tasks_list: List[Dict] = []  # List of tasks with task_number, task_desc, task_note
         self._frame_queue = AsyncQueue(maxsize=10)
         self._action_queue = AsyncQueue()
         self._running = False
         self._tasks: list[asyncio.Task] = []
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
+        
+        # History tracking: past 20 model outputs
+        self._output_history: deque = deque(maxlen=20)  # Store last 20 model outputs
+        
+        # Rate limiting: track last request time (max 10 requests per minute = 6 seconds between requests)
+        self._last_request_time: float = 0.0
+        self._min_request_interval: float = 1.0  # 6 seconds = 10 requests per minute max
+        
+        # Initialize Google GenAI client
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            logger.warning("GOOGLE_API_KEY not found in environment. Multimodal LLM calls will fail.")
+            self._genai_client = None
+        else:
+            try:
+                self._genai_client = genai.Client(api_key=api_key)
+                logger.info(f"Initialized Google GenAI client for io_id={self.io_id}")
+            except Exception as e:
+                logger.error(f"Failed to initialize Google GenAI client: {e}")
+                self._genai_client = None
+        
+        # Initialize action router runner for executing actions
+        # Use provided action runner or create a new one
+        self._action_runner = action_runner
+        self._session_service = session_service
+        self._action_user_id = f"video_ingestor_{io_id}" # google adk each session requires a user ID but this is just a session foringesting a stream
+        self._action_app_name = app_name  # Must match the runner's app_name
+        self.session_id = f"video_ingestor_session_{io_id}"
+        
         logger.info(f"Initialized for io_id={self.io_id}")
     
     async def start(self):
@@ -33,6 +99,21 @@ class VideoStreamIngestor:
         if self._running:
             logger.info(f"Already running for io_id={self.io_id}")
             return
+        
+        # Create session for action runner if session_service is available
+        if self._session_service:
+            try:
+                await self._session_service.create_session(
+                    app_name=self._action_app_name,
+                    user_id=self._action_user_id,
+                    session_id=self.session_id
+                )
+                logger.info(f"Created session {self.session_id} for io_id={self.io_id}")
+            except Exception as e:
+                # Session might already exist, which is fine
+                logger.debug(f"Session creation for {self.session_id}: {e}")
+        else:
+            logger.warning(f"No session_service provided. Session {self.session_id} may not exist.")
         
         self._running = True
         logger.info(f"Starting ingestor for io_id={self.io_id}")
@@ -125,19 +206,18 @@ class VideoStreamIngestor:
                     )
                     if frame is None:
                         continue
-                    # Use DEBUG level for frequent frame processing messages
                     logger.debug(f"Process loop: Frame got from process loop queue for io_id={self.io_id}")
-                    # Run ML processing (placeholder - replace with actual ML model)
-                    results = await self._run_ml_inference(frame, self._task_notes)
                     
-                    # Update task_notes for all active tasks
-                    for task_desc, task_notes in self._task_notes.items():
-                        await self._update_task_notes(task_desc, task_notes, results)
-                        
-                        # Check if action should be triggered
-                        action = await self._check_action_conditions(task_desc, task_notes, results)
-                        if action:
-                            await self._action_queue.put(action)
+                    # Run ML processing with multimodal LLM
+                    results = await self._run_ml_inference(frame)
+                    
+                    # Store output in history
+                    if results:
+                        self._output_history.append(results)
+                    
+                    # Process results: update task notes and queue actions
+                    if results:
+                        await self._process_ml_results(results)
                             
                 except asyncio.TimeoutError:
                     # Timeout allows us to check _running flag
@@ -180,76 +260,151 @@ class VideoStreamIngestor:
         except Exception as e:
             logger.error(f"Error in action loop for io_id={self.io_id}: {e}", exc_info=True)
     
-    async def _run_ml_inference(self, frame: Any, task_notes: dict) -> Dict[str, Any]:
-        """Run ML inference on a frame (placeholder for custom ML architecture).
-        
-        Args:
-            frame: The frame to process (numpy array or mock dict)
-            task_notes: The shared task_notes dictionary (maps task_desc to task_notes)
-        Returns:
-            Dictionary with ML inference results
-        """
-        # TODO: Replace with actual ML model inference
-        # This is a placeholder that simulates ML processing
-        
-        # For now, return mock results
-        # In real implementation, this would:
-        # 1. Preprocess frame
-        # 2. Run through ML model
-        # 3. Post-process results
-        # 4. Return structured results
-        
-        await asyncio.sleep(0.07)  # Simulate processing time
-        
-        return {
-            "task description": "count number of claps and then send an email to example@hotmail.com",
-            "new note content": "This is a new note. currently 1 clap",
-            "Action to take": None,
-        }
+    def _frame_to_base64(self, frame: Any) -> str:
+        """Convert OpenCV frame to base64 encoded image."""
+        try:
+            _, buffer = cv2.imencode('.jpg', frame)
+            return base64.b64encode(buffer).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Error encoding frame: {e}")
+            return ""
     
-    async def _update_task_notes(self, task_desc: str, task_notes: dict, ml_results: Dict[str, Any]):
-        """Update task notes based on ML results.
+    def _build_prompt(self) -> str:
+        return "output an update to say hello for task number 0 in the notes and take the action of opening the door"
+        """Build the prompt for the LLM based on tasks and history."""
+        # Build tasks section
+        tasks_lines = ["<tasks>"]
+        for task in self._tasks_list:
+            tasks_lines.append("<task>")
+            tasks_lines.append(f"<task_number>{task.get('task_number', 0)}</task_number>")
+            tasks_lines.append(f"<task_desc>{task.get("task_desc", "")}</task_desc>")
+            tasks_lines.append(f"<task_note>{task.get("task_note", "")}</task_note>")
+            tasks_lines.append("</task>")
+        tasks_lines.append("</tasks>")
         
-        Args:
-            task_desc: Description of the task
-            task_notes: The shared task_notes dictionary
-            ml_results: Results from ML inference
-        """
-        # TODO: Uncomment when ML model is implemented. Want to test with just 1 task and test task_notes updating
-        # if task_desc != ml_results["task description"]:
-        #     return
-        # task_notes is already the dictionary for this specific task (shared reference)
-        # So we update it directly, not task_notes[task_desc]
-        task_notes["note"] = ml_results["new note content"]
+        # Build history section (only model outputs)
+        history_lines = ["<history>"]
+        for output in self._output_history:
+            history_lines.append("<output>")
+            history_lines.append(f"<output_json>{json.dumps(output, default=str)}</output_json>")
+            history_lines.append("</output>")
+        history_lines.append("</history>")
+        
+        # Build instructions
+        instructions = """<instructions>
+
+You are the video ingestor. Your job is to output two lists of json objects.
+
+The first list is to update the task notes to keep track of each task based on the latest image in the stream. Use the history of your own outputs to prevent double counting.
+
+The second list is to take system actions if a task specifies to and it fits the video stream.
+
+Write your output in this format and ONLY this format. Do not write anything but in exactly this format and nothing else.
+[{task_number: <task number>, task_note: <new_description>, task_done: <True or False>}, ...], [{take_action: action_description}, ...]
+
+examples:
+[{task_number: 1, task_note: "The squirrel count is 5, last squirrel spotted at 10am PST, squirrel was wearing a beanie", task_done: False}], [{take_action: "send email to example@gmail.com with contents 'Hello! This is the video ingester.'"}]
+
+[{task_number: 0, task_note: "purple book was seen on living room table, then kitchen sink, then on bedroom carpet", task_done: False}, {task_number: 3, task_note: "The ball was swapped from the second cup to the third cup", task_done: True}], []
+
+[], [{take_action: "open front door"}]
+</instructions>"""
+        
+        return "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines) + "\n\n" + instructions
     
-    async def _check_action_conditions(self, task_desc: str, task_notes: dict, ml_results: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Check if an action should be triggered based on task conditions.
+    async def _run_ml_inference(self, frame: Any) -> Optional[Dict[str, Any]]:
+        """Run multimodal LLM inference on a frame."""
+        if not self._genai_client or not self._tasks_list:
+            return None
         
-        Args:
-            task_desc: Description of the task
-            task_notes: The shared task_notes dictionary
-            ml_results: Results from ML inference
+        # Rate limiting: ensure minimum interval between requests
+        current_time = time.time()
+        time_since_last = current_time - self._last_request_time
+        if time_since_last < self._min_request_interval:
+            await asyncio.sleep(self._min_request_interval - time_since_last)
         
-        Returns:
-            Action dictionary if action should be triggered, None otherwise
-        """
-        if task_desc != ml_results["task description"]:
+        try:
+            image_base64 = self._frame_to_base64(frame)
+            if not image_base64:
+                return None
+            
+            image_part = types.Part(
+                inline_data=types.Blob(
+                    data=base64.b64decode(image_base64),
+                    mime_type="image/jpeg"
+                )
+            )
+            text_part = types.Part(text=self._build_prompt())
+            
+            logger.info(f"LLM inference prompt: {self._build_prompt()}")
+            
+            self._last_request_time = time.time()
+            response = self._genai_client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[image_part, text_part],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=VideoIngestorOutput.model_json_schema()
+                )
+            )
+            
+            output = VideoIngestorOutput(**json.loads(response.text))
+            
+            logger.info(f"LLM inference output: {output}")
+            return {
+                "task_updates": [u.model_dump() for u in output.task_updates],
+                "system_actions": [a.model_dump() for a in output.system_actions]
+            }
+        except Exception as e:
+            logger.error(f"LLM inference error: {e}", exc_info=True)
+            return None
+    
+    async def _process_ml_results(self, ml_results: Dict[str, Any]):
+        """Process ML inference results: update task notes and queue actions."""
+        if not ml_results:
             return
-        if ml_results["Action to take"] != None:
-            return ml_results["Action to take"]
-        return None
+        
+        # Update tasks
+        for update in ml_results.get("task_updates", []):
+            task = next((t for t in self._tasks_list if t.get("task_number") == update.get("task_number")), None)
+            if task:
+                task["task_note"] = update.get("task_note", "")
+                task_desc = task.get("task_desc", "")
+                if task_desc in self._task_notes:
+                    self._task_notes[task_desc]["note"] = update.get("task_note", "")
+                    if update.get("task_done"):
+                        self._task_notes[task_desc]["done"] = True
+        
+        # Queue actions
+        for action in ml_results.get("system_actions", []):
+            if action.get("take_action"):
+                await self._action_queue.put(action["take_action"])
     
     async def _execute_action(self, action: str):
-        """Execute an action (e.g., call take_output_action).
+        """
+        Execute an action using the shared admin agent runner.
         
         Args:
-            action: Dictionary describing the action to execute
+            action: String describing the action to execute
         """
+        if not self._action_runner:
+            logger.error("Action runner not available. Cannot execute action.")
+            return
+        
         try:
-            result = await take_output_action(action)
-            logger.info(f"Action result: {result}")
+            content = genai_types.Content(role='user', parts=[genai_types.Part(text=f"Execute this action: {action}")])
+            
+            async for event in self._action_runner.run_async(
+                user_id=self._action_user_id,
+                session_id=self.session_id,
+                new_message=content
+            ):
+                if event.is_final_response():
+                    if event.content and event.content.parts:
+                        logger.info(f"Action result: {event.content.parts[0].text}")
+                    break
         except Exception as e:
-            logger.error(f"Error calling take_output_action: {e}", exc_info=True)
+            logger.error(f"Error executing action: {e}", exc_info=True)
     
     def add_task(self, task_desc: str, task_notes: dict):
         """Add a task to the video stream ingestor.
@@ -263,7 +418,17 @@ class VideoStreamIngestor:
         # Initialize task notes
         task_notes["note"] = "" # want to use a string for simplicity but dictionary is more flexible and is passed by reference
         
-        logger.info(f"Added task '{task_desc}' for io_id={self.io_id}")
+        # Add to tasks list with task_number
+        # Use the length of tasks_list as the task_number (0-indexed)
+        task_number = len(self._tasks_list)
+        task_entry = {
+            "task_number": task_number,
+            "task_desc": task_desc,
+            "task_note": task_notes.get("note", "")
+        }
+        self._tasks_list.append(task_entry)
+        
+        logger.info(f"Added task {task_number} '{task_desc}' for io_id={self.io_id}")
         
         # Start the ingestor if not already running
         if not self._running:
@@ -286,6 +451,11 @@ class VideoStreamIngestor:
         """
         if task_desc in self._task_notes:
             del self._task_notes[task_desc]
+            # Remove from tasks list
+            self._tasks_list = [t for t in self._tasks_list if t.get("task_desc") != task_desc]
+            # Renumber remaining tasks
+            for i, task in enumerate(self._tasks_list):
+                task["task_number"] = i
             logger.info(f"Removed task '{task_desc}' for io_id={self.io_id}")
         else:
             logger.warning(f"Task '{task_desc}' not found for io_id={self.io_id}")
@@ -322,6 +492,12 @@ class VideoStreamIngestor:
         
         # Add new task description with same task_notes
         self._task_notes[new_task_desc] = task_notes
+        
+        # Update tasks list
+        for task in self._tasks_list:
+            if task.get("task_desc") == old_task_desc:
+                task["task_desc"] = new_task_desc
+                break
         
         logger.info(f"Edited task from '{old_task_desc}' to '{new_task_desc}' for io_id={self.io_id}")
         return True

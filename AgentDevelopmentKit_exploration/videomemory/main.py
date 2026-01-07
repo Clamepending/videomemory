@@ -20,33 +20,34 @@ setup_logging()
 async def main():
     # Initialize system managers
     io_manager = system.IOmanager()
-    task_manager = system.TaskManager(io_manager=io_manager)
+    
+    # Set up shared session service and runner for all agents
+    app_name = "videomemory_app"
+    session_service = InMemorySessionService()
+    runner = Runner(
+        agent=agents.admin_agent,
+        app_name=app_name,
+        session_service=session_service
+    )
+    
+    # Pass shared runner and session service to task manager (for video ingestor actions)
+    task_manager = system.TaskManager(
+        io_manager=io_manager, 
+        action_runner=runner,
+        session_service=session_service,
+        app_name=app_name
+    )
     
     # Set managers in tools so they can access them
     tools.tasks.set_managers(io_manager, task_manager)
     
-    # Use the admin agent
-    agent = agents.admin_agent
-    
-    # Set up session service
-    session_service = InMemorySessionService()
-    
-    # Create session
-    APP_NAME = "conversation_app"
+    # Create admin conversation session
     USER_ID = "user_1"
-    SESSION_ID = "session_001"
-    
-    session = await session_service.create_session(
-        app_name=APP_NAME,
+    SESSION_ID = "admin_session"
+    await session_service.create_session(
+        app_name=app_name,
         user_id=USER_ID,
         session_id=SESSION_ID
-    )
-    
-    # Create runner
-    runner = Runner(
-        agent=agent,
-        app_name=APP_NAME,
-        session_service=session_service
     )
     
     print("AI Agent initialized. Type 'quit' or 'exit' to end the conversation.\n")

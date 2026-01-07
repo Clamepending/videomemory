@@ -4,7 +4,9 @@ import uuid
 import logging
 from typing import Dict, List, Optional
 from system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
-
+from system.io_manager import IOmanager
+from google.adk.runners import Runner
+from google.adk.sessions import BaseSessionService
 # Set up logger for this module
 logger = logging.getLogger('TaskManager')
 
@@ -12,15 +14,21 @@ logger = logging.getLogger('TaskManager')
 class TaskManager:
     """Manages tasks and their associations with IO streams."""
     
-    def __init__(self, io_manager=None):
+    def __init__(self, io_manager: IOmanager = None, action_runner: Runner = None, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app"):
         """Initialize the task manager.
         
         Args:
             io_manager: Optional IO manager instance for checking stream categories
+            action_runner: Optional Runner for executing actions, shared with video ingestors
+            session_service: Optional session service used by the runner (required for video ingestor sessions)
+            app_name: The app name used by the runner (must match the runner's app_name)
         """
         self._tasks: Dict[str, Dict] = {}  # task_id -> task info
         self._io_manager = io_manager
         self._ingestors: Dict[str, VideoStreamIngestor] = {}  # io_id -> ingestor instance
+        self._action_runner = action_runner
+        self._session_service = session_service
+        self._app_name = app_name
     
     def add_task(self, io_id: str, task_description: str) -> Dict:
         """Add a new task for a specific IO stream.
@@ -57,7 +65,12 @@ class TaskManager:
         
         # Initialize video ingestor if not already created for this io_id
         if io_id not in self._ingestors:
-            self._ingestors[io_id] = VideoStreamIngestor(io_id)
+            self._ingestors[io_id] = VideoStreamIngestor(
+                io_id, 
+                action_runner=self._action_runner,
+                session_service=self._session_service,
+                app_name=self._app_name
+            )
         
         # Create task
         task_id = str(uuid.uuid4())[:8]  # Short UUID for readability
