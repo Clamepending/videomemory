@@ -5,11 +5,10 @@ import logging
 from typing import Dict, List, Optional
 from system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from system.io_manager import IOmanager
+from system.task_types import NoteEntry, Task
 from google.adk.runners import Runner
 from google.adk.sessions import BaseSessionService
-# Set up logger for this module
 logger = logging.getLogger('TaskManager')
-
 
 class TaskManager:
     """Manages tasks and their associations with IO streams."""
@@ -23,7 +22,7 @@ class TaskManager:
             session_service: Optional session service used by the runner (required for video ingestor sessions)
             app_name: The app name used by the runner (must match the runner's app_name)
         """
-        self._tasks: Dict[str, Dict] = {}  # task_id -> task info
+        self._tasks: Dict[str, Task] = {}  # task_id -> Task object
         self._io_manager = io_manager
         self._ingestors: Dict[str, VideoStreamIngestor] = {}  # io_id -> ingestor instance
         self._action_runner = action_runner
@@ -75,22 +74,29 @@ class TaskManager:
         # Create task
         task_id = str(uuid.uuid4())[:8]  # Short UUID for readability
         
-        # Create task_notes dictionary for the ingestor to update (flexible dict for any information)
-        task_notes = {}
+        # Create Task object (will be shared by reference with video ingestor)
+        task = Task(
+            task_id=task_id,
+            task_number=None,  # Will be set by video ingestor TODO: change task_number to task_id and have it be organized by task manager rather than the video ingestor
+            task_desc=task_description,
+            task_note=[],  # Empty list, will be shared by reference
+            done=False,
+            io_id=io_id
+        )
         
-        task_info = {
-            "task_id": task_id,
-            "io_id": io_id,
-            "description": task_description,
-            "status": "pending",
-            "task_notes": task_notes,
-        }
         
-        self._tasks[task_id] = task_info
+        self._tasks[task_id] = task
         
-        # Add task to the ingestor, passing the task_notes dictionary
+        # Add task to the ingestor, passing the Task object (shared by reference)
         # This will automatically start the ingestor if not already running
-        self._ingestors[io_id].add_task(task_description, task_notes)
+        logger.debug(f"[DEBUG] TaskManager.add_task: About to call ingestor.add_task for io_id={io_id}")
+        try:
+            self._ingestors[io_id].add_task(task)
+            logger.debug(f"[DEBUG] TaskManager.add_task: ingestor.add_task completed successfully")
+        except Exception as e:
+            logger.error(f"[ERROR] TaskManager.add_task: Exception in ingestor.add_task: {e}", exc_info=True)
+            # Don't fail the task addition if ingestor start fails - task is still added
+            # But log the error for debugging
         
         return {
             "status": "success",
@@ -107,20 +113,14 @@ class TaskManager:
             task_id: The unique identifier of the task
         
         Returns:
-            Dictionary with task info including notes, or None if not found
+            Dictionary with task info including notes (with serialized note history), or None if not found
         """
-        task_info = self._tasks.get(task_id)
-        if task_info is None:
+        task = self._tasks.get(task_id)
+        if task is None:
             return None
         
-        # Return a copy with all information including task_notes
-        return {
-            "task_id": task_info.get("task_id"),
-            "io_id": task_info.get("io_id"),
-            "description": task_info.get("description"),
-            "status": task_info.get("status"),
-            "task_notes": task_info.get("task_notes", {}),
-        }
+        # Return a copy with all information including task
+        return task.to_dict()
     
     def list_tasks(self, io_id: Optional[str] = None) -> List[Dict]:
         """List all tasks, optionally filtered by io_id.
@@ -132,21 +132,22 @@ class TaskManager:
             List of task dictionaries
         """
         if io_id:
-            return [task for task in self._tasks.values() if task["io_id"] == io_id]
-        return list(self._tasks.values())
+            return [task.to_dict() for task in self._tasks.values() if task.io_id == io_id]
+        return [task.to_dict() for task in self._tasks.values()]
     
-    def update_task_status(self, task_id: str, status: str) -> bool:
+    def update_task_status(self, task_id: str, done: bool) -> bool:
         """Update the status of a task.
         
         Args:
             task_id: The unique identifier of the task
-            status: New status (e.g., "pending", "running", "completed", "failed")
+            done: New done status
         
         Returns:
             True if updated successfully, False if task not found
         """
         if task_id in self._tasks:
-            self._tasks[task_id]["status"] = status
+            task = self._tasks[task_id]
+            task.done = done
             
             return True
         return False
@@ -162,21 +163,19 @@ class TaskManager:
         """
         if task_id not in self._tasks:
             return False
-        
+        task = self._tasks[task_id]
         # Get task info before removing
-        task_info = self._tasks[task_id]
-        io_id = task_info["io_id"]
-        task_description = task_info["description"]
+        io_id = task.io_id
         
         # Remove task from ingestor
         if io_id in self._ingestors:
-            self._ingestors[io_id].remove_task(task_description)
+            self._ingestors[io_id].remove_task(task.task_desc)
         
         # Remove task from manager
         del self._tasks[task_id]
         
         # Check if there are no more tasks for this io_id
-        remaining_tasks = [task for task in self._tasks.values() if task["io_id"] == io_id]
+        remaining_tasks = [task for task in self._tasks.values() if task.io_id == io_id]
         if len(remaining_tasks) == 0 and io_id in self._ingestors:
             # Delete the ingestor if no tasks remain
             logger.info(f"VideoStreamIngestor for io_id={io_id} has no tasks remaining. Deleting ingestor.")
@@ -202,29 +201,17 @@ class TaskManager:
             }
         
         # Get task info
-        task_info = self._tasks[task_id]
-        io_id = task_info["io_id"]
-        old_description = task_info["description"]
+        task = self._tasks[task_id]
+        io_id = task.io_id
+
         
-        # Update task description in ingestor
-        if io_id in self._ingestors:
-            success = self._ingestors[io_id].edit_task(old_description, new_description)
-            if not success:
-                return {
-                    "status": "error",
-                    "message": f"Failed to update task in ingestor for io_id '{io_id}'",
-                    "task_id": task_id,
-                }
-        
-        # Update task description in manager
-        self._tasks[task_id]["description"] = new_description
-        
+        # Update task description in Task object
+        task.task_desc = new_description
+        # Update task description in manager and Task object
         return {
             "status": "success",
             "message": f"Task updated successfully",
             "task_id": task_id,
             "io_id": io_id,
-            "old_description": old_description,
-            "new_description": new_description,
         }
 

@@ -40,6 +40,8 @@ def setup_logging(log_dir: Path = None) -> Path:
     # Set specific logger levels
     logging.getLogger('VideoStreamIngestor').setLevel(logging.DEBUG)
     logging.getLogger('TaskManager').setLevel(logging.DEBUG)
+    logging.getLogger('tasks').setLevel(logging.DEBUG)
+    logging.getLogger('main').setLevel(logging.DEBUG)
     
     print(f"Logging to: {log_file}")
     return log_file

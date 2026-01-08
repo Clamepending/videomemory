@@ -2,10 +2,12 @@
 """Simple conversational AI agent using Gemini 2.0 Flash with Google ADK."""
 
 import asyncio
+import os
 from dotenv import load_dotenv
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
 from google.genai import types
+import httpx
 import agents
 import system
 import tools
@@ -13,6 +15,13 @@ from system.logging_config import setup_logging
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Check for required API key
+if not os.getenv("GOOGLE_API_KEY"):
+    print("WARNING: GOOGLE_API_KEY not found in environment variables.")
+    print("Please create a .env file in this directory with:")
+    print("  GOOGLE_API_KEY=your_api_key_here")
+    print("The application may fail to connect to the AI service.\n")
 
 # Initialize logging
 setup_logging()
@@ -68,23 +77,48 @@ async def main():
         
         try:
             # Create message content
+            import logging
+            logger = logging.getLogger('main')
+            logger.debug(f"[DEBUG] main: Processing user input: {user_input}")
+            
             content = types.Content(role='user', parts=[types.Part(text=user_input)])
             
             # Run the agent and get response
+            logger.debug(f"[DEBUG] main: About to call runner.run_async")
             final_response_text = "No response received"
-            async for event in runner.run_async(
-                user_id=USER_ID,
-                session_id=SESSION_ID,
-                new_message=content
-            ):
-                if event.is_final_response():
-                    if event.content and event.content.parts:
-                        final_response_text = event.content.parts[0].text
-                    break
+            try:
+                async for event in runner.run_async(
+                    user_id=USER_ID,
+                    session_id=SESSION_ID,
+                    new_message=content
+                ):
+                    logger.debug(f"[DEBUG] main: Received event, is_final_response={event.is_final_response()}")
+                    if event.is_final_response():
+                        if event.content and event.content.parts:
+                            final_response_text = event.content.parts[0].text
+                        break
+                logger.debug(f"[DEBUG] main: Finished processing events, final_response_text={final_response_text}")
+            except Exception as inner_e:
+                logger.error(f"[ERROR] main: Exception during runner.run_async: {type(inner_e).__name__}: {inner_e}", exc_info=True)
+                raise
             
             print(f"Agent: {final_response_text}\n")
+        except (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
+            # Network-related errors - provide user-friendly message
+            import logging
+            logger = logging.getLogger('main')
+            error_type = type(e).__name__
+            error_msg = str(e) if str(e) else "No additional details"
+            logger.error(f"[ERROR] main: Network error caught: {error_type}: {error_msg}", exc_info=True)
+            print(f"Network Error: Connection issue with the AI service ({error_type}). Please try again in a moment.\n")
+            print(f"Error details: {error_msg}\n")
         except Exception as e:
-            print(f"Error: {e}\n")
+            # Other errors - show more details
+            import traceback
+            error_msg = str(e) if str(e) else type(e).__name__
+            print(f"Error: {error_msg}\n")
+            # Print full traceback for debugging
+            traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())

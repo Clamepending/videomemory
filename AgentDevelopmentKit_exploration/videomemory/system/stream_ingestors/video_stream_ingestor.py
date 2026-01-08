@@ -5,7 +5,9 @@ import logging
 import base64
 import json
 import os
+import sys
 import time
+from pathlib import Path
 from typing import Dict, Optional, Any, List
 from asyncio import Queue as AsyncQueue
 from collections import deque
@@ -18,12 +20,17 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
+# Add videomemory directory to path for direct execution
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from system.task_types import NoteEntry, Task
+
 # Load environment variables
 load_dotenv()
 
 # Set up logger for this module
 logger = logging.getLogger('VideoStreamIngestor')
-
 
 # Pydantic models for structured output
 class TaskUpdate(BaseModel):
@@ -56,8 +63,7 @@ class VideoStreamIngestor:
             app_name: The app name used by the runner (must match the runner's app_name)
         """
         self.camera_index = 0 # TODO: dont hard code to be the first camera. Modify the task manager to pass in the camera index.
-        self._task_notes: Dict[str, dict] = {}  # task_desc -> task_notes dict
-        self._tasks_list: List[Dict] = []  # List of tasks with task_number, task_desc, task_note
+        self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
         self._frame_queue = AsyncQueue(maxsize=10)
         self._action_queue = AsyncQueue()
         self._running = False
@@ -97,12 +103,15 @@ class VideoStreamIngestor:
     
     async def start(self):
         """Start the video stream ingestor and all processing loops."""
+        logger.debug(f"[DEBUG] VideoStreamIngestor.start: Called for camera_index={self.camera_index}")
+        
         if self._running:
             logger.info(f"Already running for camera index={self.camera_index}")
             return
         
         # Create session for action runner if session_service is available
         if self._session_service:
+            logger.debug(f"[DEBUG] VideoStreamIngestor.start: About to create session {self.session_id}")
             try:
                 await self._session_service.create_session(
                     app_name=self._action_app_name,
@@ -111,8 +120,13 @@ class VideoStreamIngestor:
                 )
                 logger.info(f"Created session {self.session_id} for camera index={self.camera_index}")
             except Exception as e:
-                # Session might already exist, which is fine
-                logger.debug(f"Session creation for {self.session_id}: {e}")
+                # Check if it's a network error
+                import httpx
+                if isinstance(e, (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
+                    logger.error(f"[ERROR] VideoStreamIngestor.start: Network error creating session {self.session_id}: {type(e).__name__}: {e}", exc_info=True)
+                else:
+                    # Session might already exist, which is fine
+                    logger.debug(f"Session creation for {self.session_id}: {e}")
         else:
             logger.warning(f"No session_service provided. Session {self.session_id} may not exist.")
         
@@ -157,8 +171,9 @@ class VideoStreamIngestor:
                 )
                 logger.error(error_msg)
                 # Update task notes to indicate camera failure
-                for task_desc, task_notes in self._task_notes.items():
-                    task_notes["error"] = "Camera access denied. Please grant camera permissions in System Settings."
+                for task in self._tasks_list:
+                    error_note = NoteEntry(content="Camera access denied. Please grant camera permissions in System Settings.")
+                    task.task_note.append(error_note)
                 return
             
             logger.info(f"Started capture loop for camera index={self.camera_index}")
@@ -275,9 +290,22 @@ class VideoStreamIngestor:
         tasks_lines = ["<tasks>"]
         for task in self._tasks_list:
             tasks_lines.append("<task>")
-            tasks_lines.append(f"<task_number>{task.get('task_number', 0)}</task_number>")
-            tasks_lines.append(f"<task_desc>{task.get("task_desc", "")}</task_desc>")
-            tasks_lines.append(f"<task_note>{task.get("task_note", "")}</task_note>")
+            tasks_lines.append(f"<task_number>{task.task_number}</task_number>")
+            tasks_lines.append(f"<task_desc>{task.task_desc}</task_desc>")
+            
+            # Build note history section
+            notes_list = task.task_note
+            
+            tasks_lines.append("<task_notes_history>")
+            if notes_list:
+                for note_entry in notes_list:
+                    assert isinstance(note_entry, NoteEntry), "Note entry must be a NoteEntry object"
+                    time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(note_entry.timestamp))
+                    tasks_lines.append(f"<note timestamp=\"{time_str}\">{note_entry.content}</note>")
+            else:
+                tasks_lines.append("<note timestamp=\"N/A\">No notes yet</note>")
+            tasks_lines.append("</task_notes_history>")
+            
             tasks_lines.append("</task>")
         tasks_lines.append("</tasks>")
         
@@ -300,7 +328,12 @@ The first list is to update task notes when you observe something relevant to a 
 - Updates to counts, positions, or states
 - Any relevant information that advances tracking of the task
 
-Use the history of your own outputs to prevent double counting or repeating the same observations. Only update tasks when there's something new or relevant to report. If nothing has changed and there's nothing new to observe, you can return an empty task_updates list.
+IMPORTANT: Task notes are maintained as a history. Each task_note you provide will be appended to the task's note history with a timestamp. You can see the full history of previous notes in the <task_notes_history> section for each task. Use this history to:
+- Avoid repeating the same observations
+- Build upon previous observations (e.g., "Previous clap count was 3, 1 more clap detected, now 4 claps detected")
+- Track progression over time (e.g., "First subtask is complete, now working on second subtask")
+
+Only update tasks to set the initial task note and when there's something new or relevant to report. If nothing has changed and there's nothing new to observe, you can return an empty task_updates list.
 
 The second list is for system actions - only include actions if a task explicitly requires taking an action and the conditions are met in the video stream.
 
@@ -310,11 +343,11 @@ Write your output in this format and ONLY this format. Do not write anything but
 examples:
 When you observe a clap for "Count claps" task: [{task_number: 0, task_note: "Clap detected. Total count: 1 clap.", task_done: False}], []
 
-When you observe 4 more claps: [{task_number: 0, task_note: "4 more claps detected. Total count: 5 claps.", task_done: False}], []
+When you observe 4 more claps (building on previous count): [{task_number: 0, task_note: "4 more claps detected. Total count: 5 claps.", task_done: False}], []
 
 When you observe people for "Keep track of number of people": [{task_number: 1, task_note: "Currently 2 people visible in frame.", task_done: False}], []
 
-When the person is not visible: [{task_number: 1, task_note: "1 person was visible, but now no one is visible.", task_done: False}], []
+When only 1 person is visible: [{task_number: 1, task_note: "1 person is visible in frame.", task_done: False}], []
 
 When nothing relevant is observed: [], []
 
@@ -349,27 +382,39 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             )
             text_part = types.Part(text=self._build_prompt())
             
-            
-            
+            # Wrap synchronous API call in asyncio.to_thread to prevent blocking
+            # This avoids connection pool issues when multiple frames are processed concurrently
             self._last_request_time = time.time()
-            response = self._genai_client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[image_part, text_part],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=VideoIngestorOutput.model_json_schema()
+            
+            def _sync_generate_content():
+                """Synchronous wrapper for generate_content to run in thread pool."""
+                return self._genai_client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[image_part, text_part],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=VideoIngestorOutput.model_json_schema()
+                    )
                 )
-            )
+            
+            # Run the blocking call in a thread pool to avoid blocking the event loop
+            response = await asyncio.to_thread(_sync_generate_content)
             
             output = VideoIngestorOutput(**json.loads(response.text))
-            logger.info(f"LLM inference prompt: {self._build_prompt()}")
-            logger.info(f"LLM inference output: {output}")
+            # logger.info(f"LLM inference prompt: {self._build_prompt()}")
+            # logger.info(f"LLM inference output: {output}")
             return {
                 "task_updates": [u.model_dump() for u in output.task_updates],
                 "system_actions": [a.model_dump() for a in output.system_actions]
             }
         except Exception as e:
-            logger.error(f"LLM inference error: {e}", exc_info=True)
+            # Handle network errors gracefully - these can happen due to connection issues
+            # but shouldn't crash the entire processing loop
+            import httpx
+            if isinstance(e, (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
+                logger.warning(f"LLM inference network error (will skip this frame): {type(e).__name__}: {e}")
+            else:
+                logger.error(f"LLM inference error: {e}", exc_info=True)
             return None
     
     async def _process_ml_results(self, ml_results: Dict[str, Any]):
@@ -377,16 +422,20 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
         if not ml_results:
             return
         
-        # Update tasks
+        # Update tasks - append new notes instead of overwriting
         for update in ml_results.get("task_updates", []):
-            task = next((t for t in self._tasks_list if t.get("task_number") == update.get("task_number")), None)
+            task = next((t for t in self._tasks_list if t.task_number == update.get("task_number")), None)
             if task:
-                task["task_note"] = update.get("task_note", "")
-                task_desc = task.get("task_desc", "")
-                if task_desc in self._task_notes:
-                    self._task_notes[task_desc]["note"] = update.get("task_note", "")
-                    if update.get("task_done"):
-                        self._task_notes[task_desc]["done"] = True
+                new_note_content = update.get("task_note", "")
+                
+                # Append new note entry with current timestamp
+                if new_note_content:  # Only append if there's actual content
+                    note_entry = NoteEntry(content=new_note_content)
+                    task.task_note.append(note_entry)
+                
+                # Update done status
+                if update.get("task_done"):
+                    task.done = True
         
         # Queue actions
         for action in ml_results.get("system_actions", []):
@@ -419,42 +468,50 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
         except Exception as e:
             logger.error(f"Error executing action: {e}", exc_info=True)
     
-    def add_task(self, task_desc: str, task_notes: dict):
+    def add_task(self, task: Task):
         """Add a task to the video stream ingestor.
         
         Args:
-            task_desc: Description of the task to be performed
-            task_notes: Dictionary to store notes and status for this task (shared reference)
+            task: Task object (shared by reference with task_manager)
         """
-        self._task_notes[task_desc] = task_notes
+        logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Called for task '{task.task_desc}', camera_index={self.camera_index}")
         
-        # Initialize task notes
-        task_notes["note"] = "" # want to use a string for simplicity but dictionary is more flexible and is passed by reference
+        # Set task number if not already set
+        task.task_number = len(self._tasks_list)
         
-        # Add to tasks list with task_number
-        # Use the length of tasks_list as the task_number (0-indexed)
-        task_number = len(self._tasks_list)
-        task_entry = {
-            "task_number": task_number,
-            "task_desc": task_desc,
-            "task_note": task_notes.get("note", "")
-        }
-        self._tasks_list.append(task_entry)
+        self._tasks_list.append(task)
         
-        logger.info(f"Added task {task_number} '{task_desc}' for camera index={self.camera_index}")
+        logger.info(f"Added task {task.task_number} '{task.task_desc}' for camera index={self.camera_index}")
         
         # Start the ingestor if not already running
         if not self._running:
+            logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Ingestor not running, scheduling start()")
             # Schedule start in the event loop
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.create_task(self.start())
+                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Event loop is running, creating async task")
+                    # Wrap start() to catch and log any errors
+                    async def start_with_error_handling():
+                        try:
+                            logger.debug(f"[DEBUG] VideoStreamIngestor.start_with_error_handling: About to call start()")
+                            await self.start()
+                            logger.debug(f"[DEBUG] VideoStreamIngestor.start_with_error_handling: start() completed successfully")
+                        except Exception as e:
+                            logger.error(f"[ERROR] VideoStreamIngestor.start_with_error_handling: Error in start(): {e}", exc_info=True)
+                            # Don't re-raise - log the error but don't crash
+                    asyncio.create_task(start_with_error_handling())
+                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Async task created")
                 else:
+                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Event loop not running, calling run_until_complete")
                     loop.run_until_complete(self.start())
-            except RuntimeError:
+            except RuntimeError as e:
                 # No event loop running, will need to be started manually
-                logger.warning(f"No event loop available. Call start() manually.")
+                logger.warning(f"No event loop available. Call start() manually. Error: {e}")
+            except Exception as e:
+                logger.error(f"[ERROR] VideoStreamIngestor.add_task: Unexpected error scheduling start(): {e}", exc_info=True)
+        else:
+            logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Ingestor already running, skipping start()")
     
     def remove_task(self, task_desc: str):
         """Remove a task from the video stream ingestor.
@@ -462,19 +519,24 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
         Args:
             task_desc: Description of the task to be removed
         """
-        if task_desc in self._task_notes:
-            del self._task_notes[task_desc]
-            # Remove from tasks list
-            self._tasks_list = [t for t in self._tasks_list if t.get("task_desc") != task_desc]
+        # Find and remove task from tasks list
+        task_found = False
+        for task in self._tasks_list:
+            if task.task_desc == task_desc:
+                self._tasks_list.remove(task)
+                task_found = True
+                break
+        
+        if task_found:
             # Renumber remaining tasks
             for i, task in enumerate(self._tasks_list):
-                task["task_number"] = i
+                task.task_number = i
             logger.info(f"Removed task '{task_desc}' for camera index={self.camera_index}")
         else:
             logger.warning(f"Task '{task_desc}' not found for camera index={self.camera_index}")
         
         # Stop ingestor if no tasks remain (async call)
-        if len(self._task_notes) == 0:
+        if len(self._tasks_list) == 0:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
@@ -487,30 +549,25 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
     def edit_task(self, old_task_desc: str, new_task_desc: str):
         """Edit/update a task description in the video stream ingestor.
         
-        This preserves the task_notes dictionary while updating the description.
+        This preserves the task notes list while updating the description.
         
         Args:
             old_task_desc: The current description of the task to be edited
             new_task_desc: The new description for the task
         """
-        if old_task_desc not in self._task_notes:
+        # Find task in tasks list
+        task = None
+        for t in self._tasks_list:
+            if t.task_desc == old_task_desc:
+                task = t
+                break
+        
+        if task is None:
             logger.warning(f"Task '{old_task_desc}' not found for camera index={self.camera_index}, cannot edit")
             return False
         
-        # Get the existing task_notes
-        task_notes = self._task_notes[old_task_desc]
-        
-        # Remove old task description
-        del self._task_notes[old_task_desc]
-        
-        # Add new task description with same task_notes
-        self._task_notes[new_task_desc] = task_notes
-        
-        # Update tasks list
-        for task in self._tasks_list:
-            if task.get("task_desc") == old_task_desc:
-                task["task_desc"] = new_task_desc
-                break
+        # Update task description (notes are already in the task object, so they're preserved)
+        task.task_desc = new_task_desc
         
         logger.info(f"Edited task from '{old_task_desc}' to '{new_task_desc}' for camera index={self.camera_index}")
         return True
@@ -580,9 +637,9 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
         """Get the latest frame (for debugging/visualization)."""
         return self._latest_frame
     
-    def get_tasks_list(self) -> List[Dict]:
-        """Get the current tasks list."""
-        return self._tasks_list.copy()
+    def get_tasks_list(self) -> List[Task]:
+        """Get the current tasks list as Task objects."""
+        return self._tasks_list
     
     def get_prompt(self) -> str:
         """Get the current prompt that would be sent to the LLM."""
@@ -600,29 +657,26 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
 
 # --- code the test the video ingestor standalone by calling just this script ---
 
-    def get_tasks_with_status(self) -> List[Dict]:
-        """Get tasks list with done status included."""
-        tasks_with_status = []
-        for task in self._tasks_list:
-            task_desc = task.get("task_desc", "")
-            is_done = self._task_notes.get(task_desc, {}).get("done", False)
-            task_copy = task.copy()
-            task_copy["done"] = is_done
-            tasks_with_status.append(task_copy)
-        return tasks_with_status
-
 def print_current_tasks(ingestor: VideoStreamIngestor):
     """Print the current state of all tasks."""
-    tasks = ingestor.get_tasks_with_status()
+    tasks = ingestor.get_tasks_list()
     if tasks:
         print("=" * 60)
         print("CURRENT TASKS:")
         print("=" * 60)
         for task in tasks:
-            status = "✓ DONE" if task.get("done", False) else "⏳ ACTIVE"
-            print(f"  [{task.get('task_number')}] {status} - {task.get('task_desc')}")
-            if task.get("task_note"):
-                print(f"      Note: {task.get('task_note')}")
+            status = "✓ DONE" if task.done else "⏳ ACTIVE"
+            print(f"  [{task.task_number}] {status} - {task.task_desc}")
+            
+            # Print note history
+            notes_history = task.task_note
+            if notes_history:
+                print(f"      Note History ({len(notes_history)} entries):")
+                for note_entry in notes_history:
+                    assert isinstance(note_entry, NoteEntry), "Note entry must be a NoteEntry object"
+                    time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(note_entry.timestamp))
+                    content = note_entry.content
+                    print(f"        [{time_str}] {content}")
         print("=" * 60)
     else:
         print("No tasks currently active.")
@@ -636,8 +690,13 @@ async def main():
         app_name="videomemory_app"
     )
     
-    task_notes = {}
-    ingestor.add_task("keep track of the order of the number of fingers being held up", task_notes)
+    task = Task(
+        task_number=-1,
+        task_desc="keep track of the order of the number of fingers being held up",
+        task_note=[],
+        done=False
+    )
+    ingestor.add_task(task)
     print("Task added: keep track of the order of the number of fingers being held up")
     
     await ingestor.start()

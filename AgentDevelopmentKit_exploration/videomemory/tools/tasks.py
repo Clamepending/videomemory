@@ -1,5 +1,7 @@
 """Task management tools."""
 
+import json
+import logging
 from typing import Optional
 
 
@@ -89,7 +91,6 @@ def add_task(io_id: str, task_description: str) -> dict:
     Returns:
         dict: A dictionary containing the task information and status.
     """
-    print(f"--- add_task({io_id} ({_context.io_manager.get_stream_info(io_id)['name']}), {task_description}) was called ---")
     if _context is None:
         return {
             "status": "error",
@@ -117,11 +118,22 @@ def add_task(io_id: str, task_description: str) -> dict:
                 "message": f"Input device with id '{io_id}' not found",
             }
         
-        # Add the task
-        result = _context.task_manager.add_task(io_id, task_description)
-        result["device_info"] = device_info
+        # Get device name for display, defaulting to "Unknown" if empty
+        device_name = device_info.get('name', '').strip() or "Unknown"
+        print(f"--- add_task({io_id} ({device_name}), {task_description}) was called ---")
         
-        return result
+        # Add the task
+        logger = logging.getLogger('tasks')
+        logger.debug(f"[DEBUG] add_task: About to call task_manager.add_task for io_id={io_id}, task={task_description}")
+        try:
+            result = _context.task_manager.add_task(io_id, task_description)
+            logger.debug(f"[DEBUG] add_task: task_manager.add_task returned: {result}")
+            result["device_info"] = device_info
+            logger.info(f"[INFO] add_task: Successfully added task, returning result")
+            return result
+        except Exception as e:
+            logger.error(f"[ERROR] add_task: Exception in task_manager.add_task: {e}", exc_info=True)
+            raise
     except Exception as e:
         return {
             "status": "error",
@@ -154,11 +166,13 @@ def list_tasks(io_id: Optional[str] = None) -> dict:
     try:
         tasks = _context.task_manager.list_tasks(io_id)
         
-        return {
+        result = {
             "status": "success",
             "tasks": tasks,
             "count": len(tasks),
         }
+        print(f"[DEBUG] list_tasks returning:\n{json.dumps(result, indent=2, default=str)}")
+        return result
     except Exception as e:
         return {
             "status": "error",

@@ -19,7 +19,7 @@ admin_agent = Agent(
         "Use list_tasks to view all tasks (optionally filtered by io_id). "
         "When a user asks a question about a task, first call list_tasks to find the relevant task_id, "
         "then call get_info_on ONCE with that task_id to get detailed information. "
-        "Do not call get_info_on multiple times for the same task_id. "
+        "Do not call get_info_on multiple times for the same task_id. Make sure to call get_info_on when answering a user's question about a task."
         "Use remove_task to delete a task by its task_id. "
         "Use edit_task to update a task's description. This is especially useful when a user wants to amend "
         "an existing task, for example, to add an action to be triggered when a condition is met. "
