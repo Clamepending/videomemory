@@ -6,7 +6,7 @@ import tools
 
 admin_agent = Agent(
     name="system_administrator",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     description="A helpful system administrator. It controls the system on behalf of the user.",
     instruction=(
         "You are a helpful and friendly system administrator. Be concise and clear in your responses. "

@@ -349,7 +349,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             )
             text_part = types.Part(text=self._build_prompt())
             
-            logger.info(f"LLM inference prompt: {self._build_prompt()}")
+            
             
             self._last_request_time = time.time()
             response = self._genai_client.models.generate_content(
@@ -362,7 +362,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             )
             
             output = VideoIngestorOutput(**json.loads(response.text))
-            
+            logger.info(f"LLM inference prompt: {self._build_prompt()}")
             logger.info(f"LLM inference output: {output}")
             return {
                 "task_updates": [u.model_dump() for u in output.task_updates],
