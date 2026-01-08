@@ -46,16 +46,16 @@ class VideoIngestorOutput(BaseModel):
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
     
-    def __init__(self, io_id: str, action_runner: Runner, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app"):
+    def __init__(self, camera_index: int, action_runner: Runner, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app"):
         """Initialize the video stream ingestor.
         
         Args:
-            io_id: The unique identifier of the IO stream
+            camera_index: The index of the camera to use
             action_runner: The runner for executing actions (see google adk: https://google.github.io/adk-docs/runtime/#key-components-of-the-runtime)
             session_service: The session service used by the runner (required to create sessions)
             app_name: The app name used by the runner (must match the runner's app_name)
         """
-        self.io_id = io_id
+        self.camera_index = 0 # TODO: dont hard code to be the first camera. Modify the task manager to pass in the camera index.
         self._task_notes: Dict[str, dict] = {}  # task_desc -> task_notes dict
         self._tasks_list: List[Dict] = []  # List of tasks with task_number, task_desc, task_note
         self._frame_queue = AsyncQueue(maxsize=10)
@@ -63,6 +63,7 @@ class VideoStreamIngestor:
         self._running = False
         self._tasks: list[asyncio.Task] = []
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
+        self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
         
         # History tracking: past 20 model outputs
         self._output_history: deque = deque(maxlen=20)  # Store last 20 model outputs
@@ -79,7 +80,7 @@ class VideoStreamIngestor:
         else:
             try:
                 self._genai_client = genai.Client(api_key=api_key)
-                logger.info(f"Initialized Google GenAI client for io_id={self.io_id}")
+                logger.info(f"Initialized Google GenAI client for camera index={self.camera_index}")
             except Exception as e:
                 logger.error(f"Failed to initialize Google GenAI client: {e}")
                 self._genai_client = None
@@ -88,16 +89,16 @@ class VideoStreamIngestor:
         # Use provided action runner or create a new one
         self._action_runner = action_runner
         self._session_service = session_service
-        self._action_user_id = f"video_ingestor_{io_id}" # google adk each session requires a user ID but this is just a session foringesting a stream
+        self._action_user_id = f"video_ingestor_{self.camera_index}" # google adk each session requires a user ID but this is just a session foringesting a stream
         self._action_app_name = app_name  # Must match the runner's app_name
-        self.session_id = f"video_ingestor_session_{io_id}"
+        self.session_id = f"video_ingestor_session_{self.camera_index}"
         
-        logger.info(f"Initialized for io_id={self.io_id}")
+        logger.info(f"Initialized for camera index={self.camera_index}")
     
     async def start(self):
         """Start the video stream ingestor and all processing loops."""
         if self._running:
-            logger.info(f"Already running for io_id={self.io_id}")
+            logger.info(f"Already running for camera index={self.camera_index}")
             return
         
         # Create session for action runner if session_service is available
@@ -108,7 +109,7 @@ class VideoStreamIngestor:
                     user_id=self._action_user_id,
                     session_id=self.session_id
                 )
-                logger.info(f"Created session {self.session_id} for io_id={self.io_id}")
+                logger.info(f"Created session {self.session_id} for camera index={self.camera_index}")
             except Exception as e:
                 # Session might already exist, which is fine
                 logger.debug(f"Session creation for {self.session_id}: {e}")
@@ -116,17 +117,17 @@ class VideoStreamIngestor:
             logger.warning(f"No session_service provided. Session {self.session_id} may not exist.")
         
         self._running = True
-        logger.info(f"Starting ingestor for io_id={self.io_id}")
+        logger.info(f"Starting ingestor for camera index={self.camera_index}")
         
         # Start all processing loops
         # Note: These tasks run concurrently in the background
         self._tasks = [
-            asyncio.create_task(self._capture_loop(), name=f"capture_{self.io_id}"),
-            asyncio.create_task(self._process_loop(), name=f"process_{self.io_id}"),
-            asyncio.create_task(self._action_loop(), name=f"action_{self.io_id}"),
+            asyncio.create_task(self._capture_loop(), name=f"capture_{self.camera_index}"),
+            asyncio.create_task(self._process_loop(), name=f"process_{self.camera_index}"),
+            asyncio.create_task(self._action_loop(), name=f"action_{self.camera_index}"),
         ]
         
-        logger.info(f"Started {len(self._tasks)} processing loops for io_id={self.io_id}")
+        logger.info(f"Started {len(self._tasks)} processing loops for camera index={self.camera_index}")
         logger.info(f"Task status: {[t.get_name() for t in self._tasks]}")
         
         # Give tasks a moment to start and report any immediate errors
@@ -135,20 +136,18 @@ class VideoStreamIngestor:
     async def _capture_loop(self):
         """Continuously capture frames from the video stream."""
         try:
-            # Get camera index from io_id (simplified - in real implementation, map io_id to camera)
-            camera_index = 0  # Default camera
             
             # On macOS, try AVFoundation backend first (better permission handling)
             import platform
             if platform.system() == 'Darwin':  # macOS
-                self._camera = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+                self._camera = cv2.VideoCapture(self.camera_index, cv2.CAP_AVFOUNDATION)
             else:
-                self._camera = cv2.VideoCapture(camera_index)
+                self._camera = cv2.VideoCapture(self.camera_index)
             
             # Check if camera opened successfully (for all platforms)
             if not self._camera.isOpened():
                 error_msg = (
-                    f"ERROR: Could not open camera {camera_index} for io_id={self.io_id}\n"
+                    f"ERROR: Could not open camera {self.camera_index} for camera index={self.camera_index}\n"
                     f"  This is likely a macOS camera permission issue.\n"
                     f"  To fix:\n"
                     f"  1. Go to System Settings > Privacy & Security > Camera\n"
@@ -162,7 +161,7 @@ class VideoStreamIngestor:
                     task_notes["error"] = "Camera access denied. Please grant camera permissions in System Settings."
                 return
             
-            logger.info(f"Started capture loop for io_id={self.io_id}")
+            logger.info(f"Started capture loop for camera index={self.camera_index}")
             
             while self._running:
                 ret, frame = self._camera.read()
@@ -182,20 +181,20 @@ class VideoStreamIngestor:
             
             self._camera.release()
             self._camera = None
-            logger.info(f"Stopped capture loop for io_id={self.io_id}")
+            logger.info(f"Stopped capture loop for camera index={self.camera_index}")
         except asyncio.CancelledError:
-            logger.info(f"Capture loop cancelled for io_id={self.io_id}")
+            logger.info(f"Capture loop cancelled for camera index={self.camera_index}")
             if self._camera:
                 self._camera.release()
                 self._camera = None
         except Exception as e:
-            logger.error(f"Error in capture loop for io_id={self.io_id}: {e}", exc_info=True)
+            logger.error(f"Error in capture loop for camera index={self.camera_index}: {e}", exc_info=True)
             self._running = False
     
     async def _process_loop(self):
         """Process frames through ML pipeline and update task notes."""
         try:
-            logger.info(f"Started process loop for io_id={self.io_id}")
+            logger.info(f"Started process loop for camera index={self.camera_index}")
             
             while self._running:
                 try:
@@ -206,9 +205,10 @@ class VideoStreamIngestor:
                     )
                     if frame is None:
                         continue
-                    logger.debug(f"Process loop: Frame got from process loop queue for io_id={self.io_id}")
+                    logger.debug(f"Process loop: Frame got from process loop queue for camera index={self.camera_index}")
                     
                     # Run ML processing with multimodal LLM
+                    self._latest_frame = frame
                     results = await self._run_ml_inference(frame)
                     
                     # Store output in history
@@ -223,19 +223,19 @@ class VideoStreamIngestor:
                     # Timeout allows us to check _running flag
                     continue
                 except Exception as e:
-                    logger.error(f"Error processing frame for io_id={self.io_id}: {e}", exc_info=True)
+                    logger.error(f"Error processing frame for camera index={self.camera_index}: {e}", exc_info=True)
                     continue
                     
         except asyncio.CancelledError:
-            logger.info(f"Process loop cancelled for io_id={self.io_id}")
+            logger.info(f"Process loop cancelled for camera index={self.camera_index}")
         except Exception as e:
-            logger.error(f"Error in process loop for io_id={self.io_id}: {e}", exc_info=True)
+            logger.error(f"Error in process loop for camera index={self.camera_index}: {e}", exc_info=True)
             self._running = False
     
     async def _action_loop(self):
         """Execute actions based on task conditions."""
         try:
-            logger.info(f"Started action loop for io_id={self.io_id}")
+            logger.info(f"Started action loop for camera index={self.camera_index}")
             
             while self._running:
                 try:
@@ -244,7 +244,7 @@ class VideoStreamIngestor:
                         self._action_queue.get(),
                         timeout=0.5
                     )
-                    logger.debug(f"Action loop: Action {action} got from action loop queue for io_id={self.io_id}")
+                    logger.debug(f"Action loop: Action {action} got from action loop queue for camera index={self.camera_index}")
                     if action is not None:
                         await self._execute_action(action)
                     
@@ -252,13 +252,13 @@ class VideoStreamIngestor:
                     # Timeout allows us to check _running flag
                     continue
                 except Exception as e:
-                    logger.error(f"Error executing action for io_id={self.io_id}: {e}", exc_info=True)
+                    logger.error(f"Error executing action for camera index={self.camera_index}: {e}", exc_info=True)
                     continue
                     
         except asyncio.CancelledError:
-            logger.info(f"Action loop cancelled for io_id={self.io_id}")
+            logger.info(f"Action loop cancelled for camera index={self.camera_index}")
         except Exception as e:
-            logger.error(f"Error in action loop for io_id={self.io_id}: {e}", exc_info=True)
+            logger.error(f"Error in action loop for camera index={self.camera_index}: {e}", exc_info=True)
     
     def _frame_to_base64(self, frame: Any) -> str:
         """Convert OpenCV frame to base64 encoded image."""
@@ -353,7 +353,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             
             self._last_request_time = time.time()
             response = self._genai_client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=[image_part, text_part],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -441,7 +441,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
         }
         self._tasks_list.append(task_entry)
         
-        logger.info(f"Added task {task_number} '{task_desc}' for io_id={self.io_id}")
+        logger.info(f"Added task {task_number} '{task_desc}' for camera index={self.camera_index}")
         
         # Start the ingestor if not already running
         if not self._running:
@@ -469,9 +469,9 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             # Renumber remaining tasks
             for i, task in enumerate(self._tasks_list):
                 task["task_number"] = i
-            logger.info(f"Removed task '{task_desc}' for io_id={self.io_id}")
+            logger.info(f"Removed task '{task_desc}' for camera index={self.camera_index}")
         else:
-            logger.warning(f"Task '{task_desc}' not found for io_id={self.io_id}")
+            logger.warning(f"Task '{task_desc}' not found for camera index={self.camera_index}")
         
         # Stop ingestor if no tasks remain (async call)
         if len(self._task_notes) == 0:
@@ -494,7 +494,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             new_task_desc: The new description for the task
         """
         if old_task_desc not in self._task_notes:
-            logger.warning(f"Task '{old_task_desc}' not found for io_id={self.io_id}, cannot edit")
+            logger.warning(f"Task '{old_task_desc}' not found for camera index={self.camera_index}, cannot edit")
             return False
         
         # Get the existing task_notes
@@ -512,16 +512,16 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                 task["task_desc"] = new_task_desc
                 break
         
-        logger.info(f"Edited task from '{old_task_desc}' to '{new_task_desc}' for io_id={self.io_id}")
+        logger.info(f"Edited task from '{old_task_desc}' to '{new_task_desc}' for camera index={self.camera_index}")
         return True
     
     async def stop(self):
         """Clean shutdown of all loops and tasks."""
         if not self._running:
-            logger.info(f"Already stopped for io_id={self.io_id}")
+            logger.info(f"Already stopped for camera index={self.camera_index}")
             return
         
-        logger.info(f"Stopping ingestor for io_id={self.io_id}")
+        logger.info(f"Stopping ingestor for camera index={self.camera_index}")
         
         # 1. Signal shutdown
         self._running = False
@@ -539,7 +539,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                     timeout=5.0
                 )
             except asyncio.TimeoutError:
-                logger.warning(f"Tasks didn't complete within timeout for io_id={self.io_id}")
+                logger.warning(f"Tasks didn't complete within timeout for camera index={self.camera_index}")
         
         # 4. Drain queues (prevents memory leaks)
         # Drain frame queue
@@ -552,7 +552,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                 break
         
         if drained_frames > 0:
-            logger.debug(f"Drained {drained_frames} frames from queue for io_id={self.io_id}")
+            logger.debug(f"Drained {drained_frames} frames from queue for camera index={self.camera_index}")
         
         # Drain action queue
         remaining_actions = []
@@ -564,7 +564,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                 break
         
         if remaining_actions:
-            logger.info(f"Discarding {len(remaining_actions)} queued actions for io_id={self.io_id}")
+            logger.info(f"Discarding {len(remaining_actions)} queued actions for camera index={self.camera_index}")
         
         # 5. Clear task list
         self._tasks = []
@@ -574,4 +574,100 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             self._camera.release()
             self._camera = None
         
-        logger.info(f"Stopped ingestor for io_id={self.io_id}")
+        logger.info(f"Stopped ingestor for camera index={self.camera_index}")
+    
+    def get_latest_frame(self) -> Optional[Any]:
+        """Get the latest frame (for debugging/visualization)."""
+        return self._latest_frame
+    
+    def get_tasks_list(self) -> List[Dict]:
+        """Get the current tasks list."""
+        return self._tasks_list.copy()
+    
+    def get_prompt(self) -> str:
+        """Get the current prompt that would be sent to the LLM."""
+        return self._build_prompt()
+    
+    def get_output_history(self) -> List[Dict]:
+        """Get the output history."""
+        return list(self._output_history)
+    
+    def get_latest_output(self) -> Optional[Dict]:
+        """Get the latest LLM output."""
+        return self._output_history[-1] if self._output_history else None
+
+
+
+# --- code the test the video ingestor standalone by calling just this script ---
+
+async def main():
+    """Main function to run the video stream ingestor with people counting task."""
+    # Create ingestor with minimal setup (no action runner needed for just counting)
+    ingestor = VideoStreamIngestor(
+        camera_index=0, # use frst camera for now
+        action_runner=None,  # Not needed for just counting
+        session_service=None,
+        app_name="videomemory_app"
+    )
+    
+    # Add task for counting people
+    task_notes = {}
+    ingestor.add_task("Count the number of people visible in the frame", task_notes)
+    print("\nTask added: Count the number of people visible in the frame")
+    print("Starting video stream ingestor...\n")
+    
+    # Start the ingestor
+    await ingestor.start()
+    
+    # Monitor and print outputs
+    try:
+        print("=" * 60)
+        print("Model responses will appear below:")
+        print("=" * 60)
+        
+        last_output_count = 0
+        while True:
+            # Check for new outputs
+            current_history = ingestor.get_output_history()
+            if len(current_history) > last_output_count:
+                # Print new outputs
+                for i in range(last_output_count, len(current_history)):
+                    output = current_history[i]
+                    print("\n" + "-" * 60)
+                    print(f"Response #{i + 1}:")
+                    print("-" * 60)
+                    
+                    # Print task updates
+                    task_updates = output.get("task_updates", [])
+                    if task_updates:
+                        print("Task Updates:")
+                        for update in task_updates:
+                            print(f"  Task {update.get('task_number')}: {update.get('task_note')}")
+                            if update.get('task_done'):
+                                print(f"    ✓ Task completed!")
+                    else:
+                        print("Task Updates: (none)")
+                    
+                    # Print system actions
+                    system_actions = output.get("system_actions", [])
+                    if system_actions:
+                        print("System Actions:")
+                        for action in system_actions:
+                            print(f"  - {action.get('take_action')}")
+                    else:
+                        print("System Actions: (none)")
+                    
+                    print("-" * 60)
+                
+                last_output_count = len(current_history)
+            
+            await asyncio.sleep(0.5)  # Check every 0.5 seconds
+            
+    except KeyboardInterrupt:
+        print("\n\nStopping video stream ingestor...")
+        await ingestor.stop()
+        print("Stopped.")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
