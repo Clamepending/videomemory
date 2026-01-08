@@ -600,71 +600,79 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
 
 # --- code the test the video ingestor standalone by calling just this script ---
 
+    def get_tasks_with_status(self) -> List[Dict]:
+        """Get tasks list with done status included."""
+        tasks_with_status = []
+        for task in self._tasks_list:
+            task_desc = task.get("task_desc", "")
+            is_done = self._task_notes.get(task_desc, {}).get("done", False)
+            task_copy = task.copy()
+            task_copy["done"] = is_done
+            tasks_with_status.append(task_copy)
+        return tasks_with_status
+
+def print_current_tasks(ingestor: VideoStreamIngestor):
+    """Print the current state of all tasks."""
+    tasks = ingestor.get_tasks_with_status()
+    if tasks:
+        print("=" * 60)
+        print("CURRENT TASKS:")
+        print("=" * 60)
+        for task in tasks:
+            status = "✓ DONE" if task.get("done", False) else "⏳ ACTIVE"
+            print(f"  [{task.get('task_number')}] {status} - {task.get('task_desc')}")
+            if task.get("task_note"):
+                print(f"      Note: {task.get('task_note')}")
+        print("=" * 60)
+    else:
+        print("No tasks currently active.")
+
 async def main():
-    """Main function to run the video stream ingestor with people counting task."""
-    # Create ingestor with minimal setup (no action runner needed for just counting)
+    """Main function to run the video stream ingestor."""
     ingestor = VideoStreamIngestor(
-        camera_index=0, # use frst camera for now
-        action_runner=None,  # Not needed for just counting
+        camera_index=0,
+        action_runner=None,
         session_service=None,
         app_name="videomemory_app"
     )
     
-    # Add task for counting people
     task_notes = {}
-    ingestor.add_task("Count the number of people visible in the frame", task_notes)
-    print("\nTask added: Count the number of people visible in the frame")
-    print("Starting video stream ingestor...\n")
+    ingestor.add_task("keep track of the order of the number of fingers being held up", task_notes)
+    print("Task added: keep track of the order of the number of fingers being held up")
     
-    # Start the ingestor
     await ingestor.start()
+    print("Video stream ingestor started.\n")
     
-    # Monitor and print outputs
     try:
-        print("=" * 60)
-        print("Model responses will appear below:")
-        print("=" * 60)
-        
         last_output_count = 0
+        cycle_count = 0
         while True:
+            cycle_count += 1
+            print("\n" + "-" * 60)
+            print(f"CYCLE #{cycle_count}")
+            print("-" * 60)
+            
+            # Print current tasks periodically
+            print_current_tasks(ingestor)
+            
             # Check for new outputs
             current_history = ingestor.get_output_history()
             if len(current_history) > last_output_count:
-                # Print new outputs
-                for i in range(last_output_count, len(current_history)):
-                    output = current_history[i]
-                    print("\n" + "-" * 60)
-                    print(f"Response #{i + 1}:")
-                    print("-" * 60)
-                    
-                    # Print task updates
-                    task_updates = output.get("task_updates", [])
-                    if task_updates:
-                        print("Task Updates:")
-                        for update in task_updates:
-                            print(f"  Task {update.get('task_number')}: {update.get('task_note')}")
-                            if update.get('task_done'):
-                                print(f"    ✓ Task completed!")
-                    else:
-                        print("Task Updates: (none)")
-                    
-                    # Print system actions
-                    system_actions = output.get("system_actions", [])
-                    if system_actions:
-                        print("System Actions:")
-                        for action in system_actions:
-                            print(f"  - {action.get('take_action')}")
-                    else:
-                        print("System Actions: (none)")
-                    
-                    print("-" * 60)
+                output = current_history[-1]
+                print(f"\n[New Response #{len(current_history)}]")
+                
+                for update in output.get("task_updates", []):
+                    print(f"  Task {update.get('task_number')}: {update.get('task_note')}")
+                
+                for action in output.get("system_actions", []):
+                    print(f"  Action: {action.get('take_action')}")
                 
                 last_output_count = len(current_history)
             
-            await asyncio.sleep(0.5)  # Check every 0.5 seconds
+            await asyncio.sleep(2.0)  # Check every 2 seconds
             
     except KeyboardInterrupt:
-        print("\n\nStopping video stream ingestor...")
+        print("\nStopping video stream ingestor...")
         await ingestor.stop()
         print("Stopped.")
 
