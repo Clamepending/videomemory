@@ -71,8 +71,9 @@ class VideoStreamIngestor:
         self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
         self._target_resolution = target_resolution # Default to 640x480
         
-        # History tracking: past 20 model outputs
+        # History tracking: past 20 model outputs (each dict includes the frame that produced it)
         self._output_history: deque = deque(maxlen=20)  # Store last 20 model outputs
+        self._total_output_count: int = 0  # Track total number of outputs processed (for debugging)
         
         # # Rate limiting: track last request time (max 10 requests per minute = 6 seconds between requests)
         # self._last_request_time: float = 0.0
@@ -239,15 +240,21 @@ class VideoStreamIngestor:
                         continue
                     
                     # Run ML processing with multimodal LLM
-                    self._latest_frame = current_frame
+                    # Build prompt before inference so we can store it with the output
+                    prompt = self._build_prompt()
                     ml_inference_start = time.time()
-                    results = await self._run_ml_inference(current_frame)
+                    results = await self._run_ml_inference(current_frame, prompt)
                     ml_inference_time = time.time() - ml_inference_start
                     
-                    # Store output in history
+                    # Store output in history with its corresponding frame and prompt
                     store_start = time.time()
                     if results:
+                        # Add frame and prompt to the output dict
+                        results["frame"] = current_frame.copy()
+                        results["prompt"] = prompt
                         self._output_history.append(results)
+                        self._total_output_count += 1
+                        self._latest_frame = current_frame
                     store_time = time.time() - store_start
                     
                     # Process results: update task notes and queue actions
@@ -328,11 +335,14 @@ class VideoStreamIngestor:
             tasks_lines.append(f"<task_desc>{task.task_desc}</task_desc>")
             
             # Build note history section
+            # Only include the last 3 task notes to prevent prompt from growing too large
+            # Full history is still maintained in task.task_note for system use
             notes_list = task.task_note
+            recent_notes = list(notes_list)[-3:] if notes_list else []  # Get last 3 notes
             
             tasks_lines.append("<task_notes_history>")
-            if notes_list:
-                for note_entry in notes_list:
+            if recent_notes:
+                for note_entry in recent_notes:
                     assert isinstance(note_entry, NoteEntry), "Note entry must be a NoteEntry object"
                     time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(note_entry.timestamp))
                     tasks_lines.append(f"<note timestamp=\"{time_str}\">{note_entry.content}</note>")
@@ -343,57 +353,78 @@ class VideoStreamIngestor:
             tasks_lines.append("</task>")
         tasks_lines.append("</tasks>")
         
-        # Build history section (only model outputs)
-        history_lines = ["<history>"]
-        for output in self._output_history:
-            history_lines.append("<output>")
-            history_lines.append(f"<output_json>{json.dumps(output, default=str)}</output_json>")
-            history_lines.append("</output>")
-        history_lines.append("</history>")
+        # Build most recent notes section for easy comparison
+        most_recent_lines = ["<most_recent_notes>"]
+        for task in self._tasks_list:
+            notes_list = task.task_note
+            if notes_list:
+                newest_note = notes_list[-1]
+                assert isinstance(newest_note, NoteEntry), "Note entry must be a NoteEntry object"
+                time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))
+                most_recent_lines.append(f"<task_{task.task_number}_newest_note timestamp=\"{time_str}\">{newest_note.content}</task_{task.task_number}_newest_note>")
+            else:
+                most_recent_lines.append(f"<task_{task.task_number}_newest_note>No notes yet</task_{task.task_number}_newest_note>")
+        most_recent_lines.append("</most_recent_notes>")
+        
+        # # Build history section (only model outputs, excluding frames and prompts)
+        # # Only include the last 4 historical actions for the model prompt
+        # history_lines = ["<history>"]
+        # recent_history = list(self._output_history)[-4:]  # Get last 4 items
+        # for output in recent_history:
+        #     # Create a copy without the frame and prompt for the prompt
+        #     output_for_prompt = {k: v for k, v in output.items() if k not in ("frame", "prompt")}
+        #     history_lines.append("<output>")
+        #     history_lines.append(f"<output_json>{json.dumps(output_for_prompt, default=str)}</output_json>")
+        #     history_lines.append("</output>")
+        # history_lines.append("</history>")
+        
+        # # Log prompt size for debugging (warn if getting very large)
+        # prompt_so_far = "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines)
+        prompt_so_far = "\n".join(tasks_lines) + "\n\n" + "\n".join(most_recent_lines)
+        prompt_size_chars = len(prompt_so_far)
+        if prompt_size_chars > 10000:  # Warn if prompt exceeds 10k characters
+            logger.warning(f"Prompt is getting large: {prompt_size_chars} characters (camera={self.camera_index})")
         
         # Build instructions
         instructions = """<instructions>
 
-You are the video ingestor. Your job is to output two lists of json objects.
+You are a video ingestor. Output two JSON lists: task_updates and system_actions.
 
-The first list is to update task notes when you observe something relevant to a task in the current image. IMPORTANT: If you can provide a meaningful update to a task note based on what you see in the image, you MUST include it. This includes:
+TASK_UPDATES: Add a task update IF AND ONLY IF you observe something NEW or DIFFERENT from the most recent note. Check the <most_recent_notes> section - if your observation matches the newest note for a task exactly, do NOT include that task in your updates (return empty list [] for no updates).
+
+Include updates for:
 - New observations related to the task
-- Changes in status or progress
-- Updates to counts, positions, or states
-- Any relevant information that advances tracking of the task
+- Changes in status, counts, positions, or states
+- Progress that advances task tracking
 
-IMPORTANT: Task notes are maintained as a history. Each task_note you provide will be appended to the task's note history with a timestamp. You can see the full history of previous notes in the <task_notes_history> section for each task. Use this history to:
-- Avoid repeating the same observations
-- Build upon previous observations (e.g., "Previous clap count was 3, 1 more clap detected, now 4 claps detected")
-- Track progression over time (e.g., "First subtask is complete, now working on second subtask")
+SYSTEM_ACTIONS: Only include if a task requires an action and conditions are met.
 
-Only update tasks to set the initial task note and when there's something new or relevant to report. If nothing has changed and there's nothing new to observe, you can return an empty task_updates list.
+Output format (JSON only, nothing else):
+[{task_number: <number>, task_note: <description>, task_done: <true/false>}, ...], [{take_action: <description>}, ...]
 
-The second list is for system actions - only include actions if a task explicitly requires taking an action and the conditions are met in the video stream.
+Examples:
+When you observe a clap for "Count claps" task: [{task_number: 0, task_note: "Clap detected. Total count: 1 clap.", task_done: false}], []
 
-Write your output in this format and ONLY this format. Do not write anything but in exactly this format and nothing else.
-[{task_number: <task number>, task_note: <new_description>, task_done: <True or False>}, ...], [{take_action: action_description}, ...]
+When you observe 4 more claps (building on previous count): [{task_number: 0, task_note: "4 more claps detected. Total count: 5 claps.", task_done: false}], []
 
-examples:
-When you observe a clap for "Count claps" task: [{task_number: 0, task_note: "Clap detected. Total count: 1 clap.", task_done: False}], []
+When you observe people for "Keep track of number of people": [{task_number: 1, task_note: "Currently 2 people visible in frame.", task_done: false}], []
 
-When you observe 4 more claps (building on previous count): [{task_number: 0, task_note: "4 more claps detected. Total count: 5 claps.", task_done: False}], []
+When only 1 person is visible: [{task_number: 1, task_note: "1 person is visible in frame.", task_done: false}], []
 
-When you observe people for "Keep track of number of people": [{task_number: 1, task_note: "Currently 2 people visible in frame.", task_done: False}], []
+When the person leaves the frame: [{task_number: 1, task_note: "Person left frame. Now 0 people visible.", task_done: false}], []
 
-When only 1 person is visible: [{task_number: 1, task_note: "1 person is visible in frame.", task_done: False}], []
+When there is no new information and the task notes perfectly match the image (or same as newest note): [], []
 
-When nothing relevant is observed: [], []
+For multiple task updates: [{task_number: 0, task_note: "Clap count: 5", task_done: false}, {task_number: 1, task_note: "2 people visible", task_done: false}], []
 
-For multiple task updates: [{task_number: 0, task_note: "Clap count: 5", task_done: False}, {task_number: 1, task_note: "2 people visible", task_done: False}], []
-
-When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps counted", task_done: True}], [{take_action: "send notification that clap counting task is complete"}]
+When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps counted", task_done: true}], [{take_action: "send notification that clap counting task is complete"}]
 </instructions>"""
         
-        return "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines) + "\n\n" + instructions
+        # return "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines) + "\n\n" + instructions
+        return "\n".join(tasks_lines) + "\n\n" + "\n".join(most_recent_lines) + "\n\n" + instructions
     
-    async def _run_ml_inference(self, frame: Any) -> Optional[Dict[str, Any]]:
-        """Run multimodal LLM inference on a frame."""
+    async def _run_ml_inference(self, frame: Any, prompt: str) -> Optional[Dict[str, Any]]:
+        """Run multimodal LLM inference on a frame with the given prompt."""
         if not self._genai_client or not self._tasks_list:
             return None
         
@@ -408,7 +439,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                     mime_type="image/jpeg"
                 )
             )
-            text_part = types.Part(text=self._build_prompt())
+            text_part = types.Part(text=prompt)
             
             # Wrap synchronous API call in asyncio.to_thread to prevent blocking
             # This avoids connection pool issues when multiple frames are processed concurrently
@@ -416,7 +447,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             def _sync_generate_content():
                 """Synchronous wrapper for generate_content to run in thread pool."""
                 return self._genai_client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-2.5-flash-lite",
                     contents=[image_part, text_part],
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
@@ -664,25 +695,22 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
         
         logger.info(f"Stopped ingestor for camera index={self.camera_index}")
     
-    def get_latest_frame(self) -> Optional[Any]:
-        """Get the latest frame (for debugging/visualization)."""
-        return self._latest_frame
     
     def get_tasks_list(self) -> List[Task]:
         """Get the current tasks list as Task objects."""
         return self._tasks_list
     
-    def get_prompt(self) -> str:
-        """Get the current prompt that would be sent to the LLM."""
-        return self._build_prompt()
-    
     def get_output_history(self) -> List[Dict]:
-        """Get the output history."""
+        """Get the output history (each dict includes frame and prompt from the same LLM call)."""
         return list(self._output_history)
     
     def get_latest_output(self) -> Optional[Dict]:
-        """Get the latest LLM output."""
+        """Get the latest LLM output (includes frame and prompt from the same LLM call)."""
         return self._output_history[-1] if self._output_history else None
+    
+    def get_total_output_count(self) -> int:
+        """Get the total number of outputs processed (for debugging)."""
+        return self._total_output_count
 
 
 
