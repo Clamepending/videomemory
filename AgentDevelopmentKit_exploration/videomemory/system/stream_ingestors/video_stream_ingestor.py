@@ -334,37 +334,44 @@ class VideoStreamIngestor:
             tasks_lines.append(f"<task_number>{task.task_number}</task_number>")
             tasks_lines.append(f"<task_desc>{task.task_desc}</task_desc>")
             
-            # Build note history section
-            # Only include the last 3 task notes to prevent prompt from growing too large
-            # Full history is still maintained in task.task_note for system use
-            notes_list = task.task_note
-            recent_notes = list(notes_list)[-3:] if notes_list else []  # Get last 3 notes
-            
-            tasks_lines.append("<task_notes_history>")
-            if recent_notes:
-                for note_entry in recent_notes:
-                    assert isinstance(note_entry, NoteEntry), "Note entry must be a NoteEntry object"
-                    time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(note_entry.timestamp))
-                    tasks_lines.append(f"<note timestamp=\"{time_str}\">{note_entry.content}</note>")
+            # most recent note
+            if task.task_note:
+                newest_note = task.task_note[-1]
             else:
-                tasks_lines.append("<note timestamp=\"N/A\">No notes yet</note>")
-            tasks_lines.append("</task_notes_history>")
+                newest_note = NoteEntry(content="None", timestamp=time.time())
+            tasks_lines.append(f"<task_newest_note timestamp=\"{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))}\">{newest_note.content}</task_newest_note>")
+            
+            # # Build note history section
+            # # Only include the last 3 task notes to prevent prompt from growing too large
+            # # Full history is still maintained in task.task_note for system use
+            # notes_list = task.task_note
+            # recent_notes = list(notes_list)[-3:] if notes_list else []  # Get last 3 notes
+            
+            # tasks_lines.append("<task_notes_history>")
+            # if recent_notes:
+            #     for note_entry in recent_notes:
+            #         assert isinstance(note_entry, NoteEntry), "Note entry must be a NoteEntry object"
+            #         time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(note_entry.timestamp))
+            #         tasks_lines.append(f"<note timestamp=\"{time_str}\">{note_entry.content}</note>")
+            # else:
+            #     tasks_lines.append("<note timestamp=\"N/A\">No notes yet</note>")
+            # tasks_lines.append("</task_notes_history>")
             
             tasks_lines.append("</task>")
         tasks_lines.append("</tasks>")
         
-        # Build most recent notes section for easy comparison
-        most_recent_lines = ["<most_recent_notes>"]
-        for task in self._tasks_list:
-            notes_list = task.task_note
-            if notes_list:
-                newest_note = notes_list[-1]
-                assert isinstance(newest_note, NoteEntry), "Note entry must be a NoteEntry object"
-                time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))
-                most_recent_lines.append(f"<task_{task.task_number}_newest_note timestamp=\"{time_str}\">{newest_note.content}</task_{task.task_number}_newest_note>")
-            else:
-                most_recent_lines.append(f"<task_{task.task_number}_newest_note>No notes yet</task_{task.task_number}_newest_note>")
-        most_recent_lines.append("</most_recent_notes>")
+        # # Build most recent notes section for easy comparison
+        # most_recent_lines = ["<most_recent_notes>"]
+        # for task in self._tasks_list:
+        #     notes_list = task.task_note
+        #     if notes_list:
+        #         newest_note = notes_list[-1]
+        #         assert isinstance(newest_note, NoteEntry), "Note entry must be a NoteEntry object"
+        #         time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))
+        #         most_recent_lines.append(f"<task_{task.task_number}_newest_note timestamp=\"{time_str}\">{newest_note.content}</task_{task.task_number}_newest_note>")
+        #     else:
+        #         most_recent_lines.append(f"<task_{task.task_number}_newest_note>No notes yet</task_{task.task_number}_newest_note>")
+        # most_recent_lines.append("</most_recent_notes>")
         
         # # Build history section (only model outputs, excluding frames and prompts)
         # # Only include the last 4 historical actions for the model prompt
@@ -380,7 +387,8 @@ class VideoStreamIngestor:
         
         # # Log prompt size for debugging (warn if getting very large)
         # prompt_so_far = "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines)
-        prompt_so_far = "\n".join(tasks_lines) + "\n\n" + "\n".join(most_recent_lines)
+        # prompt_so_far = "\n".join(tasks_lines) + "\n\n" + "\n".join(most_recent_lines)
+        prompt_so_far = "\n".join(tasks_lines)
         prompt_size_chars = len(prompt_so_far)
         if prompt_size_chars > 10000:  # Warn if prompt exceeds 10k characters
             logger.warning(f"Prompt is getting large: {prompt_size_chars} characters (camera={self.camera_index})")
@@ -390,11 +398,17 @@ class VideoStreamIngestor:
 
 You are a video ingestor. Output two JSON lists: task_updates and system_actions.
 
-TASK_UPDATES: Add a task update IF AND ONLY IF you observe something NEW or DIFFERENT from the most recent note. Check the <most_recent_notes> section - if your observation matches the newest note for a task exactly, do NOT include that task in your updates (return empty list [] for no updates).
+TASK_UPDATES: Add a task update IF AND ONLY IF there is something NEW or DIFFERENT in the imagefrom the most recent note for the task. Check the <task_newest_note> section - if the image matches the newest note for a task exactly, do NOT include that task in your updates (return empty list [] for no updates).
+
+CRITICAL: Any change in count, quantity, or state MUST be reported, including:
+- Changes from a non-zero count to zero
+- Changes from zero to a non-zero count
+- Any numerical change in counts or quantities
+- Changes in status, positions, or states
 
 Include updates for:
 - New observations related to the task
-- Changes in status, counts, positions, or states
+- Changes in status, counts, positions, or states (including transitions to/from zero)
 - Progress that advances task tracking
 
 SYSTEM_ACTIONS: Only include if a task requires an action and conditions are met.
@@ -413,6 +427,10 @@ When only 1 person is visible: [{task_number: 1, task_note: "1 person is visible
 
 When the person leaves the frame: [{task_number: 1, task_note: "Person left frame. Now 0 people visible.", task_done: false}], []
 
+When tracking counts and the count changes to zero (e.g., most recent note says "1 item" but image shows 0): [{task_number: 0, task_note: "No items visible. Count is now 0.", task_done: false}], []
+
+When tracking counts and the count changes from zero to non-zero (e.g., most recent note says "0 items" but image shows 2): [{task_number: 0, task_note: "2 items are now visible.", task_done: false}], []
+
 When there is no new information and the task notes perfectly match the image (or same as newest note): [], []
 
 For multiple task updates: [{task_number: 0, task_note: "Clap count: 5", task_done: false}, {task_number: 1, task_note: "2 people visible", task_done: false}], []
@@ -421,7 +439,8 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
 </instructions>"""
         
         # return "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines) + "\n\n" + instructions
-        return "\n".join(tasks_lines) + "\n\n" + "\n".join(most_recent_lines) + "\n\n" + instructions
+        # return "\n".join(tasks_lines) + "\n\n" + "\n".join(most_recent_lines) + "\n\n" + instructions
+        return "\n".join(tasks_lines) + "\n\n" + instructions
     
     async def _run_ml_inference(self, frame: Any, prompt: str) -> Optional[Dict[str, Any]]:
         """Run multimodal LLM inference on a frame with the given prompt."""
@@ -447,7 +466,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             def _sync_generate_content():
                 """Synchronous wrapper for generate_content to run in thread pool."""
                 return self._genai_client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
+                    model="gemini-2.5-flash", # gemini-2.5-flash-lite gets 1 sec latency, gemini-2.5-flash gets 2 sec latency but lite sometimes outputs [] when there clearly should be an update
                     contents=[image_part, text_part],
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
