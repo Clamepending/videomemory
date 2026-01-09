@@ -161,6 +161,34 @@ HTML_TEMPLATE = """
         .task-header-content {
             flex: 1;
         }
+        .add-task-container {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 2px solid #e0e0e0;
+        }
+        .add-task-input {
+            width: calc(100% - 100px);
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .add-task-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        .add-task-btn:hover {
+            background-color: #45a049;
+        }
+        .add-task-btn:active {
+            background-color: #3d8b40;
+        }
     </style>
 </head>
 <body>
@@ -176,9 +204,13 @@ HTML_TEMPLATE = """
             </div>
             
             <div class="panel">
-                <h2>Latest Notes for Each Task</h2>
+                <h2>Tasks</h2>
                 <div id="latestTaskNotes">
                     <div class="no-data">Waiting for task notes...</div>
+                </div>
+                <div class="add-task-container">
+                    <input type="text" id="newTaskInput" class="add-task-input" placeholder="Enter new task description..." />
+                    <button class="add-task-btn" id="addTaskBtn">Add Task</button>
                 </div>
             </div>
             
@@ -228,12 +260,16 @@ HTML_TEMPLATE = """
                 });
         }
         
+        let isRemovingTask = false; // Global flag to prevent refresh during removal
+        
         function removeTask(taskDesc) {
-            if (!confirm('Are you sure you want to remove this task?')) {
+            if (isRemovingTask) {
+                console.log('Removal already in progress, ignoring duplicate click');
                 return;
             }
             
             console.log('Removing task:', taskDesc);
+            isRemovingTask = true;
             
             fetch('/api/remove-task', {
                 method: 'POST',
@@ -249,29 +285,129 @@ HTML_TEMPLATE = """
             .then(data => {
                 console.log('Response data:', data);
                 if (data.status === 'success') {
-                    // Refresh the task list
-                    updateLatestTaskNotes();
+                    // Small delay before refresh to ensure removal completes
+                    setTimeout(function() {
+                        isRemovingTask = false;
+                        // Refresh the task list
+                        updateLatestTaskNotes();
+                    }, 100);
                 } else {
+                    isRemovingTask = false;
                     alert('Error removing task: ' + (data.message || 'Unknown error'));
                 }
             })
             .catch(error => {
                 console.error('Error removing task:', error);
+                isRemovingTask = false;
                 alert('Error removing task: ' + error.message);
             });
         }
         
+        function addTask() {
+            const input = document.getElementById('newTaskInput');
+            const taskDesc = input.value.trim();
+            
+            if (!taskDesc) {
+                alert('Please enter a task description');
+                return;
+            }
+            
+            console.log('Adding task:', taskDesc);
+            
+            fetch('/api/add-task', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ task_desc: taskDesc })
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Response data:', data);
+                if (data.status === 'success') {
+                    // Clear the input
+                    input.value = '';
+                    // Refresh the task list
+                    updateLatestTaskNotes();
+                } else {
+                    alert('Error adding task: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error adding task:', error);
+                alert('Error adding task: ' + error.message);
+            });
+        }
+        
+        // Set up event listeners for adding tasks (works whether DOM is ready or not)
+        function setupAddTaskListeners() {
+            const addBtn = document.getElementById('addTaskBtn');
+            const input = document.getElementById('newTaskInput');
+            
+            if (addBtn) {
+                addBtn.addEventListener('click', addTask);
+            }
+            
+            if (input) {
+                input.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        addTask();
+                    }
+                });
+            }
+        }
+        
+        // Set up listeners when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupAddTaskListeners);
+        } else {
+            // DOM is already ready
+            setupAddTaskListeners();
+        }
+        
         // Use event delegation for remove buttons (works with dynamically created buttons)
+        // Set up a single document-level listener that handles all remove button clicks
         document.addEventListener('click', function(e) {
-            if (e.target && e.target.classList.contains('remove-btn')) {
-                const taskDesc = e.target.getAttribute('data-task-desc');
+            // Check if clicked element is a remove button or inside one
+            let target = e.target;
+            let removeBtn = null;
+            
+            // Walk up the DOM tree to find the remove button
+            while (target && target !== document.body) {
+                if (target.classList && target.classList.contains('remove-btn')) {
+                    removeBtn = target;
+                    break;
+                }
+                target = target.parentElement;
+            }
+            
+            if (removeBtn && !isRemovingTask) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const taskDesc = removeBtn.getAttribute('data-task-desc');
                 if (taskDesc) {
-                    removeTask(taskDesc);
+                    // Decode HTML entities in the task description
+                    const decodedTaskDesc = taskDesc
+                        .replace(/&amp;/g, '&')
+                        .replace(/&quot;/g, '"')
+                        .replace(/&#39;/g, "'");
+                    
+                    // Call removeTask (which sets isRemovingTask flag)
+                    removeTask(decodedTaskDesc);
                 }
             }
-        });
+        }, true); // Use capture phase for better reliability
         
         function updateLatestTaskNotes() {
+            // Don't refresh if a removal is in progress
+            if (isRemovingTask) {
+                return;
+            }
+            
             fetch('/api/latest-task-notes')
                 .then(response => response.json())
                 .then(data => {
@@ -526,6 +662,50 @@ def remove_task():
     except Exception as e:
         logger.error(f"Error removing task: {e}", exc_info=True)
         return jsonify({"status": "error", "message": f"Failed to remove task: {str(e)}"}), 500
+
+
+@app.route('/api/add-task', methods=['POST'])
+def add_task():
+    """Add a new task to the ingestor."""
+    global ingestor
+    if ingestor is None:
+        return jsonify({"status": "error", "message": "Ingestor not initialized"}), 500
+    
+    data = request.get_json()
+    if not data or 'task_desc' not in data:
+        return jsonify({"status": "error", "message": "task_desc is required"}), 400
+    
+    task_desc = data['task_desc'].strip()
+    
+    if not task_desc:
+        return jsonify({"status": "error", "message": "Task description cannot be empty"}), 400
+    
+    try:
+        # Check if task already exists
+        tasks = ingestor.get_tasks_list()
+        task_exists = any(task.task_desc == task_desc for task in tasks)
+        
+        if task_exists:
+            return jsonify({"status": "error", "message": f"Task '{task_desc}' already exists"}), 400
+        
+        # Create a new task
+        new_task = Task(
+            task_number=-1,  # Will be set by add_task
+            task_desc=task_desc,
+            task_note=[],
+            done=False
+        )
+        
+        # Add the task to the ingestor
+        ingestor.add_task(new_task)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Task '{task_desc}' added successfully"
+        })
+    except Exception as e:
+        logger.error(f"Error adding task: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"Failed to add task: {str(e)}"}), 500
 
 
 @app.route('/api/history')
