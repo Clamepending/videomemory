@@ -427,7 +427,16 @@ def run_ingestor_async():
             done=False
         )
         ingestor.add_task(task)
-        logger.info("Task added: keep track of the order of the number of fingers being held up")
+        logger.info("Task added: count the number of fingers being held up")
+        
+        task = Task(
+            task_number=-1,
+            task_desc="keep track of the orientation of phones",
+            task_note=[],
+            done=False
+        )
+        ingestor.add_task(task)
+        logger.info("Task added: keep track of the orientation of phones")
         
         # Start the ingestor
         await ingestor.start()
