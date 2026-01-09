@@ -20,10 +20,7 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
-# Add videomemory directory to path for direct execution
-if __name__ == "__main__":
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from system.task_types import NoteEntry, Task
 
 # Load environment variables
@@ -53,7 +50,7 @@ class VideoIngestorOutput(BaseModel):
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
     
-    def __init__(self, camera_index: int, action_runner: Runner, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app"):
+    def __init__(self, camera_index: int, action_runner: Runner, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480)):
         """Initialize the video stream ingestor.
         
         Args:
@@ -61,22 +58,28 @@ class VideoStreamIngestor:
             action_runner: The runner for executing actions (see google adk: https://google.github.io/adk-docs/runtime/#key-components-of-the-runtime)
             session_service: The session service used by the runner (required to create sessions)
             app_name: The app name used by the runner (must match the runner's app_name)
+            target_resolution: Target resolution (width, height) to resize frames to for VLM processing.
+                              Default is (640, 480) for lower bandwidth and faster processing.
         """
         self.camera_index = 0 # TODO: dont hard code to be the first camera. Modify the task manager to pass in the camera index.
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
-        self._frame_queue = AsyncQueue(maxsize=10)
+        self._frame_queue = AsyncQueue(maxsize=1)
         self._action_queue = AsyncQueue()
         self._running = False
         self._tasks: list[asyncio.Task] = []
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
         self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
+        self._target_resolution = target_resolution # Default to 640x480
         
         # History tracking: past 20 model outputs
         self._output_history: deque = deque(maxlen=20)  # Store last 20 model outputs
         
-        # Rate limiting: track last request time (max 10 requests per minute = 6 seconds between requests)
-        self._last_request_time: float = 0.0
-        self._min_request_interval: float = 1.0  # 6 seconds = 10 requests per minute max
+        # # Rate limiting: track last request time (max 10 requests per minute = 6 seconds between requests)
+        # self._last_request_time: float = 0.0
+        # self._min_request_interval: float = 0.1  # 600 requests per minute max
+        
+        # Process loop timing: track last process time for delay logging
+        self._last_process_time: float = 0.0
         
         # Initialize Google GenAI client
         api_key = os.getenv("GOOGLE_API_KEY")
@@ -178,22 +181,25 @@ class VideoStreamIngestor:
             
             logger.info(f"Started capture loop for camera index={self.camera_index}")
             
+            # measure the time between frames
+            last_frame_time = time.time()
             while self._running:
-                ret, frame = self._camera.read()
+                # Run blocking camera.read() in thread pool to avoid blocking event loop
+                
+                ret, current_frame = await asyncio.to_thread(self._camera.read)
                 if ret:
-                    # Put frame in queue (non-blocking, will drop if queue full)
-                    try:
-                        self._frame_queue.put_nowait(frame)
-                    except asyncio.QueueFull:
-                        # Drop oldest frame if queue is full
-                        try:
-                            self._frame_queue.get_nowait()
-                            self._frame_queue.put_nowait(frame)
-                        except asyncio.QueueEmpty:
-                            pass
+                    # Resize frame to target resolution if needed
+                    if current_frame.shape[1] != self._target_resolution[0] or current_frame.shape[0] != self._target_resolution[1]:
+                        current_frame = cv2.resize(current_frame, self._target_resolution, interpolation=cv2.INTER_LINEAR)
                     
-                await asyncio.sleep(0.1)  # 10fps
-            
+                    # Put frame in queue (await will yield control if queue is full)
+                    # This allows the process loop to run and process the frame
+                    await self._frame_queue.put(current_frame)
+                    
+                    current_time = time.time()
+                    time_between_frames = current_time - last_frame_time
+                    logger.debug(f"Camera feed: time between frames: {time_between_frames:.3f}s")
+                    last_frame_time = current_time
             self._camera.release()
             self._camera = None
             logger.info(f"Stopped capture loop for camera index={self.camera_index}")
@@ -213,26 +219,54 @@ class VideoStreamIngestor:
             
             while self._running:
                 try:
-                    # Use timeout to allow checking _running flag periodically
-                    frame = await asyncio.wait_for(
+                    # Start timing the overall loop iteration
+                    loop_start_time = time.time()
+                    
+                    # Track time between process loop calls
+                    current_time = time.time()
+                    time_between_calls = current_time - self._last_process_time if self._last_process_time > 0 else 0.0
+                    self._last_process_time = current_time
+                    
+                    # Get frame from queue
+                    get_frame_start = time.time()
+                    current_frame = await asyncio.wait_for(
                         self._frame_queue.get(),
                         timeout=0.5
                     )
-                    if frame is None:
+                    get_frame_time = time.time() - get_frame_start
+                    
+                    if current_frame is None:
                         continue
-                    logger.debug(f"Process loop: Frame got from process loop queue for camera index={self.camera_index}")
                     
                     # Run ML processing with multimodal LLM
-                    self._latest_frame = frame
-                    results = await self._run_ml_inference(frame)
+                    self._latest_frame = current_frame
+                    ml_inference_start = time.time()
+                    results = await self._run_ml_inference(current_frame)
+                    ml_inference_time = time.time() - ml_inference_start
                     
                     # Store output in history
+                    store_start = time.time()
                     if results:
                         self._output_history.append(results)
+                    store_time = time.time() - store_start
                     
                     # Process results: update task notes and queue actions
+                    process_results_start = time.time()
                     if results:
                         await self._process_ml_results(results)
+                    process_results_time = time.time() - process_results_start
+                    
+                    # Log all timing information in one line
+                    # loop_total_time = time.time() - loop_start_time
+                    # logger.debug(
+                    #     f"Process loop [camera={self.camera_index}]: "
+                    #     f"since_last={time_between_calls:.3f}s, "
+                    #     f"frame_get={get_frame_time:.3f}s, "
+                    #     f"ml_inference={ml_inference_time:.3f}s, "
+                    #     f"store={store_time:.3f}s, "
+                    #     f"process_results={process_results_time:.3f}s, "
+                    #     f"total={loop_total_time:.3f}s"
+                    # )
                             
                 except asyncio.TimeoutError:
                     # Timeout allows us to check _running flag
@@ -363,12 +397,6 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
         if not self._genai_client or not self._tasks_list:
             return None
         
-        # Rate limiting: ensure minimum interval between requests
-        current_time = time.time()
-        time_since_last = current_time - self._last_request_time
-        if time_since_last < self._min_request_interval:
-            await asyncio.sleep(self._min_request_interval - time_since_last)
-        
         try:
             image_base64 = self._frame_to_base64(frame)
             if not image_base64:
@@ -384,7 +412,6 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             
             # Wrap synchronous API call in asyncio.to_thread to prevent blocking
             # This avoids connection pool issues when multiple frames are processed concurrently
-            self._last_request_time = time.time()
             
             def _sync_generate_content():
                 """Synchronous wrapper for generate_content to run in thread pool."""
@@ -397,8 +424,12 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                     )
                 )
             
+            # Time the API call
+            api_call_start = time.time()
             # Run the blocking call in a thread pool to avoid blocking the event loop
             response = await asyncio.to_thread(_sync_generate_content)
+            api_call_time = time.time() - api_call_start
+            logger.debug(f"API call [camera={self.camera_index}]: generate_content took {api_call_time:.3f}s")
             
             output = VideoIngestorOutput(**json.loads(response.text))
             # logger.info(f"LLM inference prompt: {self._build_prompt()}")
@@ -737,4 +768,6 @@ async def main():
 
 
 if __name__ == "__main__":
+    from system.logging_config import setup_logging
+    setup_logging()
     asyncio.run(main())
