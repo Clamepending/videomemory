@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 import cv2
 import sys
 
@@ -136,6 +136,31 @@ HTML_TEMPLATE = """
             color: #999;
             font-style: italic;
         }
+        .remove-btn {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 10px;
+            margin-top: 5px;
+        }
+        .remove-btn:hover {
+            background-color: #d32f2f;
+        }
+        .remove-btn:active {
+            background-color: #b71c1c;
+        }
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .task-header-content {
+            flex: 1;
+        }
     </style>
 </head>
 <body>
@@ -203,6 +228,49 @@ HTML_TEMPLATE = """
                 });
         }
         
+        function removeTask(taskDesc) {
+            if (!confirm('Are you sure you want to remove this task?')) {
+                return;
+            }
+            
+            console.log('Removing task:', taskDesc);
+            
+            fetch('/api/remove-task', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ task_desc: taskDesc })
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Response data:', data);
+                if (data.status === 'success') {
+                    // Refresh the task list
+                    updateLatestTaskNotes();
+                } else {
+                    alert('Error removing task: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error removing task:', error);
+                alert('Error removing task: ' + error.message);
+            });
+        }
+        
+        // Use event delegation for remove buttons (works with dynamically created buttons)
+        document.addEventListener('click', function(e) {
+            if (e.target && e.target.classList.contains('remove-btn')) {
+                const taskDesc = e.target.getAttribute('data-task-desc');
+                if (taskDesc) {
+                    removeTask(taskDesc);
+                }
+            }
+        });
+        
         function updateLatestTaskNotes() {
             fetch('/api/latest-task-notes')
                 .then(response => response.json())
@@ -210,14 +278,33 @@ HTML_TEMPLATE = """
                     const container = document.getElementById('latestTaskNotes');
                     if (data && data.tasks && data.tasks.length > 0) {
                         let html = '';
-                        data.tasks.forEach(task => {
+                        data.tasks.forEach((task, index) => {
+                            // Escape HTML for display
+                            const taskDescEscaped = task.task_desc
+                                .replace(/&/g, '&amp;')
+                                .replace(/</g, '&lt;')
+                                .replace(/>/g, '&gt;')
+                                .replace(/"/g, '&quot;')
+                                .replace(/'/g, '&#39;');
+                            // Escape for HTML attribute (quotes need special handling)
+                            const taskDescAttr = task.task_desc
+                                .replace(/&/g, '&amp;')
+                                .replace(/"/g, '&quot;')
+                                .replace(/'/g, '&#39;');
+                            
                             html += '<div class="task-update">';
-                            html += '<strong>Task ' + task.task_number + ':</strong> ' + task.task_desc;
+                            html += '<div class="task-header">';
+                            html += '<div class="task-header-content">';
+                            html += '<strong>Task ' + task.task_number + ':</strong> ' + taskDescEscaped;
                             html += ' <span style="color: #999;">(Done: ' + task.done + ')</span><br>';
                             
                             if (task.latest_note) {
+                                const noteContentEscaped = task.latest_note.content
+                                    .replace(/&/g, '&amp;')
+                                    .replace(/</g, '&lt;')
+                                    .replace(/>/g, '&gt;');
                                 html += '<div style="margin-top: 5px; padding-left: 10px; border-left: 2px solid #4CAF50;">';
-                                html += '<strong>Latest Note:</strong> ' + task.latest_note.content;
+                                html += '<strong>Latest Note:</strong> ' + noteContentEscaped;
                                 html += ' <span class="timestamp">(' + task.latest_note.timestamp + ')</span>';
                                 html += '</div>';
                             } else {
@@ -226,6 +313,10 @@ HTML_TEMPLATE = """
                                 html += '</div>';
                             }
                             
+                            html += '</div>';
+                            // Use data attribute instead of onclick for better reliability
+                            html += '<button class="remove-btn" data-task-desc="' + taskDescAttr + '">Remove</button>';
+                            html += '</div>';
                             html += '</div>';
                         });
                         container.innerHTML = html;
@@ -402,6 +493,39 @@ def get_latest_task_notes():
         tasks_data.append(task_dict)
     
     return jsonify({"tasks": tasks_data})
+
+
+@app.route('/api/remove-task', methods=['POST'])
+def remove_task():
+    """Remove a task from the ingestor."""
+    global ingestor
+    if ingestor is None:
+        return jsonify({"status": "error", "message": "Ingestor not initialized"}), 500
+    
+    data = request.get_json()
+    if not data or 'task_desc' not in data:
+        return jsonify({"status": "error", "message": "task_desc is required"}), 400
+    
+    task_desc = data['task_desc']
+    
+    try:
+        # Check if task exists before removing
+        tasks = ingestor.get_tasks_list()
+        task_exists = any(task.task_desc == task_desc for task in tasks)
+        
+        if not task_exists:
+            return jsonify({"status": "error", "message": f"Task '{task_desc}' not found"}), 404
+        
+        # Remove the task
+        ingestor.remove_task(task_desc)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Task '{task_desc}' removed successfully"
+        })
+    except Exception as e:
+        logger.error(f"Error removing task: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"Failed to remove task: {str(e)}"}), 500
 
 
 @app.route('/api/history')
