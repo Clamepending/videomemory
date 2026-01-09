@@ -151,9 +151,9 @@ HTML_TEMPLATE = """
             </div>
             
             <div class="panel">
-                <h2>Latest Model Output</h2>
-                <div id="latestOutput">
-                    <div class="no-data">Waiting for model output...</div>
+                <h2>Latest Notes for Each Task</h2>
+                <div id="latestTaskNotes">
+                    <div class="no-data">Waiting for task notes...</div>
                 </div>
             </div>
             
@@ -203,48 +203,38 @@ HTML_TEMPLATE = """
                 });
         }
         
-        function updateLatestOutput() {
-            fetch('/api/latest-output')
+        function updateLatestTaskNotes() {
+            fetch('/api/latest-task-notes')
                 .then(response => response.json())
                 .then(data => {
-                    const container = document.getElementById('latestOutput');
-                    if (data && data.output) {
-                        const output = data.output;
-                        let html = '<div class="output-item">';
-                        html += '<h3>Output #' + (data.total_count || data.index) + '</h3>';
-                        
-                        if (output.task_updates && output.task_updates.length > 0) {
-                            html += '<div><strong>Task Updates:</strong></div>';
-                            output.task_updates.forEach(update => {
-                                html += '<div class="task-update">';
-                                html += '<strong>Task ' + update.task_number + ':</strong> ' + update.task_note;
-                                html += ' <span style="color: #999;">(Done: ' + update.task_done + ')</span>';
+                    const container = document.getElementById('latestTaskNotes');
+                    if (data && data.tasks && data.tasks.length > 0) {
+                        let html = '';
+                        data.tasks.forEach(task => {
+                            html += '<div class="task-update">';
+                            html += '<strong>Task ' + task.task_number + ':</strong> ' + task.task_desc;
+                            html += ' <span style="color: #999;">(Done: ' + task.done + ')</span><br>';
+                            
+                            if (task.latest_note) {
+                                html += '<div style="margin-top: 5px; padding-left: 10px; border-left: 2px solid #4CAF50;">';
+                                html += '<strong>Latest Note:</strong> ' + task.latest_note.content;
+                                html += ' <span class="timestamp">(' + task.latest_note.timestamp + ')</span>';
                                 html += '</div>';
-                            });
-                        }
-                        
-                        if (output.system_actions && output.system_actions.length > 0) {
-                            html += '<div><strong>System Actions:</strong></div>';
-                            output.system_actions.forEach(action => {
-                                html += '<div class="system-action">';
-                                html += '<strong>Action:</strong> ' + action.take_action;
+                            } else {
+                                html += '<div style="margin-top: 5px; padding-left: 10px; color: #999; font-style: italic;">';
+                                html += 'No notes yet';
                                 html += '</div>';
-                            });
-                        }
-                        
-                        if ((!output.task_updates || output.task_updates.length === 0) && 
-                            (!output.system_actions || output.system_actions.length === 0)) {
-                            html += '<div class="no-data">No updates or actions</div>';
-                        }
-                        
-                        html += '</div>';
+                            }
+                            
+                            html += '</div>';
+                        });
                         container.innerHTML = html;
                     } else {
-                        container.innerHTML = '<div class="no-data">Waiting for model output...</div>';
+                        container.innerHTML = '<div class="no-data">No tasks available yet...</div>';
                     }
                 })
                 .catch(error => {
-                    console.error('Error fetching latest output:', error);
+                    console.error('Error fetching latest task notes:', error);
                 });
         }
         
@@ -295,7 +285,7 @@ HTML_TEMPLATE = """
         
         function updateAll() {
             updateFrameAndPrompt();
-            updateLatestOutput();
+            updateLatestTaskNotes();
             updateHistory();
         }
         
@@ -377,6 +367,41 @@ def get_latest_output():
         "index": len(history),
         "total_count": total_count
     })
+
+
+@app.route('/api/latest-task-notes')
+def get_latest_task_notes():
+    """Get the latest note for each task."""
+    global ingestor
+    if ingestor is None:
+        return jsonify({"error": "Ingestor not initialized"}), 500
+    
+    tasks = ingestor.get_tasks_list()
+    if not tasks:
+        return jsonify({"tasks": []})
+    
+    tasks_data = []
+    for task in tasks:
+        task_dict = {
+            "task_number": task.task_number,
+            "task_desc": task.task_desc,
+            "done": task.done,
+            "latest_note": None
+        }
+        
+        # Get the latest note if available
+        if task.task_note and len(task.task_note) > 0:
+            latest_note_entry = task.task_note[-1]
+            # Convert NoteEntry to dict for JSON serialization
+            if hasattr(latest_note_entry, 'to_dict'):
+                task_dict["latest_note"] = latest_note_entry.to_dict()
+            else:
+                # Fallback if it's already a dict
+                task_dict["latest_note"] = latest_note_entry
+        
+        tasks_data.append(task_dict)
+    
+    return jsonify({"tasks": tasks_data})
 
 
 @app.route('/api/history')
