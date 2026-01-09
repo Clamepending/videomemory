@@ -239,7 +239,6 @@ def get_info_on(task_id: str) -> dict:
             "status": "error",
             "message": "Tool context not initialized. System managers not available.",
         }
-        print(f"[DEBUG] get_info_on returning: {result}")
         return result
     
     if _context.task_manager is None:
@@ -247,7 +246,6 @@ def get_info_on(task_id: str) -> dict:
             "status": "error",
             "message": "Task manager not available in context",
         }
-        print(f"[DEBUG] get_info_on returning: {result}")
         return result
     
     try:
@@ -259,14 +257,12 @@ def get_info_on(task_id: str) -> dict:
                 "message": f"Task '{task_id}' not found",
                 "task_id": task_id,
             }
-            print(f"[DEBUG] get_info_on returning: {result}")
             return result
         
         result = {
             "status": "success",
             "task": task_info,
         }
-        print(f"[DEBUG] get_info_on returning success with task_info: {task_info}")
         return result
     except Exception as e:
         result = {
