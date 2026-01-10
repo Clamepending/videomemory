@@ -5,3 +5,7 @@ pyserial
 opencv-python
 pydantic
 streamlit
+openai
+anthropic
+httpx
+matplotlib
