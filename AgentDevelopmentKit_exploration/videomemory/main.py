@@ -12,6 +12,7 @@ import agents
 import system
 import tools
 from system.logging_config import setup_logging
+from system.model_providers import get_VLM_provider
 
 # Load environment variables from .env file
 load_dotenv()
@@ -39,12 +40,16 @@ async def main():
         session_service=session_service
     )
     
+    # Initialize model provider from environment variable
+    model_provider = get_VLM_provider()
+    
     # Pass shared runner and session service to task manager (for video ingestor actions)
     task_manager = system.TaskManager(
         io_manager=io_manager, 
         action_runner=runner,
         session_service=session_service,
-        app_name=app_name
+        app_name=app_name,
+        model_provider=model_provider
     )
     
     # Set managers in tools so they can access them

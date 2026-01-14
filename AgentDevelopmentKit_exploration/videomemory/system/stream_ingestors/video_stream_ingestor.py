@@ -16,12 +16,11 @@ from google.adk.sessions import BaseSessionService
 from google.genai import types as genai_types
 import cv2
 from pydantic import BaseModel, Field
-from google import genai
-from google.genai import types
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from system.task_types import NoteEntry, Task
+from system.model_providers import BaseModelProvider, get_VLM_provider
 
 # Load environment variables
 load_dotenv()
@@ -50,7 +49,7 @@ class VideoIngestorOutput(BaseModel):
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
     
-    def __init__(self, camera_index: int, action_runner: Runner, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480)):
+    def __init__(self, camera_index: int, action_runner: Runner, model_provider: BaseModelProvider, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480)):
         """Initialize the video stream ingestor.
         
         Args:
@@ -60,6 +59,7 @@ class VideoStreamIngestor:
             app_name: The app name used by the runner (must match the runner's app_name)
             target_resolution: Target resolution (width, height) to resize frames to for VLM processing.
                               Default is (640, 480) for lower bandwidth and faster processing.
+            model_provider: Model provider instance for ML inference.
         """
         self.camera_index = 0 # TODO: dont hard code to be the first camera. Modify the task manager to pass in the camera index.
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
@@ -82,18 +82,10 @@ class VideoStreamIngestor:
         # Process loop timing: track last process time for delay logging
         self._last_process_time: float = 0.0
         
-        # Initialize Google GenAI client
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            logger.warning("GOOGLE_API_KEY not found in environment. Multimodal LLM calls will fail.")
-            self._genai_client = None
-        else:
-            try:
-                self._genai_client = genai.Client(api_key=api_key)
-                logger.info(f"Initialized Google GenAI client for camera index={self.camera_index}")
-            except Exception as e:
-                logger.error(f"Failed to initialize Google GenAI client: {e}")
-                self._genai_client = None
+        # Store model provider (already initialized in __init__)
+        self._model_provider = model_provider
+        if hasattr(self._model_provider, '_client') and self._model_provider._client is None:
+            logger.warning(f"Model provider {type(self._model_provider).__name__} failed to initialize. Multimodal LLM calls will fail.")
         
         # Initialize action router runner for executing actions
         # Use provided action runner or create a new one
@@ -444,7 +436,7 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
     
     async def _run_ml_inference(self, frame: Any, prompt: str) -> Optional[Dict[str, Any]]:
         """Run multimodal LLM inference on a frame with the given prompt."""
-        if not self._genai_client or not self._tasks_list:
+        if not self._model_provider or not self._tasks_list:
             return None
         
         try:
@@ -452,26 +444,15 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             if not image_base64:
                 return None
             
-            image_part = types.Part(
-                inline_data=types.Blob(
-                    data=base64.b64decode(image_base64),
-                    mime_type="image/jpeg"
-                )
-            )
-            text_part = types.Part(text=prompt)
-            
             # Wrap synchronous API call in asyncio.to_thread to prevent blocking
             # This avoids connection pool issues when multiple frames are processed concurrently
             
             def _sync_generate_content():
                 """Synchronous wrapper for generate_content to run in thread pool."""
-                return self._genai_client.models.generate_content(
-                    model="gemini-2.5-flash", # gemini-2.5-flash-lite gets 1 sec latency, gemini-2.5-flash gets 2 sec latency but lite sometimes outputs [] when there clearly should be an update
-                    contents=[image_part, text_part],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=VideoIngestorOutput.model_json_schema()
-                    )
+                return self._model_provider._sync_generate_content(
+                    image_base64=image_base64,
+                    prompt=prompt,
+                    response_schema=VideoIngestorOutput.model_json_schema()
                 )
             
             # Time the API call
@@ -761,9 +742,11 @@ def print_current_tasks(ingestor: VideoStreamIngestor):
 
 async def main():
     """Main function to run the video stream ingestor."""
+    model_provider = get_VLM_provider()
     ingestor = VideoStreamIngestor(
         camera_index=0,
         action_runner=None,
+        model_provider=model_provider,
         session_service=None,
         app_name="videomemory_app"
     )

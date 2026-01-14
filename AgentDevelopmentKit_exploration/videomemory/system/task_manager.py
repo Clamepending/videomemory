@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from system.io_manager import IOmanager
 from system.task_types import NoteEntry, Task
+from system.model_providers import BaseModelProvider, get_VLM_provider
 from google.adk.runners import Runner
 from google.adk.sessions import BaseSessionService
 logger = logging.getLogger('TaskManager')
@@ -13,7 +14,7 @@ logger = logging.getLogger('TaskManager')
 class TaskManager:
     """Manages tasks and their associations with IO streams."""
     
-    def __init__(self, io_manager: IOmanager = None, action_runner: Runner = None, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app"):
+    def __init__(self, io_manager: IOmanager = None, action_runner: Runner = None, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", model_provider: Optional[BaseModelProvider] = None):
         """Initialize the task manager.
         
         Args:
@@ -21,6 +22,7 @@ class TaskManager:
             action_runner: Optional Runner for executing actions, shared with video ingestors
             session_service: Optional session service used by the runner (required for video ingestor sessions)
             app_name: The app name used by the runner (must match the runner's app_name)
+            model_provider: Optional model provider for ML inference. If None, defaults to Gemini25FlashProvider.
         """
         self._tasks: Dict[str, Task] = {}  # task_id -> Task object
         self._io_manager = io_manager
@@ -28,6 +30,10 @@ class TaskManager:
         self._action_runner = action_runner
         self._session_service = session_service
         self._app_name = app_name
+        # Get model provider from environment variable if not provided
+        if model_provider is None:
+            model_provider = get_VLM_provider()
+        self._model_provider = model_provider
     
     def add_task(self, io_id: str, task_description: str) -> Dict:
         """Add a new task for a specific IO stream.
@@ -67,6 +73,7 @@ class TaskManager:
             self._ingestors[io_id] = VideoStreamIngestor(
                 io_id, 
                 action_runner=self._action_runner,
+                model_provider=self._model_provider,
                 session_service=self._session_service,
                 app_name=self._app_name
             )

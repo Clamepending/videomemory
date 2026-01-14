@@ -32,6 +32,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from system.stream_ingestors.video_stream_ingestor import VideoIngestorOutput, VideoStreamIngestor
 from system.task_types import Task
+from system.model_providers import get_VLM_provider
 
 # Load .env file from the same directory as this script
 env_path = Path(__file__).parent / ".env"
@@ -122,17 +123,11 @@ def build_test_prompt(ingestor: VideoStreamIngestor) -> str:
 # Provider configurations
 # Note: All models listed below support image+text inputs (vision multimodal)
 PROVIDER_CONFIGS = {
-    "Anthropic": {
-        # All Claude 3.5+ models support vision (text + image inputs)
-        "models": [
-            "claude-sonnet-4-5-20250929",  # Latest Sonnet (supports vision) ✓
-            "claude-haiku-4-5-20251001",  # Fastest Claude vision model ✓
-        ],
-        "api_key": "ANTHROPIC_API_KEY",
-    },
+    
     "OpenRouter": {
         # Fast vision models verified to support image+text inputs (as of Jan 2026)
         "models": [
+            "qwen/qwen-2.5-vl-7b-instruct",
             # OpenAI models (all support vision)
             "openai/gpt-4o-mini",  # Fastest OpenAI vision model
             
@@ -149,8 +144,9 @@ PROVIDER_CONFIGS = {
             # Qwen models (all support vision)
             "qwen/qwen-2-vl-7b-instruct",  # Fast 7B vision model
             "qwen/qwen-2.5-omni-7b",  # Multimodal omni model (Mar 2025)
-            "qwen/qwen-2.5-vl-7b-instruct:free",  # Free tier option
+            # "qwen/qwen-2.5-vl-7b-instruct:free",  # Free tier option
             # "qwen/qwen2.5-vl-3b-instruct",  # doesnt work
+            
             "qwen/qwen3-vl-8b-instruct",  # Fast 8B vision model
             "qwen/qwen3-vl-30b-a3b-instruct",  # Fast 30B vision model?
             
@@ -168,6 +164,14 @@ PROVIDER_CONFIGS = {
             
         ],
         "api_key": "OPENROUTER_API_KEY",
+    },
+    "Anthropic": {
+        # All Claude 3.5+ models support vision (text + image inputs)
+        "models": [
+            "claude-sonnet-4-5-20250929",  # Latest Sonnet (supports vision) ✓
+            "claude-haiku-4-5-20251001",  # Fastest Claude vision model ✓
+        ],
+        "api_key": "ANTHROPIC_API_KEY",
     },
     "OpenAI": {
         # Vision support: gpt-4o, gpt-4o-mini, gpt-4-turbo support vision
@@ -364,7 +368,8 @@ def run_benchmark(num_runs: int = SAMPLE_SIZE) -> Dict[str, Dict[str, Dict]]:
     
     # Load image and create ingestor to reuse its methods
     test_image = load_test_image(640, 480)
-    ingestor = VideoStreamIngestor(camera_index=0, action_runner=None, session_service=None)
+    model_provider = get_VLM_provider()
+    ingestor = VideoStreamIngestor(camera_index=0, action_runner=None, model_provider=model_provider, session_service=None)
     image_base64 = ingestor._frame_to_base64(test_image)
     prompt = build_test_prompt(ingestor)
     results = {}

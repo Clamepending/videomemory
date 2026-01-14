@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from system.task_types import Task
 from system.logging_config import setup_logging
+from system.model_providers import get_VLM_provider
 
 # Set up logging
 setup_logging()
@@ -550,11 +551,18 @@ def get_frame_and_prompt():
     """Get the frame and prompt that were used together for the latest model output."""
     global ingestor
     if ingestor is None:
-        return jsonify({"error": "Ingestor not initialized"}), 500
+        logger.warning("API call: Ingestor not initialized")
+        return jsonify({"error": "Ingestor not initialized", "frame_base64": None, "prompt": ""}), 200
+    
+    # Check if ingestor is running
+    if not ingestor._running:
+        logger.warning("API call: Ingestor not running")
+        return jsonify({"error": "Ingestor not running", "frame_base64": None, "prompt": ""}), 200
     
     # Get the latest output (includes the frame and prompt from the same LLM call)
     latest_output = ingestor.get_latest_output()
     if not latest_output:
+        logger.debug("API call: No output available yet (output history is empty)")
         return jsonify({"error": "No output available yet", "frame_base64": None, "prompt": ""}), 200
     
     latest_frame = latest_output.get("frame")
@@ -601,7 +609,8 @@ def get_latest_task_notes():
     """Get the latest note for each task."""
     global ingestor
     if ingestor is None:
-        return jsonify({"error": "Ingestor not initialized"}), 500
+        logger.warning("API call: Ingestor not initialized for latest-task-notes")
+        return jsonify({"tasks": []}), 200
     
     tasks = ingestor.get_tasks_list()
     if not tasks:
@@ -713,7 +722,8 @@ def get_history():
     """Get the full output history (excluding frames for JSON serialization)."""
     global ingestor
     if ingestor is None:
-        return jsonify({"error": "Ingestor not initialized"}), 500
+        logger.warning("API call: Ingestor not initialized for history")
+        return jsonify({"history": [], "count": 0, "total_count": 0}), 200
     
     history = ingestor.get_output_history()
     # Remove frames and prompts from history for JSON response
@@ -741,9 +751,11 @@ def run_ingestor_async():
         global ingestor
         
         # Initialize ingestor (same as in main() function)
+        model_provider = get_VLM_provider()
         ingestor = VideoStreamIngestor(
             camera_index=0,
             action_runner=None,
+            model_provider=model_provider,
             session_service=None,
             app_name="videomemory_app"
         )
