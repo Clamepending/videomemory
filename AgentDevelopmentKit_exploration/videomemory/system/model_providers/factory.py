@@ -6,7 +6,7 @@ from typing import Optional
 from .base import BaseModelProvider
 from .google_provider import Gemini25FlashProvider, Gemini25FlashLiteProvider
 from .openai_provider import OpenAIGPT41NanoProvider, OpenAIGPT4oMiniProvider
-from .openrouter_providers import (
+from .openrouter_provider import (
     OpenRouterMolmo28BProvider,
     OpenRouterQwen2VL7BProvider,
     OpenRouterPhi4MultimodalProvider

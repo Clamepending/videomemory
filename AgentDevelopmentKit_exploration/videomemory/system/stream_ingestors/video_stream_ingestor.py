@@ -16,6 +16,7 @@ from google.adk.sessions import BaseSessionService
 from google.genai import types as genai_types
 import cv2
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -31,6 +32,7 @@ logger = logging.getLogger('VideoStreamIngestor')
 # Pydantic models for structured output
 class TaskUpdate(BaseModel):
     """Model for task update output."""
+    model_config = ConfigDict(extra="forbid")
     task_number: int = Field(..., description="The task number")
     task_note: str = Field(..., description="Updated description/note for the task")
     task_done: bool = Field(..., description="Whether the task is completed")
@@ -38,11 +40,13 @@ class TaskUpdate(BaseModel):
 
 class SystemAction(BaseModel):
     """Model for system action output."""
+    model_config = ConfigDict(extra="forbid")
     take_action: str = Field(..., description="Description of the action to take")
 
 
 class VideoIngestorOutput(BaseModel):
     """Model for the complete output structure."""
+    model_config = ConfigDict(extra="forbid")
     task_updates: List[TaskUpdate] = Field(default_factory=list, description="List of task updates")
     system_actions: List[SystemAction] = Field(default_factory=list, description="List of system actions to take")
 
@@ -96,7 +100,7 @@ class VideoStreamIngestor:
         self.session_id = f"video_ingestor_session_{self.camera_index}"
         
         logger.info(f"Initialized for camera index={self.camera_index}")
-    
+ 
     async def start(self):
         """Start the video stream ingestor and all processing loops."""
         logger.debug(f"[DEBUG] VideoStreamIngestor.start: Called for camera_index={self.camera_index}")
@@ -452,23 +456,20 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                 return self._model_provider._sync_generate_content(
                     image_base64=image_base64,
                     prompt=prompt,
-                    response_schema=VideoIngestorOutput.model_json_schema()
+                    response_model=VideoIngestorOutput
                 )
             
             # Time the API call
             api_call_start = time.time()
             # Run the blocking call in a thread pool to avoid blocking the event loop
-            response = await asyncio.to_thread(_sync_generate_content)
+            response: VideoIngestorOutput = await asyncio.to_thread(_sync_generate_content)
             api_call_time = time.time() - api_call_start
             logger.debug(f"API call [camera={self.camera_index}]: generate_content took {api_call_time:.3f}s")
-            
-            output = VideoIngestorOutput(**json.loads(response.text))
+
+            # Providers return a validated Pydantic model instance.
             # logger.info(f"LLM inference prompt: {self._build_prompt()}")
             # logger.info(f"LLM inference output: {output}")
-            return {
-                "task_updates": [u.model_dump() for u in output.task_updates],
-                "system_actions": [a.model_dump() for a in output.system_actions]
-            }
+            return response.model_dump()
         except Exception as e:
             # Handle network errors gracefully - these can happen due to connection issues
             # but shouldn't crash the entire processing loop

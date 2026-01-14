@@ -2,8 +2,9 @@
 
 import os
 import logging
-from typing import Any
+from typing import Any, Type
 from openai import OpenAI
+from pydantic import BaseModel
 from .base import BaseModelProvider
 
 logger = logging.getLogger('OpenAIProvider')
@@ -34,21 +35,22 @@ class OpenAIGPT41NanoProvider(BaseModelProvider):
                 logger.error(f"Failed to initialize OpenAI client: {e}")
                 self._client = None
     
-    def _sync_generate_content(self, image_base64: str, prompt: str, response_schema: dict) -> Any:
+    def _sync_generate_content(self, image_base64: str, prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate content using OpenAI GPT-4.1-nano.
         
         Args:
             image_base64: Base64-encoded image string
             prompt: Text prompt
-            response_schema: JSON schema for structured output (not used by OpenAI, but kept for interface consistency)
+            response_model: Pydantic model class describing expected output
             
         Returns:
-            Response object with .text attribute containing JSON
+            Parsed and validated Pydantic model instance
         """
         if not self._client:
             raise RuntimeError("OpenAI client not initialized. Check OPENAI_API_KEY environment variable.")
         
-        response = self._client.chat.completions.create(
+        # Use Structured Outputs parsing directly into the Pydantic model.
+        completion = self._client.beta.chat.completions.parse(
             model="gpt-4.1-nano-2025-04-14",
             messages=[{
                 "role": "user",
@@ -57,15 +59,14 @@ class OpenAIGPT41NanoProvider(BaseModelProvider):
                     {"type": "text", "text": prompt}
                 ]
             }],
-            response_format={"type": "json_object"}
+            response_format=response_model,
         )
-        
-        # Create a simple response object with .text attribute
-        class Response:
-            def __init__(self, text: str):
-                self.text = text
-        
-        return Response(response.choices[0].message.content)
+
+        message = completion.choices[0].message
+        if getattr(message, "parsed", None) is not None:
+            return response_model.model_validate(message.parsed)
+        refusal = getattr(message, "refusal", None)
+        raise RuntimeError(f"OpenAI refused or returned no parsed output: {refusal or 'unknown'}")
 
 
 class OpenAIGPT4oMiniProvider(BaseModelProvider):
@@ -93,21 +94,21 @@ class OpenAIGPT4oMiniProvider(BaseModelProvider):
                 logger.error(f"Failed to initialize OpenAI client: {e}")
                 self._client = None
     
-    def _sync_generate_content(self, image_base64: str, prompt: str, response_schema: dict) -> Any:
+    def _sync_generate_content(self, image_base64: str, prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate content using OpenAI GPT-4o-mini.
         
         Args:
             image_base64: Base64-encoded image string
             prompt: Text prompt
-            response_schema: JSON schema for structured output (not used by OpenAI, but kept for interface consistency)
+            response_model: Pydantic model class describing expected output
             
         Returns:
-            Response object with .text attribute containing JSON
+            Parsed and validated Pydantic model instance
         """
         if not self._client:
             raise RuntimeError("OpenAI client not initialized. Check OPENAI_API_KEY environment variable.")
         
-        response = self._client.chat.completions.create(
+        completion = self._client.beta.chat.completions.parse(
             model="gpt-4o-mini-2024-07-18",
             messages=[{
                 "role": "user",
@@ -116,13 +117,12 @@ class OpenAIGPT4oMiniProvider(BaseModelProvider):
                     {"type": "text", "text": prompt}
                 ]
             }],
-            response_format={"type": "json_object"}
+            response_format=response_model,
         )
-        
-        # Create a simple response object with .text attribute
-        class Response:
-            def __init__(self, text: str):
-                self.text = text
-        
-        return Response(response.choices[0].message.content)
+
+        message = completion.choices[0].message
+        if getattr(message, "parsed", None) is not None:
+            return response_model.model_validate(message.parsed)
+        refusal = getattr(message, "refusal", None)
+        raise RuntimeError(f"OpenAI refused or returned no parsed output: {refusal or 'unknown'}")
 

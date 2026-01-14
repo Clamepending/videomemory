@@ -3,9 +3,10 @@
 import os
 import base64
 import logging
-from typing import Any
+from typing import Any, Type
 from google import genai
 from google.genai import types as genai_types
+from pydantic import BaseModel
 from .base import BaseModelProvider
 
 logger = logging.getLogger('GoogleProviders')
@@ -38,16 +39,16 @@ class _BaseGoogleProvider(BaseModelProvider):
                 logger.error(f"Failed to initialize Google GenAI client: {e}")
                 self._client = None
     
-    def _sync_generate_content(self, image_base64: str, prompt: str, response_schema: dict) -> Any:
+    def _sync_generate_content(self, image_base64: str, prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate content using Google GenAI.
         
         Args:
             image_base64: Base64-encoded image string
             prompt: Text prompt
-            response_schema: JSON schema for structured output
+            response_model: Pydantic model class describing expected output
             
         Returns:
-            Response object with .text attribute containing JSON
+            Parsed and validated Pydantic model instance
         """
         if not self._client:
             raise RuntimeError("Google client not initialized. Check GOOGLE_API_KEY environment variable.")
@@ -60,14 +61,20 @@ class _BaseGoogleProvider(BaseModelProvider):
         )
         text_part = genai_types.Part(text=prompt)
         
-        return self._client.models.generate_content(
+        response = self._client.models.generate_content(
             model=self._model_name,
             contents=[image_part, text_part],
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=response_schema
+                response_schema=response_model.model_json_schema()
             )
         )
+
+        # Google returns JSON as text; validate into the requested model.
+        raw = getattr(response, "text", None)
+        if raw is None:
+            raise RuntimeError("Google model returned empty response text.")
+        return response_model.model_validate_json(raw)
 
 
 class Gemini25FlashProvider(_BaseGoogleProvider):

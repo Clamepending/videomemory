@@ -4,8 +4,9 @@ import os
 import json
 import time
 import logging
-from typing import Any
+from typing import Any, Type
 import httpx
+from pydantic import BaseModel
 from .base import BaseModelProvider
 
 logger = logging.getLogger('OpenRouterProviders')
@@ -56,16 +57,16 @@ class _BaseOpenRouterProvider(BaseModelProvider):
         else:
             logger.info(f"Initialized OpenRouter provider for {self._model_name}")
     
-    def _sync_generate_content(self, image_base64: str, prompt: str, response_schema: dict) -> Any:
+    def _sync_generate_content(self, image_base64: str, prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate content using OpenRouter API.
         
         Args:
             image_base64: Base64-encoded image string
             prompt: Text prompt
-            response_schema: JSON schema for structured output (not used by OpenRouter, but kept for interface consistency)
+            response_model: Pydantic model class describing expected output
             
         Returns:
-            Response object with .text attribute containing JSON
+            Parsed and validated Pydantic model instance
         """
         if not self.api_key:
             raise RuntimeError("OpenRouter API key not set. Check OPENROUTER_API_KEY environment variable.")
@@ -73,9 +74,15 @@ class _BaseOpenRouterProvider(BaseModelProvider):
         # Enforce rate limit
         self._rate_limiter.wait_if_needed()
         
-        # Add JSON schema instruction to prompt for OpenRouter models
-        json_schema_str = json.dumps(response_schema, indent=2)
-        enhanced_prompt = f"{prompt}\n\nPlease respond with valid JSON matching this schema: {json_schema_str}"
+        schema = response_model.model_json_schema()
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": response_model.__name__,
+                "strict": True,
+                "schema": schema,
+            },
+        }
         
         with httpx.Client(timeout=20.0) as client:
             response = client.post(
@@ -90,10 +97,10 @@ class _BaseOpenRouterProvider(BaseModelProvider):
                         "role": "user",
                         "content": [
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
-                            {"type": "text", "text": enhanced_prompt}
+                            {"type": "text", "text": prompt}
                         ]
                     }],
-                    "response_format": {"type": "json_object"}
+                    "response_format": response_format
                 }
             )
             
@@ -102,13 +109,27 @@ class _BaseOpenRouterProvider(BaseModelProvider):
             
             response.raise_for_status()
             result = response.json()
-            
-            # Create a simple response object with .text attribute
-            class Response:
-                def __init__(self, text: str):
-                    self.text = text
-            
-            return Response(result["choices"][0]["message"]["content"])
+
+            message = (result.get("choices") or [{}])[0].get("message") or {}
+            content = message.get("content")
+            if content is None:
+                tool_calls = message.get("tool_calls") or []
+                if tool_calls:
+                    content = (tool_calls[0].get("function") or {}).get("arguments")
+
+            if content is None:
+                raise RuntimeError("OpenRouter returned empty content.")
+
+            if isinstance(content, (dict, list)):
+                return response_model.model_validate(content)
+
+            s = str(content).strip()
+            if s.startswith("```") and s.endswith("```"):
+                lines = s.splitlines()
+                if len(lines) >= 2:
+                    s = "\n".join(lines[1:-1]).strip()
+
+            return response_model.model_validate_json(s)
 
 
 class OpenRouterMolmo28BProvider(_BaseOpenRouterProvider):
