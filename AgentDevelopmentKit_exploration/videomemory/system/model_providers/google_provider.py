@@ -3,7 +3,7 @@
 import os
 import base64
 import logging
-from typing import Any, Type
+from typing import Type
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel
@@ -61,12 +61,14 @@ class _BaseGoogleProvider(BaseModelProvider):
         )
         text_part = genai_types.Part(text=prompt)
         
+        # Use response_json_schema instead of response_schema to bypass client-side
+        # validation that rejects additional_properties. The API itself supports it.
         response = self._client.models.generate_content(
             model=self._model_name,
             contents=[image_part, text_part],
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=response_model.model_json_schema()
+                response_json_schema=response_model.model_json_schema()
             )
         )
 

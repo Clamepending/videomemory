@@ -67,7 +67,6 @@ class VideoStreamIngestor:
         """
         self.camera_index = 0 # TODO: dont hard code to be the first camera. Modify the task manager to pass in the camera index.
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
-        self._frame_queue = AsyncQueue(maxsize=1)
         self._action_queue = AsyncQueue()
         self._running = False
         self._tasks: list[asyncio.Task] = []
@@ -82,9 +81,6 @@ class VideoStreamIngestor:
         # # Rate limiting: track last request time (max 10 requests per minute = 6 seconds between requests)
         # self._last_request_time: float = 0.0
         # self._min_request_interval: float = 0.1  # 600 requests per minute max
-        
-        # Process loop timing: track last process time for delay logging
-        self._last_process_time: float = 0.0
         
         # Store model provider (already initialized in __init__)
         self._model_provider = model_provider
@@ -136,8 +132,7 @@ class VideoStreamIngestor:
         # Start all processing loops
         # Note: These tasks run concurrently in the background
         self._tasks = [
-            asyncio.create_task(self._capture_loop(), name=f"capture_{self.camera_index}"),
-            asyncio.create_task(self._process_loop(), name=f"process_{self.camera_index}"),
+            asyncio.create_task(self._process_input(), name=f"process_input_{self.camera_index}"),
             asyncio.create_task(self._action_loop(), name=f"action_{self.camera_index}"),
         ]
         
@@ -147,10 +142,9 @@ class VideoStreamIngestor:
         # Give tasks a moment to start and report any immediate errors
         await asyncio.sleep(0.1)
     
-    async def _capture_loop(self):
-        """Continuously capture frames from the video stream."""
+    async def _process_input(self):
+        """Unified loop that captures frames and processes them through ML pipeline."""
         try:
-            
             # On macOS, try AVFoundation backend first (better permission handling)
             import platform
             if platform.system() == 'Darwin':  # macOS
@@ -176,74 +170,26 @@ class VideoStreamIngestor:
                     task.task_note.append(error_note)
                 return
             
-            logger.info(f"Started capture loop for camera index={self.camera_index}")
+            logger.info(f"Started process input loop for camera index={self.camera_index}")
             
-            # measure the time between frames
-            last_frame_time = time.time()
             while self._running:
-                # Run blocking camera.read() in thread pool to avoid blocking event loop
-                
-                ret, current_frame = await asyncio.to_thread(self._camera.read)
-                if ret:
+                try:
+                    # Capture frame from camera
+                    ret, current_frame = await asyncio.to_thread(self._camera.read)
+                    if not ret:
+                        continue
+                    
                     # Resize frame to target resolution if needed
                     if current_frame.shape[1] != self._target_resolution[0] or current_frame.shape[0] != self._target_resolution[1]:
                         current_frame = cv2.resize(current_frame, self._target_resolution, interpolation=cv2.INTER_LINEAR)
                     
-                    # Put frame in queue (await will yield control if queue is full)
-                    # This allows the process loop to run and process the frame
-                    await self._frame_queue.put(current_frame)
-                    
-                    current_time = time.time()
-                    time_between_frames = current_time - last_frame_time
-                    logger.debug(f"Camera feed: time between frames: {time_between_frames:.3f}s")
-                    last_frame_time = current_time
-            self._camera.release()
-            self._camera = None
-            logger.info(f"Stopped capture loop for camera index={self.camera_index}")
-        except asyncio.CancelledError:
-            logger.info(f"Capture loop cancelled for camera index={self.camera_index}")
-            if self._camera:
-                self._camera.release()
-                self._camera = None
-        except Exception as e:
-            logger.error(f"Error in capture loop for camera index={self.camera_index}: {e}", exc_info=True)
-            self._running = False
-    
-    async def _process_loop(self):
-        """Process frames through ML pipeline and update task notes."""
-        try:
-            logger.info(f"Started process loop for camera index={self.camera_index}")
-            
-            while self._running:
-                try:
-                    # Start timing the overall loop iteration
-                    loop_start_time = time.time()
-                    
-                    # Track time between process loop calls
-                    current_time = time.time()
-                    time_between_calls = current_time - self._last_process_time if self._last_process_time > 0 else 0.0
-                    self._last_process_time = current_time
-                    
-                    # Get frame from queue
-                    get_frame_start = time.time()
-                    current_frame = await asyncio.wait_for(
-                        self._frame_queue.get(),
-                        timeout=0.5
-                    )
-                    get_frame_time = time.time() - get_frame_start
-                    
-                    if current_frame is None:
-                        continue
-                    
-                    # Run ML processing with multimodal LLM
                     # Build prompt before inference so we can store it with the output
                     prompt = self._build_prompt()
-                    ml_inference_start = time.time()
+                    
+                    # Run ML processing with multimodal LLM
                     results = await self._run_ml_inference(current_frame, prompt)
-                    ml_inference_time = time.time() - ml_inference_start
                     
                     # Store output in history with its corresponding frame and prompt
-                    store_start = time.time()
                     if results:
                         # Add frame and prompt to the output dict
                         results["frame"] = current_frame.copy()
@@ -251,38 +197,31 @@ class VideoStreamIngestor:
                         self._output_history.append(results)
                         self._total_output_count += 1
                         self._latest_frame = current_frame
-                    store_time = time.time() - store_start
-                    
-                    # Process results: update task notes and queue actions
-                    process_results_start = time.time()
-                    if results:
+                        
+                        # Process results: update task notes and queue actions
                         await self._process_ml_results(results)
-                    process_results_time = time.time() - process_results_start
-                    
-                    # Log all timing information in one line
-                    # loop_total_time = time.time() - loop_start_time
-                    # logger.debug(
-                    #     f"Process loop [camera={self.camera_index}]: "
-                    #     f"since_last={time_between_calls:.3f}s, "
-                    #     f"frame_get={get_frame_time:.3f}s, "
-                    #     f"ml_inference={ml_inference_time:.3f}s, "
-                    #     f"store={store_time:.3f}s, "
-                    #     f"process_results={process_results_time:.3f}s, "
-                    #     f"total={loop_total_time:.3f}s"
-                    # )
                             
-                except asyncio.TimeoutError:
-                    # Timeout allows us to check _running flag
-                    continue
                 except Exception as e:
                     logger.error(f"Error processing frame for camera index={self.camera_index}: {e}", exc_info=True)
                     continue
+            
+            # Cleanup camera
+            if self._camera:
+                self._camera.release()
+                self._camera = None
+            logger.info(f"Stopped process input loop for camera index={self.camera_index}")
                     
         except asyncio.CancelledError:
-            logger.info(f"Process loop cancelled for camera index={self.camera_index}")
+            logger.info(f"Process input loop cancelled for camera index={self.camera_index}")
+            if self._camera:
+                self._camera.release()
+                self._camera = None
         except Exception as e:
-            logger.error(f"Error in process loop for camera index={self.camera_index}: {e}", exc_info=True)
+            logger.error(f"Error in process input loop for camera index={self.camera_index}: {e}", exc_info=True)
             self._running = False
+            if self._camera:
+                self._camera.release()
+                self._camera = None
     
     async def _action_loop(self):
         """Execute actions based on task conditions."""
@@ -662,18 +601,6 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                 logger.warning(f"Tasks didn't complete within timeout for camera index={self.camera_index}")
         
         # 4. Drain queues (prevents memory leaks)
-        # Drain frame queue
-        drained_frames = 0
-        while not self._frame_queue.empty():
-            try:
-                self._frame_queue.get_nowait()
-                drained_frames += 1
-            except asyncio.QueueEmpty:
-                break
-        
-        if drained_frames > 0:
-            logger.debug(f"Drained {drained_frames} frames from queue for camera index={self.camera_index}")
-        
         # Drain action queue
         remaining_actions = []
         while not self._action_queue.empty():
