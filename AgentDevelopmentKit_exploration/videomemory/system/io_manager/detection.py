@@ -353,3 +353,82 @@ class DeviceDetector:
         
         return audio_inputs if audio_inputs else ["Microphone (detected)"]
 
+
+def main():
+    """Test all device detection methods and display results."""
+    print("=" * 80)
+    print("Device Detection Test")
+    print("=" * 80)
+    
+    detector = DeviceDetector()
+    
+    # Display platform information
+    print(f"\nPlatform: {platform.system()} ({platform.release()})")
+    print(f"Platform flags: Linux={detector.is_linux}, macOS={detector.is_mac}, Windows={detector.is_windows}")
+    print()
+    
+    # Test all detection methods
+    detection_tests = [
+        ("Cameras", detector.detect_cameras),
+        ("Screens/Displays", detector.detect_screens),
+        ("Keyboards", detector.detect_keyboards),
+        ("Mice/Trackpads", detector.detect_mice),
+        ("Audio Input", detector.detect_audio_input),
+        ("COM/Serial Ports", detector.detect_com_ports),
+    ]
+    
+    results = {}
+    
+    for category, detection_func in detection_tests:
+        print(f"{'=' * 80}")
+        print(f"Testing {category}...")
+        print(f"{'=' * 80}")
+        try:
+            devices = detection_func()
+            results[category] = devices
+            if devices:
+                print(f"Found {len(devices)} device(s):")
+                for i, device in enumerate(devices, 1):
+                    print(f"  {i}. {device}")
+            else:
+                print("  No devices found.")
+        except Exception as e:
+            print(f"  ERROR: {type(e).__name__}: {e}")
+            results[category] = []
+        print()
+    
+    # Test detect_all()
+    print(f"{'=' * 80}")
+    print("Testing detect_all()...")
+    print(f"{'=' * 80}")
+    try:
+        all_devices = detector.detect_all()
+        for category, devices in all_devices.items():
+            print(f"{category}: {len(devices)} device(s)")
+            for device in devices:
+                print(f"  - {device}")
+    except Exception as e:
+        print(f"ERROR: {type(e).__name__}: {e}")
+    print()
+    
+    # Summary
+    print(f"{'=' * 80}")
+    print("SUMMARY")
+    print(f"{'=' * 80}")
+    total_devices = 0
+    for category, devices in results.items():
+        count = len(devices)
+        total_devices += count
+        status = "✓" if count > 0 else "✗"
+        print(f"{status} {category}: {count} device(s)")
+        if count > 0:
+            for device in devices:
+                print(f"    - {device}")
+    
+    print(f"\nTotal devices detected: {total_devices}")
+    print("=" * 80)
+
+
+if __name__ == "__main__":
+    main()
+
