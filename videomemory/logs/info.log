@@ -1,20 +1,68 @@
-2026-01-21 19:05:57,143 - ModelProviderFactory - INFO - Creating model provider: gemini-2.5-flash (Gemini25FlashProvider)
-2026-01-21 19:05:57,176 - GoogleProviders - INFO - Initialized Google GenAI client for gemini-2.5-flash
-2026-01-21 19:05:57,187 - werkzeug - WARNING -  * Debugger is active!
-2026-01-21 19:05:57,192 - werkzeug - INFO -  * Debugger PIN: 394-331-644
-2026-01-21 19:05:57,209 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:05:57] "GET / HTTP/1.1" 200 -
-2026-01-21 19:05:57,255 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:05:57] "GET / HTTP/1.1" 200 -
-2026-01-21 19:06:06,013 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
-2026-01-21 19:06:06,631 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
-2026-01-21 19:06:06,638 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:06:06] "POST /chat HTTP/1.1" 200 -
-2026-01-21 19:06:15,001 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
-2026-01-21 19:06:15,862 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
-2026-01-21 19:06:15,863 - google_genai.types - WARNING - Warning: there are non-text parts in the response: ['function_call'], returning concatenated text result from text parts. Check the full candidates.content.parts accessor to get the full model response.
-2026-01-21 19:06:17,079 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
-2026-01-21 19:06:18,046 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
-2026-01-21 19:06:18,760 - tasks - INFO - [INFO] add_task: Successfully added task, returning result
-2026-01-21 19:06:19,206 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
-2026-01-21 19:06:19,210 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
-2026-01-21 19:06:19,902 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
-2026-01-21 19:06:19,903 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:06:19] "POST /chat HTTP/1.1" 200 -
-2026-01-21 19:06:21,341 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent "HTTP/1.1 200 OK"
+2026-01-21 19:08:41,115 - ModelProviderFactory - INFO - Creating model provider: gemini-2.5-flash (Gemini25FlashProvider)
+2026-01-21 19:08:41,147 - GoogleProviders - INFO - Initialized Google GenAI client for gemini-2.5-flash
+2026-01-21 19:08:41,162 - werkzeug - WARNING -  * Debugger is active!
+2026-01-21 19:08:41,167 - werkzeug - INFO -  * Debugger PIN: 394-331-644
+2026-01-21 19:08:42,074 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:42] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:42,299 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:42] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:44,218 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:44] "GET / HTTP/1.1" 200 -
+2026-01-21 19:08:46,524 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
+2026-01-21 19:08:47,261 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
+2026-01-21 19:08:47,261 - google_genai.types - WARNING - Warning: there are non-text parts in the response: ['function_call'], returning concatenated text result from text parts. Check the full candidates.content.parts accessor to get the full model response.
+2026-01-21 19:08:48,405 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:48] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:48,464 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:48] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:48,494 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
+2026-01-21 19:08:49,541 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
+2026-01-21 19:08:49,624 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:49] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:49,681 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:49] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:49,779 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:49] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:49,842 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:49] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,059 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,111 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,201 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,283 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,298 - tasks - INFO - [INFO] add_task: Successfully added task, returning result
+2026-01-21 19:08:50,358 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,455 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,481 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,575 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,622 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,752 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:50] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:50,763 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
+2026-01-21 19:08:50,769 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-01-21 19:08:51,926 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:51] "GET /task/0 HTTP/1.1" 200 -
+2026-01-21 19:08:52,026 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:52] "GET /api/task/0 HTTP/1.1" 200 -
+2026-01-21 19:08:52,280 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
+2026-01-21 19:08:52,283 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:52] "POST /chat HTTP/1.1" 200 -
+2026-01-21 19:08:52,987 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent "HTTP/1.1 200 OK"
+2026-01-21 19:08:57,030 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:57] "GET /api/task/0 HTTP/1.1" 200 -
+2026-01-21 19:08:57,151 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:57] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:08:57,217 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:57] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:08:57,942 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:57] "GET /task/0 HTTP/1.1" 200 -
+2026-01-21 19:08:57,997 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:08:57] "GET /api/task/0 HTTP/1.1" 200 -
+2026-01-21 19:09:02,370 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:02] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:09:02,432 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:02] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:09:03,774 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:03] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:09:03,844 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:03] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:09:04,735 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:04] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:09:04,815 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:04] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:09:05,512 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:05] "GET /task/0 HTTP/1.1" 200 -
+2026-01-21 19:09:05,582 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:05] "GET /api/task/0 HTTP/1.1" 200 -
+2026-01-21 19:09:07,951 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:07] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:09:08,014 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:08] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:09:08,385 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:08] "GET / HTTP/1.1" 200 -
+2026-01-21 19:09:09,607 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:09] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:09:09,673 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:09] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:09:10,411 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:10] "GET /task/0 HTTP/1.1" 200 -
+2026-01-21 19:09:10,465 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:10] "GET /api/task/0 HTTP/1.1" 200 -
+2026-01-21 19:09:12,616 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:12] "GET / HTTP/1.1" 200 -
+2026-01-21 19:09:13,995 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-21' coro=<AsyncClient.aclose() done, defined at /Users/mark/Desktop/projects/videomemory/.venv/lib/python3.13/site-packages/google/genai/client.py:218> wait_for=<Task pending name='Task-22' coro=<_wait_for_close() running at /Users/mark/Desktop/projects/videomemory/.venv/lib/python3.13/site-packages/aiohttp/connector.py:138> wait_for=<_GatheringFuture pending cb=[Task.task_wakeup()]> cb=[Task.task_wakeup()]>>
+2026-01-21 19:09:13,996 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-22' coro=<_wait_for_close() done, defined at /Users/mark/Desktop/projects/videomemory/.venv/lib/python3.13/site-packages/aiohttp/connector.py:136> wait_for=<_GatheringFuture pending cb=[Task.task_wakeup()]> cb=[Task.task_wakeup()]>
+2026-01-21 19:09:17,607 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:17] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:09:17,676 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:17] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:09:19,213 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:19] "GET /task/0 HTTP/1.1" 200 -
+2026-01-21 19:09:19,280 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:19] "GET /api/task/0 HTTP/1.1" 200 -
+2026-01-21 19:09:21,105 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:21] "GET /tasks HTTP/1.1" 200 -
+2026-01-21 19:09:21,167 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:21] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 19:09:21,928 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:09:21] "GET / HTTP/1.1" 200 -

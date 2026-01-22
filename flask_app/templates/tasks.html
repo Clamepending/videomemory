@@ -35,12 +35,16 @@
             padding: 20px;
             display: flex;
             flex-direction: column;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
         }
         
         .task-card:hover {
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            border-color: #19c37d;
         }
         
         .task-card.done {
@@ -196,7 +200,8 @@
                 tasksGrid.className = 'tasks-grid';
                 
                 tasks.forEach(task => {
-                    const taskCard = document.createElement('div');
+                    const taskCard = document.createElement('a');
+                    taskCard.href = `/task/${task.task_id || ''}`;
                     taskCard.className = `task-card ${task.done ? 'done' : ''}`;
                     
                     // Get latest note

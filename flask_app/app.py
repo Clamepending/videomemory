@@ -73,12 +73,28 @@ def tasks():
     """Render the tasks page."""
     return render_template('tasks.html')
 
+@app.route('/task/<task_id>')
+def task_detail(task_id):
+    """Render the task detail page."""
+    return render_template('task_detail.html', task_id=task_id)
+
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
     """Get all tasks."""
     try:
         tasks_list = task_manager.list_tasks()
         return jsonify({'tasks': tasks_list})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/task/<task_id>', methods=['GET'])
+def get_task(task_id):
+    """Get a specific task by ID."""
+    try:
+        task = task_manager.get_task(task_id)
+        if task is None:
+            return jsonify({'error': 'Task not found'}), 404
+        return jsonify({'task': task})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
