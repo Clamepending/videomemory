@@ -6,7 +6,7 @@ python main.py
 ```
 
 
-To monitor log statements in a seporate terminal window:
+To monitor log statements in a separate terminal window:
 ```
-tail -f AgentDevelopmentKit_exploration/videomemory/logs/videomemory.log
+tail -f videomemory/logs/info.log
 ```
