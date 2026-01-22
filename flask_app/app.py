@@ -88,15 +88,22 @@ def chat():
         final_response_text = "No response received"
         async def get_response():
             nonlocal final_response_text
-            async for event in runner.run_async(
+            # Use async generator properly with try/finally to ensure cleanup
+            gen = runner.run_async(
                 user_id=USER_ID,
                 session_id=SESSION_ID,
                 new_message=content
-            ):
-                if event.is_final_response():
-                    if event.content and event.content.parts:
-                        final_response_text = event.content.parts[0].text
-                    break
+            )
+            try:
+                async for event in gen:
+                    if event.is_final_response():
+                        if event.content and event.content.parts:
+                            final_response_text = event.content.parts[0].text
+                        break
+            finally:
+                # Properly close the async generator to avoid resource leaks
+                await gen.aclose()
+
         
         loop.run_until_complete(get_response())
         loop.close()

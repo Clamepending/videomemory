@@ -5,6 +5,8 @@ outputs/datasets/*
 venv/
 .venv/
 
+logs/
+
 outputs/captioners/*
 
 apps/Qwen2-VL-7B-Instruct/
