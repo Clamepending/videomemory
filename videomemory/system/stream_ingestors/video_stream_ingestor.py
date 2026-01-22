@@ -171,7 +171,10 @@ class VideoStreamIngestor:
             
             logger.info(f"Started process input loop for camera index={self.camera_index}")
             
+            loop_iteration = 0
             while self._running:
+                loop_iteration += 1
+                logger.debug(f"Process input loop iteration {loop_iteration} for camera index={self.camera_index}")
                 try:
                     # Capture frame from camera
                     ret, current_frame = await asyncio.to_thread(self._camera.read)
@@ -489,10 +492,11 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Ingestor not running, scheduling start()")
             # Schedule start in the event loop
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Event loop is running, creating async task")
-                    # Wrap start() to catch and log any errors
+                # Check for Flask background loop (set in flask_app/app.py)
+                flask_loop = getattr(sys.modules.get(__name__), '_flask_background_loop', None)
+                
+                if flask_loop is not None and not flask_loop.is_closed():
+                    # Use Flask background loop
                     async def start_with_error_handling():
                         try:
                             logger.debug(f"[DEBUG] VideoStreamIngestor.start_with_error_handling: About to call start()")
@@ -500,12 +504,24 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                             logger.debug(f"[DEBUG] VideoStreamIngestor.start_with_error_handling: start() completed successfully")
                         except Exception as e:
                             logger.error(f"[ERROR] VideoStreamIngestor.start_with_error_handling: Error in start(): {e}", exc_info=True)
-                            # Don't re-raise - log the error but don't crash
-                    asyncio.create_task(start_with_error_handling())
-                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Async task created")
+                    asyncio.run_coroutine_threadsafe(start_with_error_handling(), flask_loop)
+                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Async task scheduled in Flask background loop")
                 else:
-                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Event loop not running, calling run_until_complete")
-                    loop.run_until_complete(self.start())
+                    # Use standard event loop (for main.py or other contexts)
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        async def start_with_error_handling():
+                            try:
+                                logger.debug(f"[DEBUG] VideoStreamIngestor.start_with_error_handling: About to call start()")
+                                await self.start()
+                                logger.debug(f"[DEBUG] VideoStreamIngestor.start_with_error_handling: start() completed successfully")
+                            except Exception as e:
+                                logger.error(f"[ERROR] VideoStreamIngestor.start_with_error_handling: Error in start(): {e}", exc_info=True)
+                        asyncio.create_task(start_with_error_handling())
+                        logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Async task created")
+                    else:
+                        logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Event loop not running, calling run_until_complete")
+                        loop.run_until_complete(self.start())
             except RuntimeError as e:
                 # No event loop running, will need to be started manually
                 logger.warning(f"No event loop available. Call start() manually. Error: {e}")

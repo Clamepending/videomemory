@@ -1,4 +1,0 @@
-2026-01-21 19:09:13,995 - asyncio - ERROR - Task was destroyed but it is pending!
-task: <Task pending name='Task-21' coro=<AsyncClient.aclose() done, defined at /Users/mark/Desktop/projects/videomemory/.venv/lib/python3.13/site-packages/google/genai/client.py:218> wait_for=<Task pending name='Task-22' coro=<_wait_for_close() running at /Users/mark/Desktop/projects/videomemory/.venv/lib/python3.13/site-packages/aiohttp/connector.py:138> wait_for=<_GatheringFuture pending cb=[Task.task_wakeup()]> cb=[Task.task_wakeup()]>>
-2026-01-21 19:09:13,996 - asyncio - ERROR - Task was destroyed but it is pending!
-task: <Task pending name='Task-22' coro=<_wait_for_close() done, defined at /Users/mark/Desktop/projects/videomemory/.venv/lib/python3.13/site-packages/aiohttp/connector.py:136> wait_for=<_GatheringFuture pending cb=[Task.task_wakeup()]> cb=[Task.task_wakeup()]>
