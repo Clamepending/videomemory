@@ -1,6 +1,5 @@
 """Task Manager for managing tasks associated with IO streams."""
 
-import uuid
 import logging
 from typing import Dict, List, Optional
 from system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
@@ -30,6 +29,7 @@ class TaskManager:
         self._action_runner = action_runner
         self._session_service = session_service
         self._app_name = app_name
+        self._task_counter = 0  # Counter for task IDs, starting from 0
         # Get model provider from environment variable if not provided
         if model_provider is None:
             model_provider = get_VLM_provider()
@@ -78,8 +78,9 @@ class TaskManager:
                 app_name=self._app_name
             )
         
-        # Create task
-        task_id = str(uuid.uuid4())[:8]  # Short UUID for readability
+        # Create task with sequential ID starting from 0
+        task_id = str(self._task_counter)
+        self._task_counter += 1
         
         # Create Task object (will be shared by reference with video ingestor)
         task = Task(
