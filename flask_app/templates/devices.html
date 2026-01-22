@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}Devices - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+        .devices-container {
+            width: 100%;
+            max-width: 1400px;
+            padding: 30px 20px;
+            height: 100%;
+            overflow-y: auto;
+        }
+        
+        .devices-header {
+            margin-bottom: 30px;
+        }
+        
+        .devices-header h1 {
+            font-size: 28px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 10px;
+        }
+        
+        .devices-header p {
+            font-size: 14px;
+            color: #888;
+        }
+        
+        .category-section {
+            margin-bottom: 40px;
+        }
+        
+        .category-title {
+            font-size: 20px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 15px;
+            text-transform: capitalize;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #404040;
+        }
+        
+        .devices-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .device-card {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+        }
+        
+        .device-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            border-color: #19c37d;
+        }
+        
+        .device-name {
+            font-size: 18px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 12px;
+            word-break: break-word;
+        }
+        
+        .device-id {
+            font-size: 12px;
+            color: #888;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            background: #1a1a1a;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #404040;
+        }
+        
+        .device-id-label {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+        
+        .no-devices {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+        
+        .no-devices h2 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #666;
+        }
+        
+        .no-devices p {
+            font-size: 14px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+        
+        .error {
+            text-align: center;
+            padding: 60px 20px;
+            color: #ff6b6b;
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="devices-container">
+        <div class="devices-header">
+            <h1>Input Devices</h1>
+            <p>All available input devices detected on this system</p>
+        </div>
+        <div id="devicesContent">
+            <div class="loading">Loading devices...</div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        async function loadDevices() {
+            const contentDiv = document.getElementById('devicesContent');
+            
+            try {
+                const response = await fetch('/api/devices');
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    contentDiv.innerHTML = `<div class="error">Error: ${data.error || 'Failed to load devices'}</div>`;
+                    return;
+                }
+                
+                const devicesByCategory = data.devices || {};
+                const categories = Object.keys(devicesByCategory);
+                
+                if (categories.length === 0) {
+                    contentDiv.innerHTML = `
+                        <div class="no-devices">
+                            <h2>No devices found</h2>
+                            <p>No input devices were detected on this system.</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let html = '';
+                
+                // Sort categories alphabetically
+                categories.sort();
+                
+                categories.forEach(category => {
+                    const devices = devicesByCategory[category];
+                    
+                    html += `
+                        <div class="category-section">
+                            <div class="category-title">${escapeHtml(category)} (${devices.length})</div>
+                            <div class="devices-grid">
+                    `;
+                    
+                    devices.forEach(device => {
+                        html += `
+                            <div class="device-card">
+                                <div class="device-name">${escapeHtml(device.name || 'Unknown Device')}</div>
+                                <div class="device-id-label">IO ID</div>
+                                <div class="device-id">${escapeHtml(device.io_id || 'N/A')}</div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                contentDiv.innerHTML = html;
+                
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Load devices on page load
+        loadDevices();
+        
+        // Refresh devices every 10 seconds
+        setInterval(loadDevices, 10000);
+    </script>
+{% endblock %}

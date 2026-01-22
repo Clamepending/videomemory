@@ -78,6 +78,7 @@
         <nav class="menu-nav">
             <a href="/" id="nav-chat">Chat</a>
             <a href="/tasks" id="nav-tasks">Tasks</a>
+            <a href="/devices" id="nav-devices">Devices</a>
         </nav>
     </div>
     <div class="content">
@@ -89,11 +90,14 @@
         const currentPath = window.location.pathname;
         const chatNav = document.getElementById('nav-chat');
         const tasksNav = document.getElementById('nav-tasks');
+        const devicesNav = document.getElementById('nav-devices');
         
         if (currentPath === '/' || currentPath === '/chat') {
             chatNav.classList.add('active');
         } else if (currentPath === '/tasks') {
             tasksNav.classList.add('active');
+        } else if (currentPath === '/devices') {
+            devicesNav.classList.add('active');
         }
     </script>
 </body>

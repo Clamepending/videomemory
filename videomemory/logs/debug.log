@@ -1,12 +1,34 @@
-2026-01-21 20:41:00,890 - ModelProviderFactory - INFO - Creating model provider: gemini-2.5-flash (Gemini25FlashProvider)
-2026-01-21 20:41:00,927 - GoogleProviders - INFO - Initialized Google GenAI client for gemini-2.5-flash
-2026-01-21 20:41:00,927 - asyncio - DEBUG - Using selector: KqueueSelector
-2026-01-21 20:41:01,047 - werkzeug - WARNING -  * Debugger is active!
-2026-01-21 20:41:01,055 - werkzeug - INFO -  * Debugger PIN: 394-331-644
-2026-01-21 20:41:01,073 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:41:01] "GET /api/tasks HTTP/1.1" 200 -
-2026-01-21 20:41:02,065 - fsevents - DEBUG - NativeEvent(path="/Users/mark/Desktop/projects/videomemory/flask_app/templates/index.html", inode=57449234, flags=11400, id=71520845): is_file, is_inode_meta_mod, is_modified
-2026-01-21 20:41:02,065 - fsevents - DEBUG - queue_event FileModifiedEvent(src_path='/Users/mark/Desktop/projects/videomemory/flask_app/templates/index.html', dest_path='', event_type='modified', is_directory=False, is_synthetic=False)
-2026-01-21 20:41:05,521 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:41:05] "GET /api/tasks HTTP/1.1" 200 -
-2026-01-21 20:41:10,521 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:41:10] "GET /api/tasks HTTP/1.1" 200 -
-2026-01-21 20:41:15,524 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:41:15] "GET /api/tasks HTTP/1.1" 200 -
-2026-01-21 20:41:20,519 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:41:20] "GET /api/tasks HTTP/1.1" 200 -
+2026-01-21 20:45:20,213 - ModelProviderFactory - INFO - Creating model provider: gemini-2.5-flash (Gemini25FlashProvider)
+2026-01-21 20:45:20,245 - GoogleProviders - INFO - Initialized Google GenAI client for gemini-2.5-flash
+2026-01-21 20:45:20,245 - asyncio - DEBUG - Using selector: KqueueSelector
+2026-01-21 20:45:20,367 - werkzeug - WARNING -  * Debugger is active!
+2026-01-21 20:45:20,373 - werkzeug - INFO -  * Debugger PIN: 394-331-644
+2026-01-21 20:45:21,169 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:21] "GET / HTTP/1.1" 200 -
+2026-01-21 20:45:22,433 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:22] "GET /devices HTTP/1.1" 200 -
+2026-01-21 20:45:22,833 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:22] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:45:28,262 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:28] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:45:32,852 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:32] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:45:34,507 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:34] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:45:34,897 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:34] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:45:35,287 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:35] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:45:43,705 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:43] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:45:49,526 - fsevents - DEBUG - NativeEvent(path="/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html", inode=57462749, flags=11400, id=71538090): is_file, is_inode_meta_mod, is_modified
+2026-01-21 20:45:49,527 - fsevents - DEBUG - queue_event FileModifiedEvent(src_path='/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html', dest_path='', event_type='modified', is_directory=False, is_synthetic=False)
+2026-01-21 20:45:50,567 - fsevents - DEBUG - NativeEvent(path="/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html", inode=57462749, flags=11400, id=71538126): is_file, is_inode_meta_mod, is_modified
+2026-01-21 20:45:50,567 - fsevents - DEBUG - queue_event FileModifiedEvent(src_path='/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html', dest_path='', event_type='modified', is_directory=False, is_synthetic=False)
+2026-01-21 20:45:51,320 - fsevents - DEBUG - NativeEvent(path="/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html", inode=57462749, flags=11400, id=71538156): is_file, is_inode_meta_mod, is_modified
+2026-01-21 20:45:51,320 - fsevents - DEBUG - queue_event FileModifiedEvent(src_path='/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html', dest_path='', event_type='modified', is_directory=False, is_synthetic=False)
+2026-01-21 20:45:52,735 - fsevents - DEBUG - NativeEvent(path="/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html", inode=57462749, flags=11400, id=71538590): is_file, is_inode_meta_mod, is_modified
+2026-01-21 20:45:52,736 - fsevents - DEBUG - queue_event FileModifiedEvent(src_path='/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html', dest_path='', event_type='modified', is_directory=False, is_synthetic=False)
+2026-01-21 20:45:52,748 - fsevents - DEBUG - NativeEvent(path="/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html", inode=57462749, flags=11400, id=71538593): is_file, is_inode_meta_mod, is_modified
+2026-01-21 20:45:52,748 - fsevents - DEBUG - queue_event FileModifiedEvent(src_path='/Users/mark/Desktop/projects/videomemory/flask_app/templates/devices.html', dest_path='', event_type='modified', is_directory=False, is_synthetic=False)
+2026-01-21 20:45:53,761 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:45:53] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:46:00,579 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:46:00] "GET /devices HTTP/1.1" 200 -
+2026-01-21 20:46:01,872 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:46:01] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:46:11,857 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:46:11] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:46:14,119 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:46:14] "GET /devices HTTP/1.1" 200 -
+2026-01-21 20:46:14,588 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:46:14] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:46:25,746 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 20:46:25] "GET /api/devices HTTP/1.1" 200 -
+2026-01-21 20:46:31,101 - fsevents - DEBUG - NativeEvent(path="/Users/mark/Desktop/projects/videomemory/videomemory/system/stream_ingestors/video_stream_ingestor.py", inode=57461012, flags=11400, id=71542825): is_file, is_inode_meta_mod, is_modified
+2026-01-21 20:46:31,103 - fsevents - DEBUG - queue_event FileModifiedEvent(src_path='/Users/mark/Desktop/projects/videomemory/videomemory/system/stream_ingestors/video_stream_ingestor.py', dest_path='', event_type='modified', is_directory=False, is_synthetic=False)
+2026-01-21 20:46:31,104 - werkzeug - INFO -  * Detected change in '/Users/mark/Desktop/projects/videomemory/videomemory/system/stream_ingestors/video_stream_ingestor.py', reloading

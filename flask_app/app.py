@@ -117,6 +117,11 @@ def task_detail(task_id):
     """Render the task detail page."""
     return render_template('task_detail.html', task_id=task_id)
 
+@app.route('/devices')
+def devices():
+    """Render the devices page."""
+    return render_template('devices.html')
+
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
     """Get all tasks."""
@@ -134,6 +139,25 @@ def get_task(task_id):
         if task is None:
             return jsonify({'error': 'Task not found'}), 404
         return jsonify({'task': task})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/devices', methods=['GET'])
+def get_devices():
+    """Get all input devices."""
+    try:
+        devices_list = io_manager.list_all_streams()
+        # Organize by category
+        by_category = {}
+        for device in devices_list:
+            category = device.get('category', 'unknown')
+            if category not in by_category:
+                by_category[category] = []
+            by_category[category].append({
+                'io_id': device.get('io_id', ''),
+                'name': device.get('name', 'Unknown')
+            })
+        return jsonify({'devices': by_category})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -170,7 +194,7 @@ def chat():
                 await gen.aclose()
 
         # Run the coroutine in the background loop
-        future = asyncio.run_coroutine_threadsafe(get_respkonse(), background_loop)
+        future = asyncio.run_coroutine_threadsafe(get_response(), background_loop)
         future.result(timeout=60)  # 60 second timeout
         
         return jsonify({'response': final_response_text})
