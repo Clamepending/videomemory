@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block title %}Tasks - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+        .tasks-container {
+            width: 100%;
+            max-width: 1400px;
+            padding: 30px 20px;
+            height: 100%;
+            overflow-y: auto;
+        }
+        
+        .tasks-header {
+            margin-bottom: 30px;
+        }
+        
+        .tasks-header h1 {
+            font-size: 28px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 10px;
+        }
+        
+        .tasks-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .task-card {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .task-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        
+        .task-card.done {
+            opacity: 0.7;
+        }
+        
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        
+        .task-id {
+            font-size: 12px;
+            color: #888;
+            font-weight: 500;
+        }
+        
+        .task-status {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        
+        .task-status.active {
+            background: #19c37d;
+            color: white;
+        }
+        
+        .task-status.done {
+            background: #666;
+            color: #ececec;
+        }
+        
+        .task-description {
+            font-size: 16px;
+            color: #ececec;
+            line-height: 1.5;
+            margin-bottom: 15px;
+            flex: 1;
+        }
+        
+        .task-note {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #404040;
+        }
+        
+        .task-note-label {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        .task-note-content {
+            font-size: 14px;
+            color: #b0b0b0;
+            line-height: 1.5;
+            font-style: italic;
+        }
+        
+        .task-note-empty {
+            font-size: 14px;
+            color: #666;
+            font-style: italic;
+        }
+        
+        .task-note-timestamp {
+            font-size: 11px;
+            color: #666;
+            margin-top: 6px;
+        }
+        
+        .no-tasks {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+        
+        .no-tasks h2 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #666;
+        }
+        
+        .no-tasks p {
+            font-size: 14px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+        
+        .error {
+            text-align: center;
+            padding: 60px 20px;
+            color: #ff6b6b;
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="tasks-container">
+        <div class="tasks-header">
+            <h1>Tasks</h1>
+        </div>
+        <div id="tasksContent">
+            <div class="loading">Loading tasks...</div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        async function loadTasks() {
+            const contentDiv = document.getElementById('tasksContent');
+            
+            try {
+                const response = await fetch('/api/tasks');
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    contentDiv.innerHTML = `<div class="error">Error: ${data.error || 'Failed to load tasks'}</div>`;
+                    return;
+                }
+                
+                const tasks = data.tasks || [];
+                
+                if (tasks.length === 0) {
+                    contentDiv.innerHTML = `
+                        <div class="no-tasks">
+                            <h2>No tasks yet</h2>
+                            <p>Tasks will appear here when they are created.</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Sort tasks by task_id (as number) descending to show newest first
+                tasks.sort((a, b) => {
+                    const idA = parseInt(a.task_id) || 0;
+                    const idB = parseInt(b.task_id) || 0;
+                    return idB - idA;
+                });
+                
+                const tasksGrid = document.createElement('div');
+                tasksGrid.className = 'tasks-grid';
+                
+                tasks.forEach(task => {
+                    const taskCard = document.createElement('div');
+                    taskCard.className = `task-card ${task.done ? 'done' : ''}`;
+                    
+                    // Get latest note
+                    const latestNote = task.task_note && task.task_note.length > 0 
+                        ? task.task_note[task.task_note.length - 1] 
+                        : null;
+                    
+                    taskCard.innerHTML = `
+                        <div class="task-header">
+                            <span class="task-id">Task #${task.task_id || 'N/A'}</span>
+                            <span class="task-status ${task.done ? 'done' : 'active'}">
+                                ${task.done ? 'Done' : 'Active'}
+                            </span>
+                        </div>
+                        <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>
+                        <div class="task-note">
+                            <div class="task-note-label">Latest Note</div>
+                            ${latestNote 
+                                ? `<div class="task-note-content">${escapeHtml(latestNote.content || 'No content')}</div>
+                                   <div class="task-note-timestamp">${latestNote.timestamp || ''}</div>`
+                                : '<div class="task-note-empty">No notes yet</div>'
+                            }
+                        </div>
+                    `;
+                    
+                    tasksGrid.appendChild(taskCard);
+                });
+                
+                contentDiv.innerHTML = '';
+                contentDiv.appendChild(tasksGrid);
+                
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Load tasks on page load
+        loadTasks();
+        
+        // Refresh tasks every 5 seconds
+        setInterval(loadTasks, 5000);
+    </script>
+{% endblock %}

@@ -74,10 +74,37 @@ def setup_logging(log_dir: Path = None) -> dict:
     logging.getLogger('tasks').setLevel(logging.DEBUG)
     logging.getLogger('main').setLevel(logging.DEBUG)
     
+    # Create dedicated log file for VideoStreamIngestor
+    video_ingestor_log_file = log_dir / "video_ingestor.log"
+    
+    # Get or create the VideoStreamIngestor logger
+    video_ingestor_logger = logging.getLogger('VideoStreamIngestor')
+    
+    # Remove any existing handlers to avoid duplicates if setup_logging() is called multiple times
+    for handler in video_ingestor_logger.handlers[:]:
+        video_ingestor_logger.removeHandler(handler)
+    
+    # Create and configure the dedicated handler for video ingestor
+    video_ingestor_handler = logging.FileHandler(video_ingestor_log_file, mode='w')
+    video_ingestor_handler.setLevel(logging.DEBUG)
+    video_ingestor_handler.setFormatter(
+        logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    )
+    
+    # Add handler to VideoStreamIngestor logger only
+    video_ingestor_logger.addHandler(video_ingestor_handler)
+    # Disable propagation to prevent logs from also appearing in general log files
+    video_ingestor_logger.propagate = False
+    # Ensure the logger level is set to DEBUG to capture all messages
+    video_ingestor_logger.setLevel(logging.DEBUG)
     
     print(f"Logging to separate files by severity:")
     for level, file_path in log_files.items():
         print(f"  {level.upper()}: {file_path}")
+    print(f"  VideoStreamIngestor: {video_ingestor_log_file}")
+    
+    # Add video_ingestor log file to return dict
+    log_files['video_ingestor'] = video_ingestor_log_file
     
     return log_files
 

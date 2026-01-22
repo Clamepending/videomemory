@@ -1,12 +1,13 @@
-2026-01-21 18:37:56,389 - ModelProviderFactory - INFO - Creating model provider: gemini-2.5-flash (Gemini25FlashProvider)
-2026-01-21 18:37:56,422 - GoogleProviders - INFO - Initialized Google GenAI client for gemini-2.5-flash
-2026-01-21 18:37:56,423 - asyncio - DEBUG - Using selector: KqueueSelector
-2026-01-21 18:37:56,433 - werkzeug - WARNING -  * Debugger is active!
-2026-01-21 18:37:56,438 - werkzeug - INFO -  * Debugger PIN: 394-331-644
-2026-01-21 18:38:01,289 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 18:38:01] "GET / HTTP/1.1" 200 -
-2026-01-21 18:38:23,341 - asyncio - DEBUG - Using selector: KqueueSelector
-2026-01-21 18:38:23,378 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
-2026-01-21 18:38:23,378 - google_adk.google.adk.models.google_llm - DEBUG - 
+2026-01-21 19:05:57,143 - ModelProviderFactory - INFO - Creating model provider: gemini-2.5-flash (Gemini25FlashProvider)
+2026-01-21 19:05:57,176 - GoogleProviders - INFO - Initialized Google GenAI client for gemini-2.5-flash
+2026-01-21 19:05:57,177 - asyncio - DEBUG - Using selector: KqueueSelector
+2026-01-21 19:05:57,187 - werkzeug - WARNING -  * Debugger is active!
+2026-01-21 19:05:57,192 - werkzeug - INFO -  * Debugger PIN: 394-331-644
+2026-01-21 19:05:57,209 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:05:57] "GET / HTTP/1.1" 200 -
+2026-01-21 19:05:57,255 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:05:57] "GET / HTTP/1.1" 200 -
+2026-01-21 19:06:05,975 - asyncio - DEBUG - Using selector: KqueueSelector
+2026-01-21 19:06:06,013 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
+2026-01-21 19:06:06,013 - google_adk.google.adk.models.google_llm - DEBUG - 
 LLM Request:
 -----------------------------------------------------------
 System Instruction:
@@ -18,7 +19,7 @@ Config:
 {'http_options': {'headers': {'x-goog-api-client': 'google-adk/1.21.0 gl-python/3.13.5', 'user-agent': 'google-adk/1.21.0 gl-python/3.13.5'}}, 'tools': [{}]}
 -----------------------------------------------------------
 Contents:
-{"parts":[{"text":"hellllllo"}],"role":"user"}
+{"parts":[{"text":"helllasod"}],"role":"user"}
 -----------------------------------------------------------
 Functions:
 list_input_devices_with_ids: {} 
@@ -30,8 +31,8 @@ edit_task: {'task_id': {'type': <Type.STRING: 'STRING'>}, 'new_description': {'t
 action_router: {'request': {'type': <Type.STRING: 'STRING'>}} 
 -----------------------------------------------------------
 
-2026-01-21 18:38:24,104 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
-2026-01-21 18:38:24,105 - google_adk.google.adk.models.google_llm - DEBUG - 
+2026-01-21 19:06:06,631 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
+2026-01-21 19:06:06,631 - google_adk.google.adk.models.google_llm - DEBUG - 
 LLM Response:
 -----------------------------------------------------------
 Text:
@@ -42,13 +43,13 @@ Function calls:
 
 -----------------------------------------------------------
 Raw response:
-{"sdk_http_response":{"headers":{"Content-Type":"application/json; charset=UTF-8","Vary":"Origin, X-Origin, Referer","Content-Encoding":"gzip","Date":"Thu, 22 Jan 2026 02:38:24 GMT","Server":"scaffolding on HTTPServer2","X-XSS-Protection":"0","X-Frame-Options":"SAMEORIGIN","X-Content-Type-Options":"nosniff","Server-Timing":"gfet4t7; dur=671","Alt-Svc":"h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000","Transfer-Encoding":"chunked"}},"candidates":[{"content":{"parts":[{"text":"Hello! How can I help you today?\n"}],"role":"model"},"finish_reason":"STOP","index":0}],"model_version":"gemini-2.5-flash","response_id":"oI1xaarQBMzFjMcPqY2g4Qk","usage_metadata":{"candidates_token_count":9,"prompt_token_count":1182,"prompt_tokens_details":[{"modality":"TEXT","token_count":1182}],"total_token_count":1191}}
+{"sdk_http_response":{"headers":{"Content-Type":"application/json; charset=UTF-8","Vary":"Origin, X-Origin, Referer","Content-Encoding":"gzip","Date":"Thu, 22 Jan 2026 03:06:06 GMT","Server":"scaffolding on HTTPServer2","X-XSS-Protection":"0","X-Frame-Options":"SAMEORIGIN","X-Content-Type-Options":"nosniff","Server-Timing":"gfet4t7; dur=561","Alt-Svc":"h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000","Transfer-Encoding":"chunked"}},"candidates":[{"content":{"parts":[{"text":"Hello! How can I help you today?\n"}],"role":"model"},"finish_reason":"STOP","index":0}],"model_version":"gemini-2.5-flash","response_id":"HpRxaYu5I6GL-8YPx7SEoQI","usage_metadata":{"candidates_token_count":9,"prompt_token_count":1182,"prompt_tokens_details":[{"modality":"TEXT","token_count":1182}],"total_token_count":1191}}
 -----------------------------------------------------------
 
-2026-01-21 18:38:24,113 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 18:38:24] "POST /chat HTTP/1.1" 200 -
-2026-01-21 18:38:31,059 - asyncio - DEBUG - Using selector: KqueueSelector
-2026-01-21 18:38:31,095 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
-2026-01-21 18:38:31,096 - google_adk.google.adk.models.google_llm - DEBUG - 
+2026-01-21 19:06:06,638 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:06:06] "POST /chat HTTP/1.1" 200 -
+2026-01-21 19:06:14,964 - asyncio - DEBUG - Using selector: KqueueSelector
+2026-01-21 19:06:15,001 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
+2026-01-21 19:06:15,002 - google_adk.google.adk.models.google_llm - DEBUG - 
 LLM Request:
 -----------------------------------------------------------
 System Instruction:
@@ -60,9 +61,9 @@ Config:
 {'http_options': {'headers': {'x-goog-api-client': 'google-adk/1.21.0 gl-python/3.13.5', 'user-agent': 'google-adk/1.21.0 gl-python/3.13.5'}}, 'tools': [{}]}
 -----------------------------------------------------------
 Contents:
-{"parts":[{"text":"hellllllo"}],"role":"user"}
+{"parts":[{"text":"helllasod"}],"role":"user"}
 {"parts":[{"text":"Hello! How can I help you today?\n"}],"role":"model"}
-{"parts":[{"text":"great"}],"role":"user"}
+{"parts":[{"text":"please ocunt fingers"}],"role":"user"}
 -----------------------------------------------------------
 Functions:
 list_input_devices_with_ids: {} 
@@ -74,18 +75,128 @@ edit_task: {'task_id': {'type': <Type.STRING: 'STRING'>}, 'new_description': {'t
 action_router: {'request': {'type': <Type.STRING: 'STRING'>}} 
 -----------------------------------------------------------
 
-2026-01-21 18:38:31,929 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
-2026-01-21 18:38:31,930 - google_adk.google.adk.models.google_llm - DEBUG - 
+2026-01-21 19:06:15,862 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
+2026-01-21 19:06:15,863 - google_genai.types - WARNING - Warning: there are non-text parts in the response: ['function_call'], returning concatenated text result from text parts. Check the full candidates.content.parts accessor to get the full model response.
+2026-01-21 19:06:15,863 - google_adk.google.adk.models.google_llm - DEBUG - 
 LLM Response:
 -----------------------------------------------------------
 Text:
-Great! Let me know if you need assistance with anything.
+None
+-----------------------------------------------------------
+Function calls:
+name: list_input_devices_with_ids, args: {}
+-----------------------------------------------------------
+Raw response:
+{"sdk_http_response":{"headers":{"Content-Type":"application/json; charset=UTF-8","Vary":"Origin, X-Origin, Referer","Content-Encoding":"gzip","Date":"Thu, 22 Jan 2026 03:06:15 GMT","Server":"scaffolding on HTTPServer2","X-XSS-Protection":"0","X-Frame-Options":"SAMEORIGIN","X-Content-Type-Options":"nosniff","Server-Timing":"gfet4t7; dur=811","Alt-Svc":"h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000","Transfer-Encoding":"chunked"}},"candidates":[{"content":{"parts":[{"function_call":{"args":{},"name":"list_input_devices_with_ids"},"thought_signature":"CoYCAXLI2nzYf5FULLmoteysjk2gu-XglXO9NM6clEkyBkOOJJDO3S4FhMrgBhNv6p3aVaCGnzbb_oVUwc-k_btkv3mOQqbS_igCUcYQTGKOoCxOSN7iuB-EgxKXVrI8ndaaUa0Tj56RFPy_-U6U4JtcEb3iUUGQbLCgVyEYtEqLoMfL9wjpb3c5QSNbhv8fU6G8rD5oWZ2YnDILNgTw1hHqKs6_KxMTveBxc-P9qMwA9U7m_W8pkhCBwCgYMR0wTXPGUjguJ60qQ5Jm63utEbzfAMprMdkRwtbI8Vj_OXp8fuGngQbK5ixRmsSFzqnBT9-qA4DUbwDAuPEzEGQjUjPV5UL-oPXmeg=="}],"role":"model"},"finish_reason":"STOP","index":0}],"model_version":"gemini-2.5-flash","response_id":"J5RxaYOIMZPWjMcPr7XR0Ak","usage_metadata":{"candidates_token_count":16,"prompt_token_count":1198,"prompt_tokens_details":[{"modality":"TEXT","token_count":1198}],"thoughts_token_count":49,"total_token_count":1263}}
+-----------------------------------------------------------
+
+2026-01-21 19:06:17,079 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
+2026-01-21 19:06:17,080 - google_adk.google.adk.models.google_llm - DEBUG - 
+LLM Request:
+-----------------------------------------------------------
+System Instruction:
+You are a helpful and friendly system administrator. Be concise and clear in your responses. You have access to tools that can help you check available input devices on the system and manage tasks. When a user requests a task that requires an input device, you should automatically call list_input_devices_with_ids to find the appropriate device and its io_id. Do not ask the user for io_ids - always retrieve them yourself using the available tools. When selecting a device, prefer video cameras (camera category) when possible. Once you have the io_id, use add_task with the io_id to create tasks. Use list_tasks to view all tasks (optionally filtered by io_id). When a user asks a question about a task, first call list_tasks to find the relevant task_id, then call get_info_on ONCE with that task_id to get detailed information. Do not call get_info_on multiple times for the same task_id. Make sure to call get_info_on when answering a user's question about a task.Use remove_task to delete a task by its task_id. Use edit_task to update a task's description. This is especially useful when a user wants to amend an existing task, for example, to add an action to be triggered when a condition is met. When editing a task, preserve the original detection part and add the new action requirement. For example, if a task is 'Count claps' and the user wants to send an email when claps reach 1, edit it to 'Count claps and when it reaches 1 send email to [email]'. You can also use take_output_action to execute various actions like sending emails, opening/closing doors, or controlling lights by providing a natural language description of the action. IMPORTANT: When a user requests an action to be triggered based on a video feed event (e.g., 'send me an email when I clap', 'turn on lights when I wave'), you have two options: 1. If a relevant task already exists (e.g., 'Count claps'), use edit_task to amend it with the action. 2. If no relevant task exists, add a NEW task that combines both the detection and the action. 
+
+You are an agent. Your internal name is "system_administrator". The description about you is "A helpful system administrator. It controls the system on behalf of the user.".
+-----------------------------------------------------------
+Config:
+{'http_options': {'headers': {'x-goog-api-client': 'google-adk/1.21.0 gl-python/3.13.5', 'user-agent': 'google-adk/1.21.0 gl-python/3.13.5'}}, 'tools': [{}]}
+-----------------------------------------------------------
+Contents:
+{"parts":[{"text":"helllasod"}],"role":"user"}
+{"parts":[{"text":"Hello! How can I help you today?\n"}],"role":"model"}
+{"parts":[{"text":"please ocunt fingers"}],"role":"user"}
+{"parts":[{"function_call":{"args":{},"name":"list_input_devices_with_ids"},"thought_signature":"CoYCAXLI2nzYf5FULLmoteysjk2gu-XglXO9NM6clEkyBkOOJJDO3S4FhMrgBhNv6p3aVaCGnzbb_oVUwc-k_btkv3mOQqbS_igCUcYQTGKOoCxOSN7iuB-EgxKXVrI8ndaaUa0Tj56RFPy_-U6U4JtcEb3iUUGQbLCgVyEYtEqLoMfL9wjpb3c5QSNbhv8fU6G8rD5oWZ2YnDILNgTw1hHqKs6_KxMTveBxc-P9qMwA9U7m_W8pkhCBwCgYMR0wTXPGUjguJ60qQ5Jm63utEbzfAMprMdkRwtbI8Vj_OXp8fuGngQbK5ixRmsSFzqnBT9-qA4DUbwDAuPEzEGQjUjPV5UL-oPXmeg=="}],"role":"model"}
+{"parts":[{"function_response":{"name":"list_input_devices_with_ids","response":{"status":"success","input_devices":{"camera":[{"io_id":"ddeb3cd4","name":""},{"io_id":"9856d608","name":"FaceTime HD Camera"},{"io_id":"ea036130","name":"OBS Camera Extension"}]}}}}],"role":"user"}
+-----------------------------------------------------------
+Functions:
+list_input_devices_with_ids: {} 
+add_task: {'io_id': {'type': <Type.STRING: 'STRING'>}, 'task_description': {'type': <Type.STRING: 'STRING'>}} 
+list_tasks: {'io_id': {'nullable': True, 'type': <Type.STRING: 'STRING'>}} 
+get_info_on: {'task_id': {'type': <Type.STRING: 'STRING'>}} 
+remove_task: {'task_id': {'type': <Type.STRING: 'STRING'>}} 
+edit_task: {'task_id': {'type': <Type.STRING: 'STRING'>}, 'new_description': {'type': <Type.STRING: 'STRING'>}} 
+action_router: {'request': {'type': <Type.STRING: 'STRING'>}} 
+-----------------------------------------------------------
+
+2026-01-21 19:06:18,046 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
+2026-01-21 19:06:18,047 - google_adk.google.adk.models.google_llm - DEBUG - 
+LLM Response:
+-----------------------------------------------------------
+Text:
+None
+-----------------------------------------------------------
+Function calls:
+name: add_task, args: {'task_description': 'Count fingers', 'io_id': '9856d608'}
+-----------------------------------------------------------
+Raw response:
+{"sdk_http_response":{"headers":{"Content-Type":"application/json; charset=UTF-8","Vary":"Origin, X-Origin, Referer","Content-Encoding":"gzip","Date":"Thu, 22 Jan 2026 03:06:18 GMT","Server":"scaffolding on HTTPServer2","X-XSS-Protection":"0","X-Frame-Options":"SAMEORIGIN","X-Content-Type-Options":"nosniff","Server-Timing":"gfet4t7; dur=908","Alt-Svc":"h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000","Transfer-Encoding":"chunked"}},"candidates":[{"content":{"parts":[{"function_call":{"args":{"task_description":"Count fingers","io_id":"9856d608"},"name":"add_task"},"thought_signature":"Ct4CAXLI2nyOUYdHGGLwNzZAYVzgFtVKs1JAYY2B_buPRwAZ5k4-E2QRduBvZedwRh3L1jd5fACgTOKoQVT48LsaDRaPsAnZ6fO4AjpIGW9qjKTHJB6lxj0vdFLD0mTPe3rlRZMHhzP123w1-8wTAIp-LfST_F-uEPdfBbzpQX36JGwrD1MUmvKEplv-8ZFWG693hhqBLotfGaTWi07nF9WtO7x9rQL5HKe5h9AAtsQggVXZIkALhlGzjy42ctPBtuYX0UI-2S681xzsBzAU28oGxycm1CKT9-ur1NJWmuofIozzMw3zwQPUVb8KUdd3Qm31b1-C7QOLAw6ARy9qQUPXLPKJYaPs2SKGlg_OBNYr2tzwed6Rr4g53aS0NnvxI1ry1_RILKO9PlvobUXthGlJ9W7Exi__D9sKSACnwSMG0fkY9nN-7vTN696CzI_ifHsBa9KtiAbDd_aMjnz8Jv8="}],"role":"model"},"finish_reason":"STOP","index":0}],"model_version":"gemini-2.5-flash","response_id":"KZRxaZ_IO_KV-8YPyrn4sAw","usage_metadata":{"candidates_token_count":32,"prompt_token_count":1307,"prompt_tokens_details":[{"modality":"TEXT","token_count":1307}],"thoughts_token_count":78,"total_token_count":1417}}
+-----------------------------------------------------------
+
+2026-01-21 19:06:18,386 - tasks - DEBUG - [DEBUG] add_task: About to call task_manager.add_task for io_id=9856d608, task=Count fingers
+2026-01-21 19:06:18,760 - TaskManager - DEBUG - [DEBUG] TaskManager.add_task: About to call ingestor.add_task for io_id=9856d608
+2026-01-21 19:06:18,760 - TaskManager - DEBUG - [DEBUG] TaskManager.add_task: ingestor.add_task completed successfully
+2026-01-21 19:06:18,760 - tasks - DEBUG - [DEBUG] add_task: task_manager.add_task returned: {'status': 'success', 'message': 'Task added successfully', 'task_id': '0', 'io_id': '9856d608', 'task_description': 'Count fingers'}
+2026-01-21 19:06:18,760 - tasks - INFO - [INFO] add_task: Successfully added task, returning result
+2026-01-21 19:06:19,206 - google_adk.google.adk.models.google_llm - INFO - Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.GEMINI_API, stream: False
+2026-01-21 19:06:19,206 - google_adk.google.adk.models.google_llm - DEBUG - 
+LLM Request:
+-----------------------------------------------------------
+System Instruction:
+You are a helpful and friendly system administrator. Be concise and clear in your responses. You have access to tools that can help you check available input devices on the system and manage tasks. When a user requests a task that requires an input device, you should automatically call list_input_devices_with_ids to find the appropriate device and its io_id. Do not ask the user for io_ids - always retrieve them yourself using the available tools. When selecting a device, prefer video cameras (camera category) when possible. Once you have the io_id, use add_task with the io_id to create tasks. Use list_tasks to view all tasks (optionally filtered by io_id). When a user asks a question about a task, first call list_tasks to find the relevant task_id, then call get_info_on ONCE with that task_id to get detailed information. Do not call get_info_on multiple times for the same task_id. Make sure to call get_info_on when answering a user's question about a task.Use remove_task to delete a task by its task_id. Use edit_task to update a task's description. This is especially useful when a user wants to amend an existing task, for example, to add an action to be triggered when a condition is met. When editing a task, preserve the original detection part and add the new action requirement. For example, if a task is 'Count claps' and the user wants to send an email when claps reach 1, edit it to 'Count claps and when it reaches 1 send email to [email]'. You can also use take_output_action to execute various actions like sending emails, opening/closing doors, or controlling lights by providing a natural language description of the action. IMPORTANT: When a user requests an action to be triggered based on a video feed event (e.g., 'send me an email when I clap', 'turn on lights when I wave'), you have two options: 1. If a relevant task already exists (e.g., 'Count claps'), use edit_task to amend it with the action. 2. If no relevant task exists, add a NEW task that combines both the detection and the action. 
+
+You are an agent. Your internal name is "system_administrator". The description about you is "A helpful system administrator. It controls the system on behalf of the user.".
+-----------------------------------------------------------
+Config:
+{'http_options': {'headers': {'x-goog-api-client': 'google-adk/1.21.0 gl-python/3.13.5', 'user-agent': 'google-adk/1.21.0 gl-python/3.13.5'}}, 'tools': [{}]}
+-----------------------------------------------------------
+Contents:
+{"parts":[{"text":"helllasod"}],"role":"user"}
+{"parts":[{"text":"Hello! How can I help you today?\n"}],"role":"model"}
+{"parts":[{"text":"please ocunt fingers"}],"role":"user"}
+{"parts":[{"function_call":{"args":{},"name":"list_input_devices_with_ids"},"thought_signature":"CoYCAXLI2nzYf5FULLmoteysjk2gu-XglXO9NM6clEkyBkOOJJDO3S4FhMrgBhNv6p3aVaCGnzbb_oVUwc-k_btkv3mOQqbS_igCUcYQTGKOoCxOSN7iuB-EgxKXVrI8ndaaUa0Tj56RFPy_-U6U4JtcEb3iUUGQbLCgVyEYtEqLoMfL9wjpb3c5QSNbhv8fU6G8rD5oWZ2YnDILNgTw1hHqKs6_KxMTveBxc-P9qMwA9U7m_W8pkhCBwCgYMR0wTXPGUjguJ60qQ5Jm63utEbzfAMprMdkRwtbI8Vj_OXp8fuGngQbK5ixRmsSFzqnBT9-qA4DUbwDAuPEzEGQjUjPV5UL-oPXmeg=="}],"role":"model"}
+{"parts":[{"function_response":{"name":"list_input_devices_with_ids","response":{"status":"success","input_devices":{"camera":[{"io_id":"ddeb3cd4","name":""},{"io_id":"9856d608","name":"FaceTime HD Camera"},{"io_id":"ea036130","name":"OBS Camera Extension"}]}}}}],"role":"user"}
+{"parts":[{"function_call":{"args":{"task_description":"Count fingers","io_id":"9856d608"},"name":"add_task"},"thought_signature":"Ct4CAXLI2nyOUYdHGGLwNzZAYVzgFtVKs1JAYY2B_buPRwAZ5k4-E2QRduBvZedwRh3L1jd5fACgTOKoQVT48LsaDRaPsAnZ6fO4AjpIGW9qjKTHJB6lxj0vdFLD0mTPe3rlRZMHhzP123w1-8wTAIp-LfST_F-uEPdfBbzpQX36JGwrD1MUmvKEplv-8ZFWG693hhqBLotfGaTWi07nF9WtO7x9rQL5HKe5h9AAtsQggVXZIkALhlGzjy42ctPBtuYX0UI-2S681xzsBzAU28oGxycm1CKT9-ur1NJWmuofIozzMw3zwQPUVb8KUdd3Qm31b1-C7QOLAw6ARy9qQUPXLPKJYaPs2SKGlg_OBNYr2tzwed6Rr4g53aS0NnvxI1ry1_RILKO9PlvobUXthGlJ9W7Exi__D9sKSACnwSMG0fkY9nN-7vTN696CzI_ifHsBa9KtiAbDd_aMjnz8Jv8="}],"role":"model"}
+{"parts":[{"function_response":{"name":"add_task","response":{"status":"success","message":"Task added successfully","task_id":"0","io_id":"9856d608","task_description":"Count fingers","device_info":{"io_id":"9856d608","category":"camera","name":"FaceTime HD Camera"}}}}],"role":"user"}
+-----------------------------------------------------------
+Functions:
+list_input_devices_with_ids: {} 
+add_task: {'io_id': {'type': <Type.STRING: 'STRING'>}, 'task_description': {'type': <Type.STRING: 'STRING'>}} 
+list_tasks: {'io_id': {'nullable': True, 'type': <Type.STRING: 'STRING'>}} 
+get_info_on: {'task_id': {'type': <Type.STRING: 'STRING'>}} 
+remove_task: {'task_id': {'type': <Type.STRING: 'STRING'>}} 
+edit_task: {'task_id': {'type': <Type.STRING: 'STRING'>}, 'new_description': {'type': <Type.STRING: 'STRING'>}} 
+action_router: {'request': {'type': <Type.STRING: 'STRING'>}} 
+-----------------------------------------------------------
+
+2026-01-21 19:06:19,210 - google_genai.models - INFO - AFC is enabled with max remote calls: 10.
+2026-01-21 19:06:19,215 - httpcore.connection - DEBUG - connect_tcp.started host='generativelanguage.googleapis.com' port=443 local_address=None timeout=None socket_options=None
+2026-01-21 19:06:19,223 - httpcore.connection - DEBUG - connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x119078590>
+2026-01-21 19:06:19,223 - httpcore.connection - DEBUG - start_tls.started ssl_context=<ssl.SSLContext object at 0x11276f0b0> server_hostname='generativelanguage.googleapis.com' timeout=None
+2026-01-21 19:06:19,247 - httpcore.connection - DEBUG - start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x1190882d0>
+2026-01-21 19:06:19,247 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2026-01-21 19:06:19,247 - httpcore.http11 - DEBUG - send_request_headers.complete
+2026-01-21 19:06:19,247 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2026-01-21 19:06:19,247 - httpcore.http11 - DEBUG - send_request_body.complete
+2026-01-21 19:06:19,247 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2026-01-21 19:06:19,902 - google_adk.google.adk.models.google_llm - INFO - Response received from the model.
+2026-01-21 19:06:19,903 - google_adk.google.adk.models.google_llm - DEBUG - 
+LLM Response:
+-----------------------------------------------------------
+Text:
+I have started a task to count fingers using the FaceTime HD Camera. The task ID is 0.
 -----------------------------------------------------------
 Function calls:
 
 -----------------------------------------------------------
 Raw response:
-{"sdk_http_response":{"headers":{"Content-Type":"application/json; charset=UTF-8","Vary":"Origin, X-Origin, Referer","Content-Encoding":"gzip","Date":"Thu, 22 Jan 2026 02:38:31 GMT","Server":"scaffolding on HTTPServer2","X-XSS-Protection":"0","X-Frame-Options":"SAMEORIGIN","X-Content-Type-Options":"nosniff","Server-Timing":"gfet4t7; dur=783","Alt-Svc":"h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000","Transfer-Encoding":"chunked"}},"candidates":[{"content":{"parts":[{"text":"Great! Let me know if you need assistance with anything.","thought_signature":"CroCAXLI2nz48EaKcMEI1lfSHr-VKWSvGlb1CBru1H75fCiY723d7KsG-u0BlYTkYhlVAMbhck8GUaJsAP7-wUdFePafgnJ6d3kt0qL3ToebupwvjBKhP6rx2zfWaBCH0gCWX-_YnQfjtSTQ72A6WIEtbT316bVSbY8CPmWStp7tCtBzrDXCV6p4_rvIc4nuXBOx-Hi9AnPB-CBvq-RHgGKLRgiZIJyRVx9iWWwiv_ueG2lp78f_59MxHH9t6VdpDtog1TWUX_EocT2zJyJP1a4PpHh02WL28wHgVGRgMDQZIkdVmhcRH7Pjh4YV1UO-pZhTp2OyM-RJfaty8efv3OHswmwMo0wTKwknIhnGHr5VHtWEi51w1Pxplmsy1x7Xn6ptPmJvvsYD5yqonFuFkYzLjlsDJRoYZi2Kv5A="}],"role":"model"},"finish_reason":"STOP","index":0}],"model_version":"gemini-2.5-flash","response_id":"p41xaZWKN9jxjrEP8u3jyAo","usage_metadata":{"candidates_token_count":12,"prompt_token_count":1195,"prompt_tokens_details":[{"modality":"TEXT","token_count":1195}],"thoughts_token_count":53,"total_token_count":1260}}
+{"sdk_http_response":{"headers":{"Content-Type":"application/json; charset=UTF-8","Vary":"Origin, X-Origin, Referer","Content-Encoding":"gzip","Date":"Thu, 22 Jan 2026 03:06:19 GMT","Server":"scaffolding on HTTPServer2","X-XSS-Protection":"0","X-Frame-Options":"SAMEORIGIN","X-Content-Type-Options":"nosniff","Server-Timing":"gfet4t7; dur=555","Alt-Svc":"h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000","Transfer-Encoding":"chunked"}},"candidates":[{"content":{"parts":[{"text":"I have started a task to count fingers using the FaceTime HD Camera. The task ID is 0."}],"role":"model"},"finish_reason":"STOP","index":0}],"model_version":"gemini-2.5-flash","response_id":"K5Rxab7HLt6Z_uMP8_i4oAY","usage_metadata":{"cache_tokens_details":[{"modality":"TEXT","token_count":727}],"cached_content_token_count":727,"candidates_token_count":21,"prompt_token_count":1429,"prompt_tokens_details":[{"modality":"TEXT","token_count":1429}],"total_token_count":1450}}
 -----------------------------------------------------------
 
-2026-01-21 18:38:31,933 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 18:38:31] "POST /chat HTTP/1.1" 200 -
+2026-01-21 19:06:19,903 - werkzeug - INFO - 127.0.0.1 - - [21/Jan/2026 19:06:19] "POST /chat HTTP/1.1" 200 -
+2026-01-21 19:06:21,339 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Content-Type', b'application/json; charset=UTF-8'), (b'Vary', b'Origin'), (b'Vary', b'X-Origin'), (b'Vary', b'Referer'), (b'Content-Encoding', b'gzip'), (b'Date', b'Thu, 22 Jan 2026 03:06:21 GMT'), (b'Server', b'scaffolding on HTTPServer2'), (b'X-XSS-Protection', b'0'), (b'X-Frame-Options', b'SAMEORIGIN'), (b'X-Content-Type-Options', b'nosniff'), (b'Server-Timing', b'gfet4t7; dur=1976'), (b'Alt-Svc', b'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000'), (b'Transfer-Encoding', b'chunked')])
+2026-01-21 19:06:21,341 - httpx - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent "HTTP/1.1 200 OK"
+2026-01-21 19:06:21,341 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2026-01-21 19:06:21,342 - httpcore.http11 - DEBUG - receive_response_body.complete
+2026-01-21 19:06:21,342 - httpcore.http11 - DEBUG - response_closed.started
+2026-01-21 19:06:21,342 - httpcore.http11 - DEBUG - response_closed.complete

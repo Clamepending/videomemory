@@ -1,24 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Agent Chat</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #212121;
-            height: 100vh;
-            display: flex;
-            justify-content: center;
+{% extends "base.html" %}
+
+{% block title %}Admin Agent Chat - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+        .content {
             align-items: center;
-            color: #ececec;
         }
         
         .chat-container {
@@ -158,9 +144,9 @@
             color: #888;
             font-style: italic;
         }
-    </style>
-</head>
-<body>
+{% endblock %}
+
+{% block content %}
     <div class="chat-container">
         <div class="chat-header">
             <h1>Admin Agent Chat</h1>
@@ -177,7 +163,9 @@
             <button class="send-button" id="sendButton" onclick="sendMessage()">Send</button>
         </div>
     </div>
+{% endblock %}
 
+{% block extra_scripts %}
     <script>
         const messagesDiv = document.getElementById('messages');
         const messageInput = document.getElementById('messageInput');
@@ -256,5 +244,4 @@
         // Focus input on load
         messageInput.focus();
     </script>
-</body>
-</html>
+{% endblock %}

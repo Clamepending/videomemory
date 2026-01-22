@@ -68,6 +68,20 @@ def index():
     """Render the chat interface."""
     return render_template('index.html')
 
+@app.route('/tasks')
+def tasks():
+    """Render the tasks page."""
+    return render_template('tasks.html')
+
+@app.route('/api/tasks', methods=['GET'])
+def get_tasks():
+    """Get all tasks."""
+    try:
+        tasks_list = task_manager.list_tasks()
+        return jsonify({'tasks': tasks_list})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/chat', methods=['POST'])
 def chat():
     """Handle chat messages."""
