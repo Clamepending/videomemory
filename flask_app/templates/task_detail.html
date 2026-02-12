@@ -85,6 +85,19 @@
             color: #ffe8a3;
         }
         
+        .task-device {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #999;
+            margin-bottom: 16px;
+        }
+
+        .task-device .device-icon {
+            font-size: 14px;
+        }
+
         .task-description {
             font-size: 18px;
             color: #ececec;
@@ -170,12 +183,33 @@
 {% block extra_scripts %}
     <script>
         const taskId = '{{ task_id }}';
-        
+        let deviceNames = {};
+
+        async function fetchDeviceNames() {
+            try {
+                const resp = await fetch('/api/devices');
+                const data = await resp.json();
+                const devices = data.devices || {};
+                deviceNames = {};
+                for (const category of Object.values(devices)) {
+                    for (const dev of category) {
+                        deviceNames[dev.io_id] = dev.name;
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch devices:', e);
+            }
+        }
+
         async function loadTaskDetail() {
             const contentDiv = document.getElementById('taskDetailContent');
             
             try {
-                const response = await fetch(`/api/task/${taskId}`);
+                // Fetch task and device names in parallel
+                const [response] = await Promise.all([
+                    fetch(`/api/task/${taskId}`),
+                    Object.keys(deviceNames).length === 0 ? fetchDeviceNames() : Promise.resolve()
+                ]);
                 const data = await response.json();
                 
                 if (!response.ok) {
@@ -193,6 +227,9 @@
                     'terminated': 'Terminated'
                 };
                 
+                // Resolve device name from io_id
+                const deviceName = deviceNames[task.io_id] || `Device ${task.io_id}`;
+                
                 let taskInfoHtml = `
                     <div class="task-info-card">
                         <div class="task-info-header">
@@ -200,6 +237,10 @@
                             <span class="task-status ${status}">
                                 ${statusLabels[status] || status}
                             </span>
+                        </div>
+                        <div class="task-device">
+                            <span class="device-icon">&#9654;</span>
+                            ${escapeHtml(deviceName)}
                         </div>
                         <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>
                     </div>

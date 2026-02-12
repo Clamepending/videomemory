@@ -281,8 +281,58 @@ class TaskManager:
             return True
         return False
     
+    def stop_task(self, task_id: str) -> Dict:
+        """Stop a running task — marks it as done and removes it from the ingestor,
+        but keeps it visible in the tasks list with all its notes preserved.
+        
+        Args:
+            task_id: The unique identifier of the task
+        
+        Returns:
+            Dictionary with status and message
+        """
+        if task_id not in self._tasks:
+            return {"status": "error", "message": f"Task '{task_id}' not found"}
+        
+        task = self._tasks[task_id]
+        
+        if task.done:
+            return {"status": "error", "message": f"Task '{task_id}' is already stopped"}
+        
+        io_id = task.io_id
+        
+        # Remove from ingestor (stops processing) but keep the Task object
+        if io_id in self._ingestors:
+            self._ingestors[io_id].remove_task(task.task_desc)
+        
+        # Mark as done
+        task.done = True
+        task.status = STATUS_DONE
+        
+        # Persist
+        if self._db:
+            try:
+                self._db.update_task_done(task_id, True, status=STATUS_DONE)
+            except Exception as e:
+                logger.error(f"Failed to persist stop for task {task_id}: {e}")
+        
+        # Clean up ingestor if no active tasks remain for this io_id
+        active_for_io = [t for t in self._tasks.values() if t.io_id == io_id and not t.done]
+        if len(active_for_io) == 0 and io_id in self._ingestors:
+            logger.info(f"VideoStreamIngestor for io_id={io_id} has no active tasks. Deleting ingestor.")
+            del self._ingestors[io_id]
+        
+        return {
+            "status": "success",
+            "message": f"Task '{task_id}' stopped successfully",
+            "task_id": task_id,
+        }
+    
     def remove_task(self, task_id: str) -> bool:
-        """Remove a task from the manager.
+        """Permanently delete a task from the system.
+        
+        This removes the task entirely — from memory, the database, and the ingestor.
+        Use stop_task instead if you want to keep the task visible with its history.
         
         Args:
             task_id: The unique identifier of the task

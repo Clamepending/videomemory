@@ -184,11 +184,48 @@ def list_tasks(io_id: Optional[str] = None) -> dict:
         }
 
 
-def remove_task(task_id: str) -> dict:
-    """Removes a task by its task_id.
+def stop_task(task_id: str) -> dict:
+    """Stops a running task. The task is marked as done and its video processing is stopped,
+    but the task and all its notes remain visible in the tasks list.
+    
+    Use this when a user asks to stop, finish, end, or cancel a task.
     
     Args:
-        task_id: The unique identifier of the task to remove.
+        task_id: The unique identifier of the task to stop.
+    
+    Returns:
+        dict: A dictionary containing the stop status and message.
+    """
+    print(f"--- stop_task(task_id={task_id}) was called ---")
+    if _context is None:
+        return {
+            "status": "error",
+            "message": "Tool context not initialized. System managers not available.",
+        }
+    
+    if _context.task_manager is None:
+        return {
+            "status": "error",
+            "message": "Task manager not available in context",
+        }
+    
+    try:
+        return _context.task_manager.stop_task(task_id)
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to stop task: {str(e)}",
+        }
+
+
+def remove_task(task_id: str) -> dict:
+    """Permanently deletes a task and all its notes. The task will no longer appear in the tasks list.
+    
+    Use this only when a user explicitly wants to delete a task entirely.
+    To just stop a task while keeping its history, use stop_task instead.
+    
+    Args:
+        task_id: The unique identifier of the task to delete.
     
     Returns:
         dict: A dictionary containing the removal status and message.

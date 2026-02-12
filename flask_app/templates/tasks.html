@@ -88,6 +88,19 @@
             color: #ffe8a3;
         }
         
+        .task-device {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 12px;
+        }
+
+        .task-device .device-icon {
+            font-size: 13px;
+        }
+
         .task-description {
             font-size: 16px;
             color: #ececec;
@@ -171,14 +184,37 @@
 
 {% block extra_scripts %}
     <script>
+        // Cache device names: io_id -> device name
+        let deviceNames = {};
+
+        async function fetchDeviceNames() {
+            try {
+                const resp = await fetch('/api/devices');
+                const data = await resp.json();
+                const devices = data.devices || {};
+                deviceNames = {};
+                for (const category of Object.values(devices)) {
+                    for (const dev of category) {
+                        deviceNames[dev.io_id] = dev.name;
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch devices:', e);
+            }
+        }
+
         async function loadTasks() {
             const contentDiv = document.getElementById('tasksContent');
             
             try {
-                const response = await fetch('/api/tasks');
-                const data = await response.json();
+                // Fetch tasks and device names in parallel
+                const [tasksResp] = await Promise.all([
+                    fetch('/api/tasks'),
+                    Object.keys(deviceNames).length === 0 ? fetchDeviceNames() : Promise.resolve()
+                ]);
+                const data = await tasksResp.json();
                 
-                if (!response.ok) {
+                if (!tasksResp.ok) {
                     contentDiv.innerHTML = `<div class="error">Error: ${data.error || 'Failed to load tasks'}</div>`;
                     return;
                 }
@@ -217,6 +253,9 @@
                         'terminated': 'Terminated'
                     };
                     
+                    // Resolve device name from io_id
+                    const deviceName = deviceNames[task.io_id] || `Device ${task.io_id}`;
+                    
                     // Get latest note
                     const latestNote = task.task_note && task.task_note.length > 0 
                         ? task.task_note[task.task_note.length - 1] 
@@ -228,6 +267,10 @@
                             <span class="task-status ${status}">
                                 ${statusLabels[status] || status}
                             </span>
+                        </div>
+                        <div class="task-device">
+                            <span class="device-icon">&#9654;</span>
+                            ${escapeHtml(deviceName)}
                         </div>
                         <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>
                         <div class="task-note">
