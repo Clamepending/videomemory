@@ -383,6 +383,28 @@ class TaskManager:
             return ingestor.get_latest_frame()
         return None
     
+    def get_ingestor(self, io_id: str) -> Optional[VideoStreamIngestor]:
+        """Get the active VideoStreamIngestor for a device, if any.
+        
+        Args:
+            io_id: The IO device identifier
+            
+        Returns:
+            The VideoStreamIngestor instance, or None if no ingestor is active for this device
+        """
+        return self._ingestors.get(io_id)
+    
+    def has_ingestor(self, io_id: str) -> bool:
+        """Check whether there is an active ingestor for a device.
+        
+        Args:
+            io_id: The IO device identifier
+            
+        Returns:
+            True if an active ingestor exists for this device
+        """
+        return io_id in self._ingestors
+    
     def edit_task(self, task_id: str, new_description: str) -> Dict:
         """Edit/update a task's description.
         

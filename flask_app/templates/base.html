@@ -96,9 +96,10 @@
             '/devices': 'nav-devices',
             '/settings': 'nav-settings'
         };
-        // Also handle paths that start with /task/ (task detail pages)
+        // Also handle paths that start with /task/ or /device/ (detail/debug pages)
         let matchKey = currentPath;
         if (currentPath.startsWith('/task/')) matchKey = '/tasks';
+        if (currentPath.startsWith('/device/')) matchKey = '/devices';
         
         const activeId = navMap[matchKey];
         if (activeId) {

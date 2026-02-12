@@ -143,6 +143,11 @@ def settings_page():
     """Render the settings page."""
     return render_template('settings.html')
 
+@app.route('/device/<io_id>/debug')
+def device_debug(io_id):
+    """Render the ingestor debug page for a device."""
+    return render_template('ingestor_debug.html', io_id=io_id)
+
 # ── Task API ──────────────────────────────────────────────────
 
 @app.route('/api/tasks', methods=['GET'])
@@ -444,6 +449,106 @@ def get_device_preview(io_id):
             status=404,
             mimetype='image/jpeg'
         )
+
+# ── Ingestor Debug API ────────────────────────────────────────
+
+@app.route('/api/device/<io_id>/debug/status', methods=['GET'])
+def get_ingestor_status(io_id):
+    """Check whether an ingestor is running for a device."""
+    try:
+        has = task_manager.has_ingestor(io_id)
+        ingestor = task_manager.get_ingestor(io_id) if has else None
+        running = ingestor._running if ingestor else False
+        return jsonify({
+            'has_ingestor': has,
+            'running': running,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/device/<io_id>/debug/frame-and-prompt', methods=['GET'])
+def get_ingestor_frame_and_prompt(io_id):
+    """Get the latest frame and prompt from a device's ingestor."""
+    import base64
+    try:
+        ingestor = task_manager.get_ingestor(io_id)
+        if ingestor is None:
+            return jsonify({'error': 'No active ingestor for this device', 'frame_base64': None, 'prompt': ''}), 200
+        if not ingestor._running:
+            return jsonify({'error': 'Ingestor not running', 'frame_base64': None, 'prompt': ''}), 200
+        
+        latest_output = ingestor.get_latest_output()
+        if not latest_output:
+            return jsonify({'error': 'No output available yet', 'frame_base64': None, 'prompt': ''}), 200
+        
+        latest_frame = latest_output.get('frame')
+        latest_prompt = latest_output.get('prompt', '')
+        
+        if latest_frame is None:
+            return jsonify({'error': 'No frame available', 'frame_base64': None, 'prompt': latest_prompt or ''}), 200
+        
+        # Convert frame to base64
+        _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        image_base64 = base64.b64encode(buffer).decode('utf-8')
+        
+        return jsonify({
+            'frame_base64': image_base64,
+            'prompt': latest_prompt or ''
+        })
+    except Exception as e:
+        flask_logger.error(f"Error in debug frame-and-prompt for {io_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e), 'frame_base64': None, 'prompt': ''}), 500
+
+@app.route('/api/device/<io_id>/debug/history', methods=['GET'])
+def get_ingestor_history(io_id):
+    """Get output history from a device's ingestor."""
+    try:
+        ingestor = task_manager.get_ingestor(io_id)
+        if ingestor is None:
+            return jsonify({'history': [], 'count': 0, 'total_count': 0}), 200
+        
+        history = ingestor.get_output_history()
+        # Remove frames and prompts for JSON serialization
+        history_clean = [{k: v for k, v in item.items() if k not in ('frame', 'prompt')} for item in history]
+        total_count = ingestor.get_total_output_count()
+        return jsonify({
+            'history': history_clean,
+            'count': len(history_clean),
+            'total_count': total_count
+        })
+    except Exception as e:
+        flask_logger.error(f"Error in debug history for {io_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/device/<io_id>/debug/tasks', methods=['GET'])
+def get_ingestor_tasks(io_id):
+    """Get tasks from a device's ingestor."""
+    try:
+        ingestor = task_manager.get_ingestor(io_id)
+        if ingestor is None:
+            return jsonify({'tasks': []}), 200
+        
+        tasks = ingestor.get_tasks_list()
+        tasks_data = []
+        for task in tasks:
+            task_dict = {
+                'task_number': task.task_number,
+                'task_id': task.task_id,
+                'task_desc': task.task_desc,
+                'done': task.done,
+                'latest_note': None
+            }
+            if task.task_note and len(task.task_note) > 0:
+                latest_note_entry = task.task_note[-1]
+                if hasattr(latest_note_entry, 'to_dict'):
+                    task_dict['latest_note'] = latest_note_entry.to_dict()
+                else:
+                    task_dict['latest_note'] = latest_note_entry
+            tasks_data.append(task_dict)
+        return jsonify({'tasks': tasks_data})
+    except Exception as e:
+        flask_logger.error(f"Error in debug tasks for {io_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 # ── Settings API ──────────────────────────────────────────────
 

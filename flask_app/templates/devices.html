@@ -114,6 +114,31 @@
             margin-bottom: 6px;
             font-weight: 500;
         }
+
+        .device-debug-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 12px;
+            padding: 7px 14px;
+            background: #353535;
+            color: #b0b0b0;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 13px;
+            transition: background 0.2s, color 0.2s;
+            border: 1px solid #444;
+        }
+
+        .device-debug-link:hover {
+            background: #19c37d;
+            color: white;
+            border-color: #19c37d;
+        }
+
+        .device-debug-link .link-icon {
+            font-size: 14px;
+        }
         
         .device-preview {
             width: 100%;
@@ -263,6 +288,9 @@
                                 <div class="device-name">${escapeHtml(device.name || 'Unknown Device')}</div>
                                 <div class="device-id-label">IO ID</div>
                                 <div class="device-id">${escapeHtml(device.io_id || 'N/A')}</div>
+                                <a href="/device/${encodeURIComponent(device.io_id)}/debug" class="device-debug-link">
+                                    <span class="link-icon">&#9881;</span> Ingestor Debug
+                                </a>
                             </div>
                         `;
                     });
