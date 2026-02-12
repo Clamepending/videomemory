@@ -1,0 +1,31 @@
+[project]
+name = "videomemory"
+version = "0.1.0"
+description = "Video memory system with AI agents"
+requires-python = ">=3.9"
+dependencies = [
+    "google-adk",
+    "google-genai",
+    "python-dotenv",
+    "pyserial",
+    "opencv-python",
+    "pydantic",
+    "streamlit",
+    "openai",
+    "anthropic",
+    "httpx",
+    "matplotlib",
+    "flask",
+    "pyobjc",
+    "cv2-enumerate-cameras>=1.3.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["videomemory"]
+
+[dependency-groups]
+dev = []

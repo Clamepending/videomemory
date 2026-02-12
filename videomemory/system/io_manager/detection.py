@@ -1,27 +1,19 @@
 """Camera detection using OpenCV."""
 
 import platform
-import os
-import sys
-from contextlib import contextmanager
 from typing import List, Tuple
+
 try:
     import cv2
     CV2_AVAILABLE = True
 except ImportError:
     CV2_AVAILABLE = False
 
-
-@contextmanager
-def suppress_stderr():
-    """Context manager to suppress stderr output."""
-    with open(os.devnull, 'w') as devnull:
-        old_stderr = sys.stderr
-        sys.stderr = devnull
-        try:
-            yield
-        finally:
-            sys.stderr = old_stderr
+try:
+    from cv2_enumerate_cameras import enumerate_cameras
+    CV2_ENUMERATE_AVAILABLE = True
+except ImportError:
+    CV2_ENUMERATE_AVAILABLE = False
 
 
 class DeviceDetector:
@@ -30,76 +22,70 @@ class DeviceDetector:
     def __init__(self):
         """Initialize the detector."""
         self.is_mac = platform.system() == 'Darwin'
-        self.num_max_cameras = 10
-        # OpenCV warnings are suppressed via stderr redirection in detect_cameras()
     
     def detect_cameras(self) -> List[Tuple[int, str]]:
         """Detect camera devices using OpenCV indices.
         
         Returns:
-            List of tuples (index, name) where index is the OpenCV camera index
+            List of tuples (opencv_index, name) where index is the OpenCV camera index
         """
-        cameras = []
         if not CV2_AVAILABLE:
-            return cameras
+            return []
         
-        # Get system camera names for better naming (optional)
-        system_camera_names = self._get_system_camera_names()
+        # Use cv2-enumerate-cameras library if available (cleanest solution)
+        if CV2_ENUMERATE_AVAILABLE:
+            try:
+                backend = cv2.CAP_AVFOUNDATION if self.is_mac else cv2.CAP_ANY
+                cameras = []
+                for camera_info in enumerate_cameras(backend):
+                    cameras.append((camera_info.index, camera_info.name))
+                return cameras
+            except Exception:
+                # Fallback to manual detection if library fails
+                pass
         
-        for idx in range(self.num_max_cameras):
+        # Fallback: manual detection
+        if self.is_mac:
+            return self._detect_cameras_macos_fallback()
+        else:
+            return self._detect_cameras_generic()
+    
+    def _detect_cameras_macos_fallback(self) -> List[Tuple[int, str]]:
+        """Fallback detection for macOS when cv2-enumerate-cameras is not available."""
+        cameras = []
+        try:
+            from AVFoundation import AVCaptureDevice
+            av_devices = list(AVCaptureDevice.devicesWithMediaType_("vide") or [])
+            
+            for idx, device in enumerate(av_devices):
+                if device:
+                    name = device.localizedName() or f"Camera {idx}"
+                    cameras.append((idx, name))
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        
+        return cameras
+    
+    def _detect_cameras_generic(self) -> List[Tuple[int, str]]:
+        """Generic camera detection for non-macOS systems."""
+        cameras = []
+        # Try first 10 indices
+        for idx in range(10):
             cap = None
             try:
-                # Suppress OpenCV warnings during camera detection
-                with suppress_stderr():
-                    if self.is_mac:
-                        cap = cv2.VideoCapture(idx, cv2.CAP_AVFOUNDATION)
-                    else:
-                        cap = cv2.VideoCapture(idx)
-                
+                cap = cv2.VideoCapture(idx)
                 if cap.isOpened():
-                    # Use system name if available, otherwise generic name
-                    if idx < len(system_camera_names):
-                        name = system_camera_names[idx]
-                    else:
-                        name = f"Camera {idx}"
-                    
-                    cameras.append((idx, name))
-                
-                # Always release the capture, even if it didn't open successfully
-                if cap:
-                    cap.release()
+                    cameras.append((idx, f"Camera {idx}"))
             except Exception:
-                # Release on exception too
+                pass
+            finally:
                 if cap:
                     try:
                         cap.release()
                     except:
                         pass
-        
-        return cameras
-    
-    def _get_system_camera_names(self) -> List[str]:
-        """Get camera names from system (optional, for better naming)."""
-        import subprocess
-        cameras = []
-        
-        if self.is_mac:
-            try:
-                result = subprocess.run(
-                    ["system_profiler", "SPCameraDataType"],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-                if result.returncode == 0:
-                    for line in result.stdout.split('\n'):
-                        if 'Camera' in line or 'iSight' in line:
-                            parts = line.split(':')
-                            if len(parts) >= 2:
-                                cameras.append(parts[1].strip())
-            except Exception:
-                pass
-        
         return cameras
     
     def detect_all(self) -> dict:

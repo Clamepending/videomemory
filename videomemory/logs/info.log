@@ -1,13 +1,19 @@
-2026-02-12 10:29:19,703 - ModelProviderFactory - INFO - Creating model provider: gemini-2.5-flash (Gemini25FlashProvider)
-2026-02-12 10:29:19,732 - GoogleProviders - INFO - Initialized Google GenAI client for gemini-2.5-flash
-2026-02-12 10:29:19,849 - werkzeug - WARNING -  * Debugger is active!
-2026-02-12 10:29:19,865 - werkzeug - INFO -  * Debugger PIN: 354-759-067
-2026-02-12 10:29:21,320 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:29:21] "GET /api/devices HTTP/1.1" 200 -
-2026-02-12 10:29:22,111 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:29:22] "GET /api/device/1/preview?t=1770920961321 HTTP/1.1" 200 -
-2026-02-12 10:29:22,265 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:29:22] "GET /api/device/0/preview?t=1770920961321 HTTP/1.1" 200 -
-2026-02-12 10:29:31,752 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:29:31] "GET /api/devices HTTP/1.1" 200 -
-2026-02-12 10:29:32,471 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:29:32] "GET /api/device/1/preview?t=1770920971755 HTTP/1.1" 200 -
-2026-02-12 10:29:32,698 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:29:32] "GET /api/device/0/preview?t=1770920971755 HTTP/1.1" 200 -
-2026-02-12 10:29:41,860 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:29:41] "GET /api/devices HTTP/1.1" 200 -
-2026-02-12 10:29:42,673 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:29:42] "GET /api/device/1/preview?t=1770920981862 HTTP/1.1" 200 -
-2026-02-12 10:29:42,866 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:29:42] "GET /api/device/0/preview?t=1770920981862 HTTP/1.1" 200 -
+2026-02-12 10:41:19,097 - ModelProviderFactory - INFO - Creating model provider: gemini-2.5-flash (Gemini25FlashProvider)
+2026-02-12 10:41:19,131 - GoogleProviders - INFO - Initialized Google GenAI client for gemini-2.5-flash
+2026-02-12 10:41:19,253 - werkzeug - WARNING -  * Debugger is active!
+2026-02-12 10:41:19,262 - werkzeug - INFO -  * Debugger PIN: 141-557-640
+2026-02-12 10:41:24,647 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:24] "GET /tasks HTTP/1.1" 200 -
+2026-02-12 10:41:24,780 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:24] "GET /api/tasks HTTP/1.1" 200 -
+2026-02-12 10:41:25,186 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:25] "GET /devices HTTP/1.1" 200 -
+2026-02-12 10:41:25,268 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:25] "GET /api/devices HTTP/1.1" 200 -
+2026-02-12 10:41:25,640 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:25] "GET /api/device/1/preview?t=1770921685276 HTTP/1.1" 200 -
+2026-02-12 10:41:25,984 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:25] "GET /api/device/0/preview?t=1770921685276 HTTP/1.1" 200 -
+2026-02-12 10:41:35,275 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:35] "GET /api/devices HTTP/1.1" 200 -
+2026-02-12 10:41:35,546 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:35] "GET /api/device/1/preview?t=1770921695278 HTTP/1.1" 200 -
+2026-02-12 10:41:35,957 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:35] "GET /api/device/0/preview?t=1770921695278 HTTP/1.1" 200 -
+2026-02-12 10:41:46,161 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:46] "GET /api/devices HTTP/1.1" 200 -
+2026-02-12 10:41:46,429 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:46] "GET /api/device/1/preview?t=1770921706164 HTTP/1.1" 200 -
+2026-02-12 10:41:46,815 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:46] "GET /api/device/0/preview?t=1770921706164 HTTP/1.1" 200 -
+2026-02-12 10:41:56,163 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:56] "GET /api/devices HTTP/1.1" 200 -
+2026-02-12 10:41:56,441 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:56] "GET /api/device/1/preview?t=1770921716164 HTTP/1.1" 200 -
+2026-02-12 10:41:56,853 - werkzeug - INFO - 127.0.0.1 - - [12/Feb/2026 10:41:56] "GET /api/device/0/preview?t=1770921716164 HTTP/1.1" 200 -
