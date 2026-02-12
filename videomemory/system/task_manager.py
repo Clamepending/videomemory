@@ -80,6 +80,34 @@ class TaskManager:
                     "message": f"Invalid camera io_id '{io_id}'. Expected numeric index.",
                 }
             
+            # Verify the camera index matches the expected device name
+            # This helps catch cases where camera order has changed
+            expected_device_name = stream_info.get("name", "Unknown")
+            
+            # Verify that the camera index actually corresponds to the expected device
+            # by checking current device list
+            try:
+                current_cameras = self._io_manager._detector.detect_cameras()
+                camera_found = False
+                for idx, name in current_cameras:
+                    if idx == camera_index:
+                        if name != expected_device_name:
+                            logger.warning(
+                                f"Camera index mismatch! io_id={io_id} expects '{expected_device_name}' "
+                                f"but index {camera_index} is now '{name}'. Camera order may have changed."
+                            )
+                        camera_found = True
+                        break
+                if not camera_found:
+                    logger.warning(
+                        f"Camera index {camera_index} not found in current device list. "
+                        f"Device may have been disconnected."
+                    )
+            except Exception as e:
+                logger.debug(f"Could not verify camera index: {e}")
+            
+            logger.info(f"Creating VideoStreamIngestor for io_id={io_id} (camera_index={camera_index}, device={expected_device_name})")
+            
             self._ingestors[io_id] = VideoStreamIngestor(
                 camera_index, 
                 action_runner=self._action_runner,

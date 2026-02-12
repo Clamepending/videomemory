@@ -169,18 +169,55 @@ class VideoStreamIngestor:
                     task.task_note.append(error_note)
                 return
             
+            # Log which camera we're actually using (for debugging)
+            try:
+                from cv2_enumerate_cameras import enumerate_cameras
+                enum_cams = list(enumerate_cameras(cv2.CAP_AVFOUNDATION))
+                for c in enum_cams:
+                    if c.index == self.camera_index:
+                        logger.info(f"Opening camera index={self.camera_index}: {c.name} (unique ID: {c.path})")
+                        break
+            except Exception:
+                logger.info(f"Opening camera index={self.camera_index} (could not verify device name)")
+            
             logger.info(f"Started process input loop for camera index={self.camera_index}")
+            
+            # Warm up camera by reading a few frames (especially important for USB cameras)
+            # This helps avoid black frames at the start
+            for _ in range(5):
+                ret, _ = await asyncio.to_thread(self._camera.read)
+                if ret:
+                    break
+                await asyncio.sleep(0.1)
             
             while self._running:
                 try:
                     # Capture frame from camera
                     ret, current_frame = await asyncio.to_thread(self._camera.read)
                     if not ret:
+                        logger.debug(f"Failed to read frame from camera index={self.camera_index}")
+                        continue
+                    
+                    # Validate frame
+                    if current_frame is None or current_frame.size == 0:
+                        logger.debug(f"Invalid frame from camera index={self.camera_index}")
                         continue
                     
                     # Resize frame to target resolution if needed
                     if current_frame.shape[1] != self._target_resolution[0] or current_frame.shape[0] != self._target_resolution[1]:
                         current_frame = cv2.resize(current_frame, self._target_resolution, interpolation=cv2.INTER_LINEAR)
+                    
+                    # Always update latest frame for preview (show whatever we get, even if black)
+                    if current_frame.size > 0:
+                        self._latest_frame = current_frame.copy()
+                    
+                    # Log frame info periodically for debugging (every 100 frames)
+                    if self._total_output_count % 100 == 0:
+                        frame_mean = current_frame.mean()
+                        logger.debug(
+                            f"Camera index={self.camera_index}: frame shape={current_frame.shape}, "
+                            f"mean={frame_mean:.2f}, min={current_frame.min()}, max={current_frame.max()}"
+                        )
                     
                     # Build prompt before inference so we can store it with the output
                     prompt = self._build_prompt()
@@ -195,7 +232,6 @@ class VideoStreamIngestor:
                         results["prompt"] = prompt
                         self._output_history.append(results)
                         self._total_output_count += 1
-                        self._latest_frame = current_frame
                         
                         # Process results: update task notes and queue actions
                         await self._process_ml_results(results)

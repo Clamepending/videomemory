@@ -37,10 +37,56 @@ class DeviceDetector:
             try:
                 backend = cv2.CAP_AVFOUNDATION if self.is_mac else cv2.CAP_ANY
                 cameras = []
-                for camera_info in enumerate_cameras(backend):
-                    cameras.append((camera_info.index, camera_info.name))
+                
+                # Try enumeration up to 2 times (USB cameras may need a moment to be recognized)
+                import time
+                camera_infos = None
+                for attempt in range(2):
+                    try:
+                        camera_infos = list(enumerate_cameras(backend))
+                        if camera_infos:
+                            break
+                    except Exception:
+                        if attempt < 1:
+                            time.sleep(0.5)  # Wait a bit for USB cameras to be recognized
+                
+                if camera_infos is None:
+                    camera_infos = []
+                
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Found {len(camera_infos)} cameras from enumeration")
+                
+                for camera_info in camera_infos:
+                    # Simple verification: just check if camera can be opened
+                    # Don't require frame reading - camera might be in use or initializing
+                    cap = None
+                    try:
+                        cap = cv2.VideoCapture(camera_info.index, camera_info.backend)
+                        if cap.isOpened():
+                            # Camera can be opened - include it
+                            # Don't require frame reading (camera might be in use)
+                            cameras.append((camera_info.index, camera_info.name))
+                            logger.debug(f"Added camera {camera_info.index}: {camera_info.name}")
+                        else:
+                            logger.debug(f"Camera {camera_info.index} ({camera_info.name}) could not be opened")
+                    except Exception as e:
+                        logger.debug(f"Exception verifying camera {camera_info.index} ({camera_info.name}): {e}")
+                        # Skip if camera can't be opened at all
+                        pass
+                    finally:
+                        if cap is not None:
+                            try:
+                                cap.release()
+                            except Exception:
+                                pass
+                
+                logger.debug(f"Returning {len(cameras)} verified cameras")
                 return cameras
-            except Exception:
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"cv2-enumerate-cameras failed: {e}")
                 # Fallback to manual detection if library fails
                 pass
         
@@ -60,7 +106,21 @@ class DeviceDetector:
             for idx, device in enumerate(av_devices):
                 if device:
                     name = device.localizedName() or f"Camera {idx}"
-                    cameras.append((idx, name))
+                    # Simple verification: just check if camera can be opened
+                    cap = None
+                    try:
+                        cap = cv2.VideoCapture(idx, cv2.CAP_AVFOUNDATION)
+                        if cap.isOpened():
+                            # Camera can be opened - include it
+                            cameras.append((idx, name))
+                    except Exception:
+                        pass  # Skip if can't open
+                    finally:
+                        if cap is not None:
+                            try:
+                                cap.release()
+                            except Exception:
+                                pass
         except ImportError:
             pass
         except Exception:

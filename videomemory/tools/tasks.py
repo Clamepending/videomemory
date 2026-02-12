@@ -110,6 +110,10 @@ def add_task(io_id: str, task_description: str) -> dict:
         }
     
     try:
+        # Refresh device list to ensure we have the latest camera order
+        # This is important because camera indices can change when devices are plugged/unplugged
+        _context.io_manager._refresh_streams()
+        
         # Verify the io_id exists
         device_info = _context.io_manager.get_stream_info(io_id)
         if device_info is None:

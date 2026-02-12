@@ -148,11 +148,14 @@ def get_task(task_id):
 def _get_camera_preview_frame(camera_index: int) -> Optional[bytes]:
     """Capture a preview frame from a camera.
     
+    Shows whatever frame the camera produces, including black frames.
+    This is useful for debugging device connections.
+    
     Args:
         camera_index: The index of the camera
         
     Returns:
-        JPEG image bytes, or None if capture failed
+        JPEG image bytes, or None if capture failed (device disconnected/unavailable)
     """
     cap = None
     try:
@@ -162,28 +165,54 @@ def _get_camera_preview_frame(camera_index: int) -> Optional[bytes]:
             cap = cv2.VideoCapture(camera_index)
         
         if not cap.isOpened():
-            return None
+            return None  # Device not available
         
-        # Set a short timeout
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        # Read a few frames first to let camera initialize
+        # Some cameras (especially built-in ones) produce black frames initially
+        import time
+        frame = None
         
-        # Read a few frames to let camera stabilize
+        # Read initial frames without setting resolution first (avoids reset)
         for _ in range(3):
+            ret, test_frame = cap.read()
+            if ret and test_frame is not None and test_frame.size > 0:
+                frame = test_frame
+            time.sleep(0.05)
+        
+        # Now try to set resolution if we got a frame
+        # Setting resolution can cause cameras to reset, so we do it after initial frames
+        if frame is not None:
+            try:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                # Read a few more frames after setting resolution (camera may reset)
+                for _ in range(5):
+                    ret, test_frame = cap.read()
+                    if ret and test_frame is not None and test_frame.size > 0:
+                        frame = test_frame  # Use latest frame
+                    time.sleep(0.05)
+            except Exception:
+                pass  # Some cameras don't support setting resolution
+        
+        # If we still don't have a frame, try one more time
+        if frame is None:
             ret, frame = cap.read()
-            if not ret:
-                continue
+            if not ret or frame is None or frame.size == 0:
+                return None  # Device disconnected or not responding
         
-        # Get the final frame
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            return None
+        # Resize frame if needed (in case resolution setting didn't work)
+        if frame.shape[1] > 640 or frame.shape[0] > 480:
+            frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LINEAR)
         
+        # Show whatever frame we got, even if it's black (for debugging)
         # Encode as JPEG
         _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return buffer.tobytes()
-    except Exception:
-        return None
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Error capturing preview from camera {camera_index}: {e}")
+        return None  # Device error/disconnected
     finally:
         if cap is not None:
             cap.release()
@@ -192,7 +221,17 @@ def _get_camera_preview_frame(camera_index: int) -> Optional[bytes]:
 def get_devices():
     """Get all input devices."""
     try:
-        devices_list = io_manager.list_all_streams()
+        # Force refresh by calling _refresh_streams directly
+        # This ensures we get the latest devices even if they were just plugged in
+        refresh_success = io_manager._refresh_streams()
+        if not refresh_success:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Device refresh had issues: {io_manager._last_error}")
+        
+        # Skip refresh in list_all_streams since we just refreshed
+        devices_list = io_manager.list_all_streams(skip_refresh=True)
+        
         # Organize by category
         by_category = {}
         for device in devices_list:
@@ -203,8 +242,16 @@ def get_devices():
                 'io_id': device.get('io_id', ''),
                 'name': device.get('name', 'Unknown')
             })
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Returning {len(devices_list)} devices: {by_category}")
+        
         return jsonify({'devices': by_category})
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in get_devices: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/device/<io_id>/preview', methods=['GET'])
@@ -235,32 +282,41 @@ def get_device_preview(io_id):
         
         # Try to get frame from active video ingestor first (much faster)
         latest_frame = task_manager.get_latest_frame_for_device(io_id)
-        if latest_frame is not None:
-            # Encode frame from ingestor
-            _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            return Response(
-                response=buffer.tobytes(),
-                mimetype='image/jpeg',
-                headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
-            )
+        if latest_frame is not None and latest_frame.size > 0:
+            # For debugging: show whatever frame we have, even if black
+            # But if frame is completely black (mean < 1), try direct capture instead
+            # as the ingestor might have an old/stale black frame
+            frame_mean = latest_frame.mean()
+            if frame_mean < 1:
+                # Frame is completely black - try direct capture to get fresh frame
+                pass  # Fall through to direct capture
+            else:
+                # Use ingestor frame (even if somewhat dark, but not pure black)
+                _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                return Response(
+                    response=buffer.tobytes(),
+                    mimetype='image/jpeg',
+                    headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
+                )
         
         # Fallback: open camera directly if no active ingestor
         try:
             camera_index = int(io_id)
         except (ValueError, TypeError):
+            # Invalid io_id - return 404 to indicate device not found
             return Response(
                 response=b'',
-                status=500,
+                status=404,
                 mimetype='image/jpeg'
             )
         
         # Capture preview frame
         frame_data = _get_camera_preview_frame(camera_index)
         if frame_data is None:
-            # Return 500 to trigger img.onerror handler
+            # Camera disconnected or unavailable - return 404 to trigger error handler
             return Response(
                 response=b'',
-                status=500,
+                status=404,
                 mimetype='image/jpeg'
             )
         
@@ -270,10 +326,10 @@ def get_device_preview(io_id):
             headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
         )
     except Exception as e:
-        # Return 500 to trigger img.onerror handler
+        # Device error/disconnected - return 404 to trigger error handler
         return Response(
             response=b'',
-            status=500,
+            status=404,
             mimetype='image/jpeg'
         )
 

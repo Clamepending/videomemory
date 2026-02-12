@@ -27,6 +27,32 @@
             color: #888;
         }
         
+        .refresh-button {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+            transition: background 0.2s;
+        }
+        
+        .refresh-button:hover {
+            background: #3a8eef;
+        }
+        
+        .refresh-button:active {
+            background: #2a7edf;
+        }
+        
+        .refresh-button:disabled {
+            background: #555;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        
         .category-section {
             margin-bottom: 40px;
         }
@@ -164,6 +190,9 @@
         <div class="devices-header">
             <h1>Input Devices</h1>
             <p>All available input devices detected on this system</p>
+            <button class="refresh-button" id="refreshButton" onclick="loadDevices()">
+                🔄 Refresh Devices
+            </button>
         </div>
         <div id="devicesContent">
             <div class="loading">Loading devices...</div>
@@ -173,13 +202,15 @@
 
 {% block extra_scripts %}
     <script>
-        // Store current device list to detect changes
-        let currentDeviceList = null;
-        
         async function loadDevices() {
             const contentDiv = document.getElementById('devicesContent');
+            const refreshButton = document.getElementById('refreshButton');
             
             try {
+                refreshButton.disabled = true;
+                refreshButton.textContent = '🔄 Refreshing...';
+                
+                // Fetch latest devices
                 const response = await fetch('/api/devices');
                 const data = await response.json();
                 
@@ -190,16 +221,6 @@
                 
                 const devicesByCategory = data.devices || {};
                 const categories = Object.keys(devicesByCategory);
-                
-                // Create a signature of the current device list
-                const deviceSignature = JSON.stringify(data.devices);
-                
-                // Only update HTML if device list actually changed
-                if (deviceSignature === currentDeviceList && contentDiv.children.length > 0) {
-                    return; // No changes, skip HTML update
-                }
-                
-                currentDeviceList = deviceSignature;
                 
                 if (categories.length === 0) {
                     contentDiv.innerHTML = `
@@ -230,6 +251,7 @@
                         let previewHtml;
                         if (isCamera) {
                             const previewId = `preview-${device.io_id.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                            // Add timestamp to force fresh image load
                             previewHtml = `<img class="device-preview loading" id="${previewId}" src="/api/device/${escapeHtml(device.io_id)}/preview?t=${Date.now()}" alt="Camera preview" />`;
                         } else {
                             previewHtml = '<div class="device-preview-placeholder">No preview available</div>';
@@ -262,17 +284,20 @@
                     img.addEventListener('error', function() {
                         this.classList.remove('loading');
                         this.classList.add('error');
-                        this.alt = 'Preview unavailable - Device may be in use or malfunctioning';
-                        // Replace with error message div
+                        this.alt = 'Device disconnected or unavailable';
+                        // Replace with error message div showing disconnected status
                         const errorDiv = document.createElement('div');
                         errorDiv.className = 'device-preview error';
-                        errorDiv.innerHTML = '<div>Preview unavailable<br/><small>Device may be in use or malfunctioning</small></div>';
+                        errorDiv.innerHTML = '<div>Device Disconnected<br/><small>Camera not available or in use</small></div>';
                         this.parentNode.replaceChild(errorDiv, this);
                     });
                 });
                 
             } catch (error) {
                 contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            } finally {
+                refreshButton.disabled = false;
+                refreshButton.textContent = '🔄 Refresh Devices';
             }
         }
         
@@ -284,23 +309,5 @@
         
         // Load devices on page load
         loadDevices();
-        
-        // Refresh devices every 10 seconds
-        setInterval(loadDevices, 10000);
-        
-        // Refresh preview images more frequently (every 1 second) for smoother updates
-        setInterval(function() {
-            const previewImages = document.querySelectorAll('.device-preview');
-            previewImages.forEach(img => {
-                // Only refresh if image is not in loading state and not in error state
-                if (img.src && !img.classList.contains('loading') && !img.classList.contains('error')) {
-                    // Update timestamp to force refresh
-                    const url = new URL(img.src);
-                    url.searchParams.set('t', Date.now());
-                    // Update src directly - browser will handle smooth transition
-                    img.src = url.toString();
-                }
-            });
-        }, 1000);
     </script>
 {% endblock %}

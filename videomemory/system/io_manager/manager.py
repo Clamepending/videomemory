@@ -97,18 +97,22 @@ class IOmanager:
         
         return self._io_streams.get(io_id)
     
-    def list_all_streams(self) -> List[Dict]:
+    def list_all_streams(self, skip_refresh: bool = False) -> List[Dict]:
         """List all available camera streams with their IDs.
+        
+        Args:
+            skip_refresh: If True, skip refresh and return cached streams
         
         Returns:
             List of dictionaries containing camera information
         """
-        if not self._refresh_streams():
-            if not self._io_streams:
-                raise RuntimeError(
-                    f"Failed to list streams: Unable to refresh streams. "
-                    f"Error: {self._last_error}. "
-                    f"No cached stream data available."
-                )
+        if not skip_refresh:
+            if not self._refresh_streams():
+                if not self._io_streams:
+                    raise RuntimeError(
+                        f"Failed to list streams: Unable to refresh streams. "
+                        f"Error: {self._last_error}. "
+                        f"No cached stream data available."
+                    )
         
         return list(self._io_streams.values())
