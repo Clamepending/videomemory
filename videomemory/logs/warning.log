@@ -1,2 +1,1 @@
-2026-01-21 21:14:28,750 - werkzeug - WARNING -  * Debugger is active!
-2026-01-21 21:14:47,516 - google_genai.types - WARNING - Warning: there are non-text parts in the response: ['function_call'], returning concatenated text result from text parts. Check the full candidates.content.parts accessor to get the full model response.
+2026-02-12 10:29:19,849 - werkzeug - WARNING -  * Debugger is active!

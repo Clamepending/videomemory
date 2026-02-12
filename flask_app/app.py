@@ -10,7 +10,7 @@ from pathlib import Path
 # Add parent directory to path so we can import videomemory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, Response
 from dotenv import load_dotenv
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
@@ -20,6 +20,9 @@ import videomemory.system
 import videomemory.tools
 from videomemory.system.logging_config import setup_logging
 from videomemory.system.model_providers import get_VLM_provider
+import cv2
+import platform
+from typing import Optional
 
 # Load environment variables
 load_dotenv()
@@ -142,6 +145,49 @@ def get_task(task_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def _get_camera_preview_frame(camera_index: int) -> Optional[bytes]:
+    """Capture a preview frame from a camera.
+    
+    Args:
+        camera_index: The index of the camera
+        
+    Returns:
+        JPEG image bytes, or None if capture failed
+    """
+    cap = None
+    try:
+        if platform.system() == 'Darwin':  # macOS
+            cap = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+        else:
+            cap = cv2.VideoCapture(camera_index)
+        
+        if not cap.isOpened():
+            return None
+        
+        # Set a short timeout
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        # Read a few frames to let camera stabilize
+        for _ in range(3):
+            ret, frame = cap.read()
+            if not ret:
+                continue
+        
+        # Get the final frame
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            return None
+        
+        # Encode as JPEG
+        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return buffer.tobytes()
+    except Exception:
+        return None
+    finally:
+        if cap is not None:
+            cap.release()
+
 @app.route('/api/devices', methods=['GET'])
 def get_devices():
     """Get all input devices."""
@@ -160,6 +206,63 @@ def get_devices():
         return jsonify({'devices': by_category})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/device/<io_id>/preview', methods=['GET'])
+def get_device_preview(io_id):
+    """Get a preview image from a camera device.
+    
+    Only works for camera devices. Returns a placeholder or error for other devices.
+    """
+    try:
+        # Get device info
+        device_info = io_manager.get_stream_info(io_id)
+        if device_info is None:
+            return jsonify({'error': 'Device not found'}), 404
+        
+        category = device_info.get('category', '').lower()
+        device_name = device_info.get('name', '')
+        
+        # Only generate previews for cameras
+        if 'camera' not in category:
+            # Return a placeholder image or empty response
+            return Response(
+                response=b'',
+                status=204,  # No Content
+                mimetype='image/jpeg'
+            )
+        
+        # For cameras, IO ID is now the OpenCV camera index as a string
+        try:
+            camera_index = int(io_id)
+        except (ValueError, TypeError):
+            return Response(
+                response=b'',
+                status=500,
+                mimetype='image/jpeg'
+            )
+        
+        # Capture preview frame
+        frame_data = _get_camera_preview_frame(camera_index)
+        if frame_data is None:
+            # Return 500 to trigger img.onerror handler
+            return Response(
+                response=b'',
+                status=500,
+                mimetype='image/jpeg'
+            )
+        
+        return Response(
+            response=frame_data,
+            mimetype='image/jpeg',
+            headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
+        )
+    except Exception as e:
+        # Return 500 to trigger img.onerror handler
+        return Response(
+            response=b'',
+            status=500,
+            mimetype='image/jpeg'
+        )
 
 @app.route('/chat', methods=['POST'])
 def chat():

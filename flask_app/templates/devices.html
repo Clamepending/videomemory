@@ -89,6 +89,47 @@
             font-weight: 500;
         }
         
+        .device-preview {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            background: #1a1a1a;
+            border: 1px solid #404040;
+        }
+        
+        .device-preview.error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            font-size: 12px;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .device-preview.loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 12px;
+        }
+        
+        .device-preview-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: #666;
+            font-size: 12px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            border: 1px solid #404040;
+        }
+        
         .no-devices {
             text-align: center;
             padding: 60px 20px;
@@ -172,8 +213,18 @@
                     `;
                     
                     devices.forEach(device => {
+                        const isCamera = category.toLowerCase().includes('camera');
+                        let previewHtml;
+                        if (isCamera) {
+                            const previewId = `preview-${device.io_id.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                            previewHtml = `<img class="device-preview loading" id="${previewId}" src="/api/device/${escapeHtml(device.io_id)}/preview?t=${Date.now()}" alt="Camera preview" />`;
+                        } else {
+                            previewHtml = '<div class="device-preview-placeholder">No preview available</div>';
+                        }
+                        
                         html += `
                             <div class="device-card">
+                                ${previewHtml}
                                 <div class="device-name">${escapeHtml(device.name || 'Unknown Device')}</div>
                                 <div class="device-id-label">IO ID</div>
                                 <div class="device-id">${escapeHtml(device.io_id || 'N/A')}</div>
@@ -188,6 +239,24 @@
                 });
                 
                 contentDiv.innerHTML = html;
+                
+                // Set up error handlers for camera previews after HTML is inserted
+                const previewImages = contentDiv.querySelectorAll('.device-preview');
+                previewImages.forEach(img => {
+                    img.addEventListener('load', function() {
+                        this.classList.remove('loading');
+                    });
+                    img.addEventListener('error', function() {
+                        this.classList.remove('loading');
+                        this.classList.add('error');
+                        this.alt = 'Preview unavailable - Device may be in use or malfunctioning';
+                        // Replace with error message div
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'device-preview error';
+                        errorDiv.innerHTML = '<div>Preview unavailable<br/><small>Device may be in use or malfunctioning</small></div>';
+                        this.parentNode.replaceChild(errorDiv, this);
+                    });
+                });
                 
             } catch (error) {
                 contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;

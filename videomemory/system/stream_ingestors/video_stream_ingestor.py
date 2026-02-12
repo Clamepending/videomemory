@@ -64,7 +64,7 @@ class VideoStreamIngestor:
                               Default is (640, 480) for lower bandwidth and faster processing.
             model_provider: Model provider instance for ML inference.
         """
-        self.camera_index = 0 # TODO: dont hard code to be the first camera. Modify the task manager to pass in the camera index.
+        self.camera_index = camera_index
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
         self._action_queue = AsyncQueue()
         self._running = False

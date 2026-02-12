@@ -70,8 +70,18 @@ class TaskManager:
         
         # Initialize video ingestor if not already created for this io_id
         if io_id not in self._ingestors:
+            # For cameras, io_id is now the OpenCV camera index as a string
+            # Convert to int for VideoStreamIngestor
+            try:
+                camera_index = int(io_id)
+            except (ValueError, TypeError):
+                return {
+                    "status": "error",
+                    "message": f"Invalid camera io_id '{io_id}'. Expected numeric index.",
+                }
+            
             self._ingestors[io_id] = VideoStreamIngestor(
-                io_id, 
+                camera_index, 
                 action_runner=self._action_runner,
                 model_provider=self._model_provider,
                 session_service=self._session_service,
