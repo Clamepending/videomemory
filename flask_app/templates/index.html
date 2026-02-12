@@ -318,6 +318,14 @@
             background: #2d332f;
             color: #ececec;
         }
+
+        .suggestion-hint {
+            display: block;
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+            font-style: italic;
+        }
 {% endblock %}
 
 {% block content %}
@@ -367,9 +375,11 @@
         const chatTitle = document.getElementById('chatTitle');
 
         const SUGGESTIONS = [
-            "Please describe the person in the front facing camera",
-            "Notify me on Discord when a bottle is left unattended near the sink",
-            "Did anything of note happen in the USB camera during the last 2 days?",
+            { text: "Please describe the person in the front facing camera" },
+            { text: "Notify me on Discord when a bottle is left unattended near the sink",
+              hint: "Discord webhook needs to be set up in the Settings tab" },
+            { text: "Did anything of note happen in the USB camera during the last 2 days?",
+              hint: "You need to ask the system to watch for anomalies on that device before you can ask this" },
         ];
 
         // ── Empty state with suggestions ─────────────
@@ -387,11 +397,19 @@
 
             const list = document.createElement('div');
             list.className = 'suggestions';
-            SUGGESTIONS.forEach(text => {
+            SUGGESTIONS.forEach(s => {
                 const btn = document.createElement('button');
                 btn.className = 'suggestion';
-                btn.textContent = text;
-                btn.onclick = () => useSuggestion(text);
+                const span = document.createElement('span');
+                span.textContent = s.text;
+                btn.appendChild(span);
+                if (s.hint) {
+                    const hint = document.createElement('span');
+                    hint.className = 'suggestion-hint';
+                    hint.textContent = `(${s.hint})`;
+                    btn.appendChild(hint);
+                }
+                btn.onclick = () => useSuggestion(s.text);
                 list.appendChild(btn);
             });
             wrapper.appendChild(list);
