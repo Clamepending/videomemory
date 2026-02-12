@@ -173,6 +173,9 @@
 
 {% block extra_scripts %}
     <script>
+        // Store current device list to detect changes
+        let currentDeviceList = null;
+        
         async function loadDevices() {
             const contentDiv = document.getElementById('devicesContent');
             
@@ -187,6 +190,16 @@
                 
                 const devicesByCategory = data.devices || {};
                 const categories = Object.keys(devicesByCategory);
+                
+                // Create a signature of the current device list
+                const deviceSignature = JSON.stringify(data.devices);
+                
+                // Only update HTML if device list actually changed
+                if (deviceSignature === currentDeviceList && contentDiv.children.length > 0) {
+                    return; // No changes, skip HTML update
+                }
+                
+                currentDeviceList = deviceSignature;
                 
                 if (categories.length === 0) {
                     contentDiv.innerHTML = `
@@ -274,5 +287,20 @@
         
         // Refresh devices every 10 seconds
         setInterval(loadDevices, 10000);
+        
+        // Refresh preview images more frequently (every 1 second) for smoother updates
+        setInterval(function() {
+            const previewImages = document.querySelectorAll('.device-preview');
+            previewImages.forEach(img => {
+                // Only refresh if image is not in loading state and not in error state
+                if (img.src && !img.classList.contains('loading') && !img.classList.contains('error')) {
+                    // Update timestamp to force refresh
+                    const url = new URL(img.src);
+                    url.searchParams.set('t', Date.now());
+                    // Update src directly - browser will handle smooth transition
+                    img.src = url.toString();
+                }
+            });
+        }, 1000);
     </script>
 {% endblock %}

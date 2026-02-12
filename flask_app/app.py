@@ -212,6 +212,8 @@ def get_device_preview(io_id):
     """Get a preview image from a camera device.
     
     Only works for camera devices. Returns a placeholder or error for other devices.
+    Tries to use frames from active video ingestors first (faster), falls back to
+    opening camera directly if no ingestor is active.
     """
     try:
         # Get device info
@@ -231,7 +233,18 @@ def get_device_preview(io_id):
                 mimetype='image/jpeg'
             )
         
-        # For cameras, IO ID is now the OpenCV camera index as a string
+        # Try to get frame from active video ingestor first (much faster)
+        latest_frame = task_manager.get_latest_frame_for_device(io_id)
+        if latest_frame is not None:
+            # Encode frame from ingestor
+            _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            return Response(
+                response=buffer.tobytes(),
+                mimetype='image/jpeg',
+                headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
+            )
+        
+        # Fallback: open camera directly if no active ingestor
         try:
             camera_index = int(io_id)
         except (ValueError, TypeError):

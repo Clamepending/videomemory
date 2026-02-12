@@ -638,6 +638,14 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
     def get_total_output_count(self) -> int:
         """Get the total number of outputs processed (for debugging)."""
         return self._total_output_count
+    
+    def get_latest_frame(self) -> Optional[Any]:
+        """Get the latest captured frame.
+        
+        Returns:
+            Latest frame as numpy array, or None if no frame available
+        """
+        return self._latest_frame.copy() if self._latest_frame is not None else None
 
 
 

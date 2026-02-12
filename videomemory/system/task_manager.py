@@ -1,7 +1,7 @@
 """Task Manager for managing tasks associated with IO streams."""
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from .stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from .io_manager import IOmanager
 from .task_types import NoteEntry, Task
@@ -200,6 +200,20 @@ class TaskManager:
             del self._ingestors[io_id]
         
         return True
+    
+    def get_latest_frame_for_device(self, io_id: str) -> Optional[Any]:
+        """Get the latest frame from an active video ingestor for a device.
+        
+        Args:
+            io_id: The IO device identifier
+            
+        Returns:
+            Latest frame as numpy array, or None if no active ingestor or frame available
+        """
+        if io_id in self._ingestors:
+            ingestor = self._ingestors[io_id]
+            return ingestor.get_latest_frame()
+        return None
     
     def edit_task(self, task_id: str, new_description: str) -> Dict:
         """Edit/update a task's description.
