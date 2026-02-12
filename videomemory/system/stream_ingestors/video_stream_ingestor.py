@@ -52,7 +52,7 @@ class VideoIngestorOutput(BaseModel):
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
     
-    def __init__(self, camera_index: int, action_runner: Runner, model_provider: BaseModelProvider, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480)):
+    def __init__(self, camera_index: int, action_runner: Runner, model_provider: BaseModelProvider, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None):
         """Initialize the video stream ingestor.
         
         Args:
@@ -63,6 +63,7 @@ class VideoStreamIngestor:
             target_resolution: Target resolution (width, height) to resize frames to for VLM processing.
                               Default is (640, 480) for lower bandwidth and faster processing.
             model_provider: Model provider instance for ML inference.
+            on_task_updated: Optional callback(task, new_note) called when a task is modified by the ingestor.
         """
         self.camera_index = camera_index
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
@@ -93,6 +94,9 @@ class VideoStreamIngestor:
         self._action_user_id = f"video_ingestor_{self.camera_index}" # google adk each session requires a user ID but this is just a session foringesting a stream
         self._action_app_name = app_name  # Must match the runner's app_name
         self.session_id = f"video_ingestor_session_{self.camera_index}"
+        
+        # Callback for persisting task changes (set by TaskManager)
+        self._on_task_updated = on_task_updated
         
         logger.info(f"Initialized for camera index={self.camera_index}")
  
@@ -464,15 +468,23 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             task = next((t for t in self._tasks_list if t.task_number == update.get("task_number")), None)
             if task:
                 new_note_content = update.get("task_note", "")
+                new_note = None
                 
                 # Append new note entry with current timestamp
                 if new_note_content:  # Only append if there's actual content
-                    note_entry = NoteEntry(content=new_note_content)
-                    task.task_note.append(note_entry)
+                    new_note = NoteEntry(content=new_note_content)
+                    task.task_note.append(new_note)
                 
                 # Update done status
                 if update.get("task_done"):
                     task.done = True
+                
+                # Persist changes via callback
+                if self._on_task_updated and (new_note or update.get("task_done")):
+                    try:
+                        self._on_task_updated(task, new_note)
+                    except Exception as e:
+                        logger.error(f"Failed to persist task update: {e}")
         
         # Queue actions
         for action in ml_results.get("system_actions", []):

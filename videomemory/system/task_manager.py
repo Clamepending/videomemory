@@ -1,10 +1,11 @@
 """Task Manager for managing tasks associated with IO streams."""
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable
 from .stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from .io_manager import IOmanager
 from .task_types import NoteEntry, Task
+from .database import TaskDatabase
 from .model_providers import BaseModelProvider, get_VLM_provider
 from google.adk.runners import Runner
 from google.adk.sessions import BaseSessionService
@@ -13,7 +14,7 @@ logger = logging.getLogger('TaskManager')
 class TaskManager:
     """Manages tasks and their associations with IO streams."""
     
-    def __init__(self, io_manager: IOmanager = None, action_runner: Runner = None, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", model_provider: Optional[BaseModelProvider] = None):
+    def __init__(self, io_manager: IOmanager = None, action_runner: Runner = None, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", model_provider: Optional[BaseModelProvider] = None, db: Optional[TaskDatabase] = None):
         """Initialize the task manager.
         
         Args:
@@ -22,6 +23,7 @@ class TaskManager:
             session_service: Optional session service used by the runner (required for video ingestor sessions)
             app_name: The app name used by the runner (must match the runner's app_name)
             model_provider: Optional model provider for ML inference. If None, defaults to Gemini25FlashProvider.
+            db: Optional TaskDatabase instance for persistent storage. If None, tasks are in-memory only.
         """
         self._tasks: Dict[str, Task] = {}  # task_id -> Task object
         self._io_manager = io_manager
@@ -30,10 +32,58 @@ class TaskManager:
         self._session_service = session_service
         self._app_name = app_name
         self._task_counter = 0  # Counter for task IDs, starting from 0
+        self._db = db
+        
         # Get model provider from environment variable if not provided
         if model_provider is None:
             model_provider = get_VLM_provider()
         self._model_provider = model_provider
+        
+        # Load persisted tasks from database
+        if self._db is not None:
+            self._load_tasks_from_db()
+    
+    def _load_tasks_from_db(self):
+        """Load previously persisted tasks from the database on startup."""
+        try:
+            saved_tasks = self._db.load_all_tasks()
+            for t in saved_tasks:
+                notes = [
+                    NoteEntry(content=n['content'], timestamp=n['timestamp'])
+                    for n in t['notes']
+                ]
+                task = Task(
+                    task_id=t['task_id'],
+                    task_number=t['task_number'],
+                    task_desc=t['task_desc'],
+                    task_note=notes,
+                    done=t['done'],
+                    io_id=t['io_id']
+                )
+                self._tasks[t['task_id']] = task
+            
+            # Resume counter from the highest existing task ID
+            max_id = self._db.get_max_task_id()
+            self._task_counter = max_id + 1
+            
+            if saved_tasks:
+                logger.info(f"Loaded {len(saved_tasks)} tasks from database (counter at {self._task_counter})")
+        except Exception as e:
+            logger.error(f"Failed to load tasks from database: {e}", exc_info=True)
+    
+    def _on_task_updated(self, task: Task, new_note: Optional[NoteEntry] = None):
+        """Callback for video ingestors to persist task changes.
+        
+        Called when the ingestor appends a note or changes done status.
+        """
+        if self._db is None:
+            return
+        try:
+            if new_note:
+                self._db.save_note(task.task_id, new_note.content, new_note.timestamp)
+            self._db.update_task_done(task.task_id, task.done)
+        except Exception as e:
+            logger.error(f"Failed to persist task update for {task.task_id}: {e}")
     
     def add_task(self, io_id: str, task_description: str) -> Dict:
         """Add a new task for a specific IO stream.
@@ -113,7 +163,8 @@ class TaskManager:
                 action_runner=self._action_runner,
                 model_provider=self._model_provider,
                 session_service=self._session_service,
-                app_name=self._app_name
+                app_name=self._app_name,
+                on_task_updated=self._on_task_updated
             )
         
         # Create task with sequential ID starting from 0
@@ -132,6 +183,13 @@ class TaskManager:
         
         
         self._tasks[task_id] = task
+        
+        # Persist to database
+        if self._db:
+            try:
+                self._db.save_task(task)
+            except Exception as e:
+                logger.error(f"Failed to persist new task {task_id}: {e}")
         
         # Add task to the ingestor, passing the Task object (shared by reference)
         # This will automatically start the ingestor if not already running
@@ -195,6 +253,13 @@ class TaskManager:
             task = self._tasks[task_id]
             task.done = done
             
+            # Persist to database
+            if self._db:
+                try:
+                    self._db.update_task_done(task_id, done)
+                except Exception as e:
+                    logger.error(f"Failed to persist task status for {task_id}: {e}")
+            
             return True
         return False
     
@@ -219,6 +284,13 @@ class TaskManager:
         
         # Remove task from manager
         del self._tasks[task_id]
+        
+        # Persist deletion to database
+        if self._db:
+            try:
+                self._db.delete_task(task_id)
+            except Exception as e:
+                logger.error(f"Failed to delete task {task_id} from database: {e}")
         
         # Check if there are no more tasks for this io_id
         remaining_tasks = [task for task in self._tasks.values() if task.io_id == io_id]
@@ -267,6 +339,14 @@ class TaskManager:
         
         # Update task description in Task object
         task.task_desc = new_description
+        
+        # Persist to database
+        if self._db:
+            try:
+                self._db.update_task_desc(task_id, new_description)
+            except Exception as e:
+                logger.error(f"Failed to persist task edit for {task_id}: {e}")
+        
         # Update task description in manager and Task object
         return {
             "status": "success",
@@ -274,4 +354,3 @@ class TaskManager:
             "task_id": task_id,
             "io_id": io_id,
         }
-

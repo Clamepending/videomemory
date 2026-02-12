@@ -5,6 +5,7 @@ import asyncio
 import os
 import sys
 import threading
+import uuid
 from pathlib import Path
 
 # Add parent directory to path so we can import videomemory
@@ -12,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from flask import Flask, render_template, request, jsonify, Response
 from dotenv import load_dotenv
-from google.adk.sessions import InMemorySessionService
+from google.adk.sessions import DatabaseSessionService
 from google.adk.runners import Runner
 from google.genai import types
 import videomemory.agents
@@ -20,9 +21,13 @@ import videomemory.system
 import videomemory.tools
 from videomemory.system.logging_config import setup_logging
 from videomemory.system.model_providers import get_VLM_provider
+from videomemory.system.database import TaskDatabase, get_default_data_dir
 import cv2
 import platform
 from typing import Optional
+import logging
+
+flask_logger = logging.getLogger('FlaskApp')
 
 # Load environment variables
 load_dotenv()
@@ -32,10 +37,17 @@ setup_logging()
 
 app = Flask(__name__)
 
-# Initialize system components (similar to main.py)
+# ── Database setup ────────────────────────────────────────────
+data_dir = get_default_data_dir()
+data_dir.mkdir(parents=True, exist_ok=True)
+
+sessions_db_url = f"sqlite+aiosqlite:///{data_dir / 'sessions.db'}"
+db = TaskDatabase(str(data_dir / 'videomemory.db'))
+
+# ── System components ─────────────────────────────────────────
 io_manager = videomemory.system.IOmanager()
 app_name = "videomemory_app"
-session_service = InMemorySessionService()
+session_service = DatabaseSessionService(db_url=sessions_db_url)
 runner = Runner(
     agent=videomemory.agents.admin_agent,
     app_name=app_name,
@@ -47,15 +59,15 @@ task_manager = videomemory.system.TaskManager(
     action_runner=runner,
     session_service=session_service,
     app_name=app_name,
-    model_provider=model_provider
+    model_provider=model_provider,
+    db=db
 )
 
 # Set managers in tools
 videomemory.tools.tasks.set_managers(io_manager, task_manager)
 
-# Create admin session
+# Shared user id for admin chat sessions
 USER_ID = "user_1"
-SESSION_ID = "admin_session"
 
 # Create a persistent event loop in a background thread
 # This allows async tasks (like video ingestor) to run continuously
@@ -92,18 +104,14 @@ background_loop = get_background_loop()
 import videomemory.system.stream_ingestors.video_stream_ingestor as vsi_module
 vsi_module._flask_background_loop = background_loop
 
-# Initialize session at startup using the background loop
-def init_session():
-    """Initialize the admin session in the background loop."""
-    async def _init():
-        await session_service.create_session(
-            app_name=app_name,
-            user_id=USER_ID,
-            session_id=SESSION_ID
-        )
-    asyncio.run_coroutine_threadsafe(_init(), background_loop).result()
+# ── Helper: run async in background loop ─────────────────────
 
-init_session()
+def run_async(coro, timeout=60):
+    """Run an async coroutine in the background event loop and return the result."""
+    future = asyncio.run_coroutine_threadsafe(coro, background_loop)
+    return future.result(timeout=timeout)
+
+# ── Page routes ───────────────────────────────────────────────
 
 @app.route('/')
 def index():
@@ -125,6 +133,8 @@ def devices():
     """Render the devices page."""
     return render_template('devices.html')
 
+# ── Task API ──────────────────────────────────────────────────
+
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
     """Get all tasks."""
@@ -144,6 +154,98 @@ def get_task(task_id):
         return jsonify({'task': task})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ── Session API ───────────────────────────────────────────────
+
+@app.route('/api/sessions', methods=['GET'])
+def list_sessions():
+    """List all admin chat sessions (metadata only)."""
+    try:
+        sessions = db.list_session_metadata()
+        return jsonify({'sessions': sessions})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/new', methods=['POST'])
+def create_session():
+    """Create a new admin chat session."""
+    try:
+        session_id = f"chat_{uuid.uuid4().hex[:12]}"
+        
+        async def _create():
+            await session_service.create_session(
+                app_name=app_name,
+                user_id=USER_ID,
+                session_id=session_id
+            )
+        
+        run_async(_create())
+        db.save_session_metadata(session_id, title='')
+        
+        return jsonify({'session_id': session_id})
+    except Exception as e:
+        flask_logger.error(f"Failed to create session: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/messages', methods=['GET'])
+def get_session_messages(session_id):
+    """Get all messages for a session."""
+    try:
+        async def _get():
+            session = await session_service.get_session(
+                app_name=app_name,
+                user_id=USER_ID,
+                session_id=session_id
+            )
+            return session
+        
+        session = run_async(_get())
+        if session is None:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        messages = []
+        for event in session.events:
+            if not event.content or not event.content.parts:
+                continue
+            # Extract text parts only
+            text_parts = []
+            for part in event.content.parts:
+                if hasattr(part, 'text') and part.text:
+                    text_parts.append(part.text)
+            if not text_parts:
+                continue
+            
+            messages.append({
+                'role': 'user' if event.author == 'user' else 'agent',
+                'text': ' '.join(text_parts),
+                'timestamp': event.timestamp if hasattr(event, 'timestamp') else None
+            })
+        
+        return jsonify({'messages': messages})
+    except Exception as e:
+        flask_logger.error(f"Failed to get messages for session {session_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>', methods=['DELETE'])
+def delete_session(session_id):
+    """Delete a chat session."""
+    try:
+        async def _delete():
+            await session_service.delete_session(
+                app_name=app_name,
+                user_id=USER_ID,
+                session_id=session_id
+            )
+        
+        run_async(_delete())
+        db.delete_session_metadata(session_id)
+        
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        flask_logger.error(f"Failed to delete session {session_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+# ── Device API ────────────────────────────────────────────────
 
 def _get_camera_preview_frame(camera_index: int) -> Optional[bytes]:
     """Capture a preview frame from a camera.
@@ -333,16 +435,30 @@ def get_device_preview(io_id):
             mimetype='image/jpeg'
         )
 
+# ── Chat API ──────────────────────────────────────────────────
+
 @app.route('/chat', methods=['POST'])
 def chat():
     """Handle chat messages."""
     data = request.json
     user_message = data.get('message', '').strip()
+    session_id = data.get('session_id', '').strip()
     
     if not user_message:
         return jsonify({'error': 'Message cannot be empty'}), 400
     
+    if not session_id:
+        return jsonify({'error': 'session_id is required'}), 400
+    
     try:
+        # Update session title with first message (if still untitled)
+        meta = db.get_session_metadata(session_id)
+        if meta and not meta['title']:
+            title = user_message[:60].strip()
+            if len(user_message) > 60:
+                title += '...'
+            db.update_session_title(session_id, title)
+        
         # Run the agent and get response using the background event loop
         content = types.Content(role='user', parts=[types.Part(text=user_message)])
         
@@ -352,7 +468,7 @@ def chat():
             # Use async generator properly with try/finally to ensure cleanup
             gen = runner.run_async(
                 user_id=USER_ID,
-                session_id=SESSION_ID,
+                session_id=session_id,
                 new_message=content
             )
             try:

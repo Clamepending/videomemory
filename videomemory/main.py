@@ -3,14 +3,15 @@
 
 import asyncio
 import os
+from pathlib import Path
 from dotenv import load_dotenv
-from google.adk.sessions import InMemorySessionService
+from google.adk.sessions import DatabaseSessionService
 from google.adk.runners import Runner
 from google.genai import types
 import httpx
 import agents
 import system
-import tools
+from system.database import TaskDatabase, get_default_data_dir
 from system.logging_config import setup_logging
 from system.model_providers import get_VLM_provider
 
@@ -28,12 +29,19 @@ if not os.getenv("GOOGLE_API_KEY"):
 setup_logging()
 
 async def main():
+    # Initialize database paths
+    data_dir = get_default_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    
+    sessions_db_url = f"sqlite+aiosqlite:///{data_dir / 'sessions.db'}"
+    task_db = TaskDatabase(str(data_dir / 'videomemory.db'))
+    
     # Initialize system managers
     io_manager = system.IOmanager()
     
     # Set up shared session service and runner for all agents
     app_name = "videomemory_app"
-    session_service = InMemorySessionService()
+    session_service = DatabaseSessionService(db_url=sessions_db_url)
     runner = Runner(
         agent=agents.admin_agent,
         app_name=app_name,
@@ -49,20 +57,28 @@ async def main():
         action_runner=runner,
         session_service=session_service,
         app_name=app_name,
-        model_provider=model_provider
+        model_provider=model_provider,
+        db=task_db
     )
     
     # Set managers in tools so they can access them
+    import tools
     tools.tasks.set_managers(io_manager, task_manager)
     
-    # Create admin conversation session
+    # Create or resume admin conversation session
     USER_ID = "user_1"
     SESSION_ID = "admin_session"
-    await session_service.create_session(
+    existing = await session_service.get_session(
         app_name=app_name,
         user_id=USER_ID,
         session_id=SESSION_ID
     )
+    if existing is None:
+        await session_service.create_session(
+            app_name=app_name,
+            user_id=USER_ID,
+            session_id=SESSION_ID
+        )
     
     print("AI Agent initialized. Type 'quit' or 'exit' to end the conversation.\n")
     
@@ -127,4 +143,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
