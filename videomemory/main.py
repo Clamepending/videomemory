@@ -36,6 +36,9 @@ async def main():
     sessions_db_url = f"sqlite+aiosqlite:///{data_dir / 'sessions.db'}"
     task_db = TaskDatabase(str(data_dir / 'videomemory.db'))
     
+    # Load saved settings into os.environ (overrides .env values)
+    task_db.load_settings_to_env()
+    
     # Initialize system managers
     io_manager = system.IOmanager()
     

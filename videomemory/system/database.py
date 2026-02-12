@@ -50,7 +50,7 @@ class TaskDatabase:
         return conn
     
     def _init_db(self):
-        """Create tables if they don't exist."""
+        """Create tables if they don't exist, and run migrations."""
         with self._get_conn() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -58,6 +58,7 @@ class TaskDatabase:
                     task_number INTEGER,
                     task_desc TEXT NOT NULL,
                     done INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'active',
                     io_id TEXT,
                     created_at REAL
                 );
@@ -78,7 +79,21 @@ class TaskDatabase:
                     title TEXT DEFAULT '',
                     created_at REAL NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                );
             """)
+            
+            # Migration: add status column if missing (for existing DBs)
+            columns = [row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+            if 'status' not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN status TEXT DEFAULT 'active'")
+                # Back-fill: done tasks get 'done', others stay 'active'
+                conn.execute("UPDATE tasks SET status = 'done' WHERE done = 1")
+                logger.info("Migrated tasks table: added status column")
     
     # ── Task methods ─────────────────────────────────────────────
 
@@ -87,20 +102,45 @@ class TaskDatabase:
         with self._get_conn() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO tasks
-                   (task_id, task_number, task_desc, done, io_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (task_id, task_number, task_desc, done, status, io_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (task.task_id, task.task_number, task.task_desc,
-                 int(task.done), task.io_id, time.time())
+                 int(task.done), task.status, task.io_id, time.time())
             )
     
-    def update_task_done(self, task_id: str, done: bool) -> None:
-        """Update only the done flag for a task."""
+    def update_task_done(self, task_id: str, done: bool, status: str = None) -> None:
+        """Update the done flag and optionally the status for a task."""
+        with self._get_conn() as conn:
+            if status is not None:
+                conn.execute(
+                    "UPDATE tasks SET done = ?, status = ? WHERE task_id = ?",
+                    (int(done), status, task_id)
+                )
+            else:
+                conn.execute(
+                    "UPDATE tasks SET done = ? WHERE task_id = ?",
+                    (int(done), task_id)
+                )
+    
+    def update_task_status(self, task_id: str, status: str) -> None:
+        """Update only the status for a task."""
         with self._get_conn() as conn:
             conn.execute(
-                "UPDATE tasks SET done = ? WHERE task_id = ?",
-                (int(done), task_id)
+                "UPDATE tasks SET status = ? WHERE task_id = ?",
+                (status, task_id)
             )
-    
+
+    def terminate_active_tasks(self) -> int:
+        """Mark all active (non-done) tasks as terminated. Returns count of affected rows."""
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE tasks SET status = 'terminated' WHERE status = 'active' AND done = 0"
+            )
+            count = cursor.rowcount
+            if count:
+                logger.info(f"Marked {count} active task(s) as terminated (app restart)")
+            return count
+
     def update_task_desc(self, task_id: str, desc: str) -> None:
         """Update only the description for a task."""
         with self._get_conn() as conn:
@@ -139,6 +179,7 @@ class TaskDatabase:
                     'task_number': r['task_number'],
                     'task_desc': r['task_desc'],
                     'done': bool(r['done']),
+                    'status': r['status'] if 'status' in r.keys() else ('done' if r['done'] else 'active'),
                     'io_id': r['io_id'],
                     'notes': [
                         {'content': n['content'], 'timestamp': n['timestamp']}
@@ -215,3 +256,49 @@ class TaskDatabase:
                 "DELETE FROM session_metadata WHERE session_id = ?",
                 (session_id,)
             )
+
+    # ── Settings methods ─────────────────────────────────────────
+
+    def get_setting(self, key: str) -> Optional[str]:
+        """Get a single setting value. Returns None if not set."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+            return row['value'] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Set a single setting value (upsert)."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO settings (key, value, updated_at)
+                   VALUES (?, ?, ?)""",
+                (key, value, time.time())
+            )
+
+    def delete_setting(self, key: str) -> None:
+        """Delete a setting."""
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+
+    def get_all_settings(self) -> Dict[str, str]:
+        """Get all settings as a dict."""
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT key, value FROM settings").fetchall()
+            return {r['key']: r['value'] for r in rows}
+
+    def load_settings_to_env(self) -> int:
+        """Load all saved settings into os.environ (overrides .env values).
+        
+        Returns:
+            Number of settings loaded.
+        """
+        settings = self.get_all_settings()
+        count = 0
+        for key, value in settings.items():
+            if value:  # Don't override with empty strings
+                os.environ[key] = value
+                count += 1
+        if count:
+            logger.info(f"Loaded {count} settings from database into environment")
+        return count

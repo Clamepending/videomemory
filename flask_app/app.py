@@ -24,6 +24,7 @@ from videomemory.system.model_providers import get_VLM_provider
 from videomemory.system.database import TaskDatabase, get_default_data_dir
 import cv2
 import platform
+import requests as http_requests
 from typing import Optional
 import logging
 
@@ -43,6 +44,10 @@ data_dir.mkdir(parents=True, exist_ok=True)
 
 sessions_db_url = f"sqlite+aiosqlite:///{data_dir / 'sessions.db'}"
 db = TaskDatabase(str(data_dir / 'videomemory.db'))
+
+# Load saved settings into os.environ BEFORE initializing providers
+# This allows DB-stored API keys and config to override .env values
+db.load_settings_to_env()
 
 # ── System components ─────────────────────────────────────────
 io_manager = videomemory.system.IOmanager()
@@ -132,6 +137,11 @@ def task_detail(task_id):
 def devices():
     """Render the devices page."""
     return render_template('devices.html')
+
+@app.route('/settings')
+def settings_page():
+    """Render the settings page."""
+    return render_template('settings.html')
 
 # ── Task API ──────────────────────────────────────────────────
 
@@ -434,6 +444,107 @@ def get_device_preview(io_id):
             status=404,
             mimetype='image/jpeg'
         )
+
+# ── Settings API ──────────────────────────────────────────────
+
+# Keys that should be masked when returned to the frontend
+_SENSITIVE_KEYS = {
+    'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY'
+}
+
+# All known setting keys (for the settings page)
+_KNOWN_SETTINGS = [
+    'DISCORD_WEBHOOK_URL',
+    'GOOGLE_API_KEY',
+    'OPENAI_API_KEY',
+    'OPENROUTER_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'VIDEO_INGESTOR_MODEL',
+]
+
+def _mask_value(key: str, value: str) -> str:
+    """Mask sensitive values, showing only the last 4 characters."""
+    if key in _SENSITIVE_KEYS and value and len(value) > 4:
+        return '*' * (len(value) - 4) + value[-4:]
+    return value
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    """Get all settings. Sensitive values are masked."""
+    try:
+        result = {}
+        for key in _KNOWN_SETTINGS:
+            # Check DB first, then fall back to env
+            db_val = db.get_setting(key)
+            env_val = os.getenv(key, '')
+            value = db_val if db_val is not None else env_val
+            result[key] = {
+                'value': _mask_value(key, value),
+                'is_set': bool(value),
+                'source': 'database' if db_val is not None else ('env' if env_val else 'unset')
+            }
+        return jsonify({'settings': result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/settings/<key>', methods=['PUT'])
+def update_setting(key):
+    """Update a single setting."""
+    if key not in _KNOWN_SETTINGS:
+        return jsonify({'error': f'Unknown setting: {key}'}), 400
+    
+    try:
+        data = request.json
+        value = data.get('value', '').strip()
+        
+        if not value:
+            # Clear the setting from DB (fall back to .env)
+            db.delete_setting(key)
+            # Remove from environ too so .env value is used
+            os.environ.pop(key, None)
+            # Reload from .env
+            from dotenv import dotenv_values
+            env_vals = dotenv_values()
+            if key in env_vals:
+                os.environ[key] = env_vals[key]
+            return jsonify({'status': 'cleared', 'key': key})
+        
+        # Save to DB and update os.environ for immediate effect
+        db.set_setting(key, value)
+        os.environ[key] = value
+        
+        return jsonify({'status': 'saved', 'key': key})
+    except Exception as e:
+        flask_logger.error(f"Failed to update setting {key}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/settings/test/discord', methods=['POST'])
+def test_discord_webhook():
+    """Send a test message to the configured Discord webhook."""
+    try:
+        webhook_url = os.getenv('DISCORD_WEBHOOK_URL', '')
+        if not webhook_url:
+            return jsonify({'status': 'error', 'message': 'Discord webhook URL is not configured'}), 400
+        
+        test_payload = {
+            'content': 'Test notification from VideoMemory — your webhook is working!',
+            'username': 'VideoMemory'
+        }
+        
+        resp = http_requests.post(webhook_url, json=test_payload, timeout=10)
+        
+        if resp.status_code == 204:
+            return jsonify({'status': 'success', 'message': 'Test message sent successfully!'})
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Discord returned status {resp.status_code}'
+            }), 400
+    except http_requests.exceptions.Timeout:
+        return jsonify({'status': 'error', 'message': 'Request timed out'}), 504
+    except Exception as e:
+        flask_logger.error(f"Discord test failed: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # ── Chat API ──────────────────────────────────────────────────
 

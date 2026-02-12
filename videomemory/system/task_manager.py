@@ -4,7 +4,7 @@ import logging
 from typing import Dict, List, Optional, Any, Callable
 from .stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from .io_manager import IOmanager
-from .task_types import NoteEntry, Task
+from .task_types import NoteEntry, Task, STATUS_ACTIVE, STATUS_DONE, STATUS_TERMINATED
 from .database import TaskDatabase
 from .model_providers import BaseModelProvider, get_VLM_provider
 from google.adk.runners import Runner
@@ -44,8 +44,16 @@ class TaskManager:
             self._load_tasks_from_db()
     
     def _load_tasks_from_db(self):
-        """Load previously persisted tasks from the database on startup."""
+        """Load previously persisted tasks from the database on startup.
+        
+        Any tasks that were still active (not done) are marked as 'terminated'
+        since no ingestor is running for them after a restart.
+        """
         try:
+            # First, mark all active tasks in the DB as terminated
+            terminated_count = self._db.terminate_active_tasks()
+            
+            # Now load all tasks (with updated statuses)
             saved_tasks = self._db.load_all_tasks()
             for t in saved_tasks:
                 notes = [
@@ -58,7 +66,8 @@ class TaskManager:
                     task_desc=t['task_desc'],
                     task_note=notes,
                     done=t['done'],
-                    io_id=t['io_id']
+                    io_id=t['io_id'],
+                    status=t.get('status', STATUS_ACTIVE)
                 )
                 self._tasks[t['task_id']] = task
             
@@ -67,7 +76,10 @@ class TaskManager:
             self._task_counter = max_id + 1
             
             if saved_tasks:
-                logger.info(f"Loaded {len(saved_tasks)} tasks from database (counter at {self._task_counter})")
+                logger.info(
+                    f"Loaded {len(saved_tasks)} tasks from database "
+                    f"(counter at {self._task_counter}, {terminated_count} terminated)"
+                )
         except Exception as e:
             logger.error(f"Failed to load tasks from database: {e}", exc_info=True)
     
@@ -81,7 +93,12 @@ class TaskManager:
         try:
             if new_note:
                 self._db.save_note(task.task_id, new_note.content, new_note.timestamp)
-            self._db.update_task_done(task.task_id, task.done)
+            # When done is set, also update status to 'done'
+            if task.done:
+                task.status = STATUS_DONE
+                self._db.update_task_done(task.task_id, task.done, status=STATUS_DONE)
+            else:
+                self._db.update_task_done(task.task_id, task.done)
         except Exception as e:
             logger.error(f"Failed to persist task update for {task.task_id}: {e}")
     
@@ -252,11 +269,12 @@ class TaskManager:
         if task_id in self._tasks:
             task = self._tasks[task_id]
             task.done = done
+            task.status = STATUS_DONE if done else STATUS_ACTIVE
             
             # Persist to database
             if self._db:
                 try:
-                    self._db.update_task_done(task_id, done)
+                    self._db.update_task_done(task_id, done, status=task.status)
                 except Exception as e:
                     logger.error(f"Failed to persist task status for {task_id}: {e}")
             

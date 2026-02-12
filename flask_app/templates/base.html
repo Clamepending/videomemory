@@ -79,6 +79,7 @@
             <a href="/" id="nav-chat">Chat</a>
             <a href="/tasks" id="nav-tasks">Tasks</a>
             <a href="/devices" id="nav-devices">Devices</a>
+            <a href="/settings" id="nav-settings">Settings</a>
         </nav>
     </div>
     <div class="content">
@@ -88,16 +89,21 @@
     <script>
         // Set active menu item based on current path
         const currentPath = window.location.pathname;
-        const chatNav = document.getElementById('nav-chat');
-        const tasksNav = document.getElementById('nav-tasks');
-        const devicesNav = document.getElementById('nav-devices');
+        const navMap = {
+            '/': 'nav-chat',
+            '/chat': 'nav-chat',
+            '/tasks': 'nav-tasks',
+            '/devices': 'nav-devices',
+            '/settings': 'nav-settings'
+        };
+        // Also handle paths that start with /task/ (task detail pages)
+        let matchKey = currentPath;
+        if (currentPath.startsWith('/task/')) matchKey = '/tasks';
         
-        if (currentPath === '/' || currentPath === '/chat') {
-            chatNav.classList.add('active');
-        } else if (currentPath === '/tasks') {
-            tasksNav.classList.add('active');
-        } else if (currentPath === '/devices') {
-            devicesNav.classList.add('active');
+        const activeId = navMap[matchKey];
+        if (activeId) {
+            const el = document.getElementById(activeId);
+            if (el) el.classList.add('active');
         }
     </script>
 </body>

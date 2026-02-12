@@ -80,6 +80,11 @@
             color: #ececec;
         }
         
+        .task-status.terminated {
+            background: #8b6914;
+            color: #ffe8a3;
+        }
+        
         .task-description {
             font-size: 18px;
             color: #ececec;
@@ -181,12 +186,19 @@
                 const task = data.task;
                 
                 // Build task info card
+                const status = task.status || (task.done ? 'done' : 'active');
+                const statusLabels = {
+                    'active': 'Active',
+                    'done': 'Done',
+                    'terminated': 'Terminated'
+                };
+                
                 let taskInfoHtml = `
                     <div class="task-info-card">
                         <div class="task-info-header">
                             <span class="task-id">Task #${task.task_id || 'N/A'}</span>
-                            <span class="task-status ${task.done ? 'done' : 'active'}">
-                                ${task.done ? 'Done' : 'Active'}
+                            <span class="task-status ${status}">
+                                ${statusLabels[status] || status}
                             </span>
                         </div>
                         <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>

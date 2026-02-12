@@ -47,7 +47,8 @@
             border-color: #19c37d;
         }
         
-        .task-card.done {
+        .task-card.done,
+        .task-card.terminated {
             opacity: 0.7;
         }
         
@@ -80,6 +81,11 @@
         .task-status.done {
             background: #666;
             color: #ececec;
+        }
+        
+        .task-status.terminated {
+            background: #8b6914;
+            color: #ffe8a3;
         }
         
         .task-description {
@@ -202,7 +208,14 @@
                 tasks.forEach(task => {
                     const taskCard = document.createElement('a');
                     taskCard.href = `/task/${task.task_id || ''}`;
-                    taskCard.className = `task-card ${task.done ? 'done' : ''}`;
+                    const status = task.status || (task.done ? 'done' : 'active');
+                    taskCard.className = `task-card ${status !== 'active' ? status : ''}`;
+                    
+                    const statusLabels = {
+                        'active': 'Active',
+                        'done': 'Done',
+                        'terminated': 'Terminated'
+                    };
                     
                     // Get latest note
                     const latestNote = task.task_note && task.task_note.length > 0 
@@ -212,8 +225,8 @@
                     taskCard.innerHTML = `
                         <div class="task-header">
                             <span class="task-id">Task #${task.task_id || 'N/A'}</span>
-                            <span class="task-status ${task.done ? 'done' : 'active'}">
-                                ${task.done ? 'Done' : 'Active'}
+                            <span class="task-status ${status}">
+                                ${statusLabels[status] || status}
                             </span>
                         </div>
                         <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>

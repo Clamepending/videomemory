@@ -279,11 +279,44 @@
 
         .empty-state {
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100%;
-            color: #555;
+            gap: 24px;
+            padding: 40px 20px;
+        }
+
+        .empty-state-title {
+            color: #666;
             font-size: 15px;
+        }
+
+        .suggestions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+            max-width: 480px;
+        }
+
+        .suggestion {
+            padding: 14px 18px;
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 12px;
+            color: #bbb;
+            font-size: 13px;
+            line-height: 1.5;
+            cursor: pointer;
+            text-align: left;
+            transition: border-color 0.15s, background 0.15s, color 0.15s;
+        }
+
+        .suggestion:hover {
+            border-color: #19c37d;
+            background: #2d332f;
+            color: #ececec;
         }
 {% endblock %}
 
@@ -305,9 +338,7 @@
                 <div class="chat-header">
                     <h1 id="chatTitle">Admin Agent Chat</h1>
                 </div>
-                <div class="chat-messages" id="messages">
-                    <div class="empty-state" id="emptyState">Start a conversation...</div>
-                </div>
+                <div class="chat-messages" id="messages"></div>
                 <div class="chat-input-container">
                     <input 
                         type="text" 
@@ -333,8 +364,47 @@
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
         const sessionList = document.getElementById('sessionList');
-        const emptyState = document.getElementById('emptyState');
         const chatTitle = document.getElementById('chatTitle');
+
+        const SUGGESTIONS = [
+            "Please describe the person in the front facing camera",
+            "Notify me on Discord when a bottle is left unattended near the sink",
+            "Did anything of note happen in the USB camera during the last 2 days?",
+        ];
+
+        // ── Empty state with suggestions ─────────────
+
+        function showEmptyState() {
+            messagesDiv.innerHTML = '';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'empty-state';
+            wrapper.id = 'emptyState';
+
+            const title = document.createElement('div');
+            title.className = 'empty-state-title';
+            title.textContent = 'Start a conversation or try an example:';
+            wrapper.appendChild(title);
+
+            const list = document.createElement('div');
+            list.className = 'suggestions';
+            SUGGESTIONS.forEach(text => {
+                const btn = document.createElement('button');
+                btn.className = 'suggestion';
+                btn.textContent = text;
+                btn.onclick = () => useSuggestion(text);
+                list.appendChild(btn);
+            });
+            wrapper.appendChild(list);
+            messagesDiv.appendChild(wrapper);
+        }
+
+        function useSuggestion(text) {
+            messageInput.value = text;
+            sendMessage();
+        }
+
+        // Show suggestions on initial load
+        showEmptyState();
 
         // ── Sessions ────────────────────────────────
 
@@ -405,7 +475,7 @@
                 const messages = data.messages || [];
 
                 if (messages.length === 0) {
-                    messagesDiv.innerHTML = '<div class="empty-state">Start a conversation...</div>';
+                    showEmptyState();
                 } else {
                     messages.forEach(m => addMessage(m.text, m.role === 'user'));
                 }
@@ -433,8 +503,8 @@
                 sessionsCache = listData.sessions || [];
                 renderSessionList();
 
-                // Clear chat
-                messagesDiv.innerHTML = '<div class="empty-state">Start a conversation...</div>';
+                // Clear chat and show suggestions
+                showEmptyState();
                 chatTitle.textContent = 'Admin Agent Chat';
                 messageInput.focus();
             } catch (err) {
