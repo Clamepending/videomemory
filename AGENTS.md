@@ -168,12 +168,13 @@ POST /api/sessions/new  ->  {"session_id": "chat_abc123"}
 ## Typical Workflow
 
 1. **Check health:** `GET /api/health`
-2. **List devices:** `GET /api/devices` to discover cameras and their `io_id`s.
-3. **Create a task:** `POST /api/tasks` with an `io_id` and `task_description`.
-4. **Monitor progress:** `GET /api/task/{task_id}` to read the notes (video analysis results).
-5. **Edit if needed:** `PUT /api/task/{task_id}` to amend the task description (e.g., add an action trigger).
-6. **Take actions:** Use `POST /api/actions/discord` to send Discord notifications.
-7. **Stop or delete:** `POST /api/task/{task_id}/stop` or `DELETE /api/task/{task_id}`.
+2. **Configure API keys:** `GET /api/settings` to check what's set, then `PUT /api/settings/GOOGLE_API_KEY` (or other keys) if needed.
+3. **List devices:** `GET /api/devices` to discover cameras and their `io_id`s.
+4. **Create a task:** `POST /api/tasks` with an `io_id` and `task_description`.
+5. **Monitor progress:** `GET /api/task/{task_id}` to read the notes (video analysis results).
+6. **Edit if needed:** `PUT /api/task/{task_id}` to amend the task description (e.g., add an action trigger).
+7. **Take actions:** Use `POST /api/actions/discord` to send Discord notifications.
+8. **Stop or delete:** `POST /api/task/{task_id}/stop` or `DELETE /api/task/{task_id}`.
 
 ## Error Format
 
