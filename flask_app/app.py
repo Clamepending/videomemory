@@ -152,23 +152,119 @@ def device_debug(io_id):
 
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
-    """Get all tasks."""
+    """List all tasks, optionally filtered by io_id.
+    
+    Query params:
+        io_id (optional): Filter tasks to a specific input device.
+    """
     try:
-        tasks_list = task_manager.list_tasks()
-        return jsonify({'tasks': tasks_list})
+        io_id = request.args.get('io_id', None)
+        tasks_list = task_manager.list_tasks(io_id)
+        return jsonify({'status': 'success', 'tasks': tasks_list, 'count': len(tasks_list)})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/tasks', methods=['POST'])
+def create_task():
+    """Add a new task for an input device.
+    
+    Body (JSON):
+        io_id (str, required): The unique identifier of the input device.
+        task_description (str, required): A description of the task to perform.
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'status': 'error', 'error': 'Request body must be JSON'}), 400
+        
+        io_id = data.get('io_id', '').strip()
+        task_description = data.get('task_description', '').strip()
+        
+        if not io_id:
+            return jsonify({'status': 'error', 'error': 'io_id is required'}), 400
+        if not task_description:
+            return jsonify({'status': 'error', 'error': 'task_description is required'}), 400
+        
+        result = videomemory.tools.tasks.add_task(io_id, task_description)
+        
+        if result.get('status') == 'error':
+            return jsonify(result), 400
+        return jsonify(result), 201
+    except Exception as e:
+        flask_logger.error(f"Failed to create task: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
 
 @app.route('/api/task/<task_id>', methods=['GET'])
 def get_task(task_id):
-    """Get a specific task by ID."""
+    """Get detailed information about a specific task including notes and status."""
     try:
         task = task_manager.get_task(task_id)
         if task is None:
-            return jsonify({'error': 'Task not found'}), 404
-        return jsonify({'task': task})
+            return jsonify({'status': 'error', 'error': 'Task not found'}), 404
+        return jsonify({'status': 'success', 'task': task})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/task/<task_id>', methods=['PUT'])
+def update_task(task_id):
+    """Edit/update a task's description.
+    
+    Body (JSON):
+        new_description (str, required): The new description for the task.
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'status': 'error', 'error': 'Request body must be JSON'}), 400
+        
+        new_description = data.get('new_description', '').strip()
+        if not new_description:
+            return jsonify({'status': 'error', 'error': 'new_description is required'}), 400
+        
+        result = task_manager.edit_task(task_id, new_description)
+        
+        if result.get('status') == 'error':
+            return jsonify(result), 404 if 'not found' in result.get('message', '').lower() else 400
+        return jsonify(result)
+    except Exception as e:
+        flask_logger.error(f"Failed to edit task {task_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/task/<task_id>', methods=['DELETE'])
+def delete_task(task_id):
+    """Permanently delete a task and all its notes."""
+    try:
+        success = task_manager.remove_task(task_id)
+        
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f"Task '{task_id}' removed successfully",
+                'task_id': task_id,
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'error': f"Task '{task_id}' not found",
+                'task_id': task_id,
+            }), 404
+    except Exception as e:
+        flask_logger.error(f"Failed to delete task {task_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/task/<task_id>/stop', methods=['POST'])
+def stop_task_endpoint(task_id):
+    """Stop a running task. The task is marked as done and its video processing
+    is stopped, but the task and all its notes remain visible."""
+    try:
+        result = task_manager.stop_task(task_id)
+        
+        if result.get('status') == 'error':
+            return jsonify(result), 404 if 'not found' in result.get('message', '').lower() else 400
+        return jsonify(result)
+    except Exception as e:
+        flask_logger.error(f"Failed to stop task {task_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
 
 # ── Session API ───────────────────────────────────────────────
 
@@ -549,6 +645,269 @@ def get_ingestor_tasks(io_id):
     except Exception as e:
         flask_logger.error(f"Error in debug tasks for {io_id}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+# ── Action API ─────────────────────────────────────────────────
+
+from videomemory.tools.actions import send_discord_notification
+
+@app.route('/api/actions/discord', methods=['POST'])
+def action_send_discord():
+    """Send a Discord notification via webhook.
+    
+    Body (JSON):
+        message (str, required): Message content to send.
+        username (str, optional): Override the webhook's bot name.
+    """
+    try:
+        data = request.json or {}
+        message = data.get('message', '').strip()
+        if not message:
+            return jsonify({'status': 'error', 'error': 'message is required'}), 400
+        
+        result = send_discord_notification(
+            message=message,
+            username=data.get('username'),
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+# ── Health & OpenAPI ──────────────────────────────────────────
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint. Returns system status."""
+    try:
+        device_count = len(io_manager.list_all_streams())
+    except Exception:
+        device_count = -1
+    
+    try:
+        task_count = len(task_manager.list_tasks())
+    except Exception:
+        task_count = -1
+    
+    return jsonify({
+        'status': 'ok',
+        'service': 'videomemory',
+        'devices_detected': device_count,
+        'active_tasks': task_count,
+    })
+
+@app.route('/openapi.json', methods=['GET'])
+def openapi_spec():
+    """Serve the OpenAPI 3.1 specification for this API."""
+    spec = {
+        "openapi": "3.1.0",
+        "info": {
+            "title": "VideoMemory API",
+            "version": "1.0.0",
+            "description": (
+                "VideoMemory is a video monitoring system that lets you create tasks for "
+                "camera input devices. The system analyses video streams using vision-language "
+                "models and can trigger actions when conditions are detected. This API exposes "
+                "the admin agent's tool calls so an external agent can act as a stand-in."
+            ),
+        },
+        "servers": [{"url": "http://localhost:5050", "description": "Local dev server"}],
+        "paths": {
+            "/api/health": {
+                "get": {
+                    "operationId": "health_check",
+                    "summary": "Health check",
+                    "description": "Returns system status including device and task counts.",
+                    "responses": {
+                        "200": {
+                            "description": "System is running",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {
+                                    "status": {"type": "string", "example": "ok"},
+                                    "service": {"type": "string", "example": "videomemory"},
+                                    "devices_detected": {"type": "integer"},
+                                    "active_tasks": {"type": "integer"},
+                                },
+                            }}},
+                        }
+                    },
+                }
+            },
+            "/api/devices": {
+                "get": {
+                    "operationId": "list_devices",
+                    "summary": "List input devices",
+                    "description": "Lists all available input devices (cameras, etc.) with their io_ids, organized by category.",
+                    "responses": {
+                        "200": {
+                            "description": "Devices grouped by category",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {
+                                    "devices": {
+                                        "type": "object",
+                                        "description": "Devices organized by category name",
+                                        "additionalProperties": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "io_id": {"type": "string", "description": "Unique device identifier (use this in add_task)"},
+                                                    "name": {"type": "string"},
+                                                },
+                                            },
+                                        },
+                                    }
+                                },
+                            }}},
+                        }
+                    },
+                }
+            },
+            "/api/tasks": {
+                "get": {
+                    "operationId": "list_tasks",
+                    "summary": "List all tasks",
+                    "description": "Lists all tasks, optionally filtered by io_id.",
+                    "parameters": [{
+                        "name": "io_id",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "string"},
+                        "description": "Filter tasks to a specific input device.",
+                    }],
+                    "responses": {
+                        "200": {
+                            "description": "List of tasks",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {
+                                    "status": {"type": "string"},
+                                    "tasks": {"type": "array", "items": {"$ref": "#/components/schemas/TaskSummary"}},
+                                    "count": {"type": "integer"},
+                                },
+                            }}},
+                        }
+                    },
+                },
+                "post": {
+                    "operationId": "add_task",
+                    "summary": "Add a new task",
+                    "description": (
+                        "Creates a new monitoring task for an input device. The system will start "
+                        "analysing the video feed according to the task description. "
+                        "First call GET /api/devices to find the io_id of the camera you want to use."
+                    ),
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "required": ["io_id", "task_description"],
+                            "properties": {
+                                "io_id": {"type": "string", "description": "Device identifier from GET /api/devices"},
+                                "task_description": {"type": "string", "description": "What to monitor for, e.g. 'Count the number of people entering the room'"},
+                            },
+                        }}},
+                    },
+                    "responses": {
+                        "201": {"description": "Task created successfully"},
+                        "400": {"description": "Validation error or device not found"},
+                    },
+                },
+            },
+            "/api/task/{task_id}": {
+                "get": {
+                    "operationId": "get_task_info",
+                    "summary": "Get task details",
+                    "description": "Gets detailed information about a task including its notes (observations from the video analysis) and current status.",
+                    "parameters": [{"name": "task_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {"description": "Task details with notes"},
+                        "404": {"description": "Task not found"},
+                    },
+                },
+                "put": {
+                    "operationId": "edit_task",
+                    "summary": "Edit a task's description",
+                    "description": (
+                        "Updates a task's description. The task keeps running with the same notes "
+                        "and status. Useful for amending tasks, e.g. adding an action trigger: "
+                        "'Count claps' -> 'Count claps and send email to user@test.com when it reaches 5'."
+                    ),
+                    "parameters": [{"name": "task_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "required": ["new_description"],
+                            "properties": {
+                                "new_description": {"type": "string", "description": "The updated task description"},
+                            },
+                        }}},
+                    },
+                    "responses": {
+                        "200": {"description": "Task updated successfully"},
+                        "404": {"description": "Task not found"},
+                    },
+                },
+                "delete": {
+                    "operationId": "remove_task",
+                    "summary": "Permanently delete a task",
+                    "description": "Permanently deletes a task and all its notes. Use POST /api/task/{task_id}/stop instead if you just want to stop it while keeping history.",
+                    "parameters": [{"name": "task_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {"description": "Task deleted"},
+                        "404": {"description": "Task not found"},
+                    },
+                },
+            },
+            "/api/task/{task_id}/stop": {
+                "post": {
+                    "operationId": "stop_task",
+                    "summary": "Stop a running task",
+                    "description": "Stops a running task. The task is marked as done and video processing stops, but the task and all its notes remain visible in the tasks list.",
+                    "parameters": [{"name": "task_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {"description": "Task stopped"},
+                        "404": {"description": "Task not found"},
+                    },
+                }
+            },
+            "/api/actions/discord": {
+                "post": {
+                    "operationId": "send_discord_notification",
+                    "summary": "Send a Discord notification",
+                    "description": "Sends a message to Discord via the configured webhook (DISCORD_WEBHOOK_URL setting).",
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "required": ["message"],
+                            "properties": {
+                                "message": {"type": "string", "description": "Message content"},
+                                "username": {"type": "string", "description": "Override bot display name"},
+                            },
+                        }}},
+                    },
+                    "responses": {"200": {"description": "Notification sent"}},
+                }
+            },
+        },
+        "components": {
+            "schemas": {
+                "TaskSummary": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "task_desc": {"type": "string"},
+                        "io_id": {"type": "string"},
+                        "status": {"type": "string", "enum": ["active", "done", "terminated"]},
+                        "done": {"type": "boolean"},
+                    },
+                },
+            }
+        },
+    }
+    return jsonify(spec)
 
 # ── Settings API ──────────────────────────────────────────────
 
