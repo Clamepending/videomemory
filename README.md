@@ -13,7 +13,7 @@ Open http://localhost:5050. Set your model API key in the **Settings** tab. Chat
 ## CLI Mode
 
 ```bash
-uv run main.py
+uv run videomemory/main.py
 ```
 
 Same admin agent, but in your terminal. Requires a `GOOGLE_API_KEY` environment variable or `.env` file.
