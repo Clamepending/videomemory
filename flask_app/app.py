@@ -1066,4 +1066,5 @@ def chat():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5050)
+    debug = os.getenv('FLASK_DEBUG', '0') == '1'
+    app.run(debug=debug, host='0.0.0.0', port=5050)

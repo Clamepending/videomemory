@@ -16,8 +16,8 @@ dependencies = [
     "httpx",
     "matplotlib",
     "flask",
-    "pyobjc",
-    "cv2-enumerate-cameras>=1.3.3",
+    "pyobjc; sys_platform == 'darwin'",
+    "cv2-enumerate-cameras>=1.3.3; sys_platform == 'darwin'",
     "greenlet>=3.2.4",
 ]
 

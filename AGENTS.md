@@ -6,11 +6,13 @@ This document describes how to run the server and interact with it via HTTP to a
 
 ## Quick Start
 
+If the server is not already running, start it:
+
 ```bash
 uv run flask_app/app.py
 ```
 
-The server is now available at `http://localhost:5050`. API keys are configured via the Settings tab in the web UI, or via `PUT /api/settings/{key}` (see Configuration section below).
+The server is available at `http://localhost:5050` (or at the host's IP on port 5050 if deployed on a remote machine like a Raspberry Pi). API keys are configured via the Settings tab in the web UI, or via `PUT /api/settings/{key}` (see Configuration section below).
 
 ## OpenAPI Spec
 
@@ -186,13 +188,60 @@ All error responses follow:
 
 HTTP status codes: `400` for validation errors, `404` for not found, `500` for server errors.
 
-## Configuration
+## Configuration & API Keys
 
-Settings can be viewed and updated at runtime:
+The system needs at least one model API key to function. You should configure this **before** creating any tasks.
+
+#### Set an API key
 
 ```
-GET  /api/settings              # List all settings (sensitive values masked)
-PUT  /api/settings/{key}        # Update a setting: {"value": "new_value"}
+PUT /api/settings/GOOGLE_API_KEY
 ```
 
-Known setting keys: `DISCORD_WEBHOOK_URL`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `VIDEO_INGESTOR_MODEL`.
+**Body:**
+```json
+{"value": "AIzaSy...your-key-here"}
+```
+
+After setting a key, restart the service for it to take effect (or if running locally, restart the server).
+
+#### Check current settings
+
+```
+GET /api/settings
+```
+
+Returns all settings with their status. Sensitive values are masked — check the `is_set` field to see if a key is configured.
+
+**Example response:**
+```json
+{
+  "settings": {
+    "GOOGLE_API_KEY": {"value": "****abcd", "is_set": true, "source": "database"},
+    "OPENAI_API_KEY": {"value": "", "is_set": false, "source": "unset"}
+  }
+}
+```
+
+#### Available setting keys
+
+| Key | Purpose |
+|---|---|
+| `GOOGLE_API_KEY` | Google Gemini models (default and recommended) |
+| `OPENAI_API_KEY` | OpenAI models (alternative) |
+| `OPENROUTER_API_KEY` | OpenRouter models (alternative) |
+| `ANTHROPIC_API_KEY` | Anthropic models (alternative) |
+| `VIDEO_INGESTOR_MODEL` | Which model to use for video analysis (default: `gemini-2.5-flash`) |
+| `DISCORD_WEBHOOK_URL` | Discord webhook for notifications |
+
+#### Onboarding: setting keys on behalf of the user
+
+If you have access to the user's API keys (e.g. from their environment or config), you can transfer them to VideoMemory during setup:
+
+```bash
+curl -X PUT http://localhost:5050/api/settings/GOOGLE_API_KEY \
+  -H "Content-Type: application/json" \
+  -d '{"value": "the-key"}'
+```
+
+Set whichever keys are available. At minimum, `GOOGLE_API_KEY` is needed for the default configuration.
