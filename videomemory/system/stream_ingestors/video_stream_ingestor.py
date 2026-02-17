@@ -78,6 +78,11 @@ class VideoStreamIngestor:
         self._output_history: deque = deque(maxlen=20)  # Store last 20 model outputs
         self._total_output_count: int = 0  # Track total number of outputs processed (for debugging)
         
+        # Frame deduplication: skip VLM calls when the frame hasn't changed
+        self._last_processed_frame: Optional[Any] = None  # Last frame sent to VLM
+        self._frame_diff_threshold: float = 3.0  # Mean absolute pixel difference threshold (0-255 scale)
+        self._frames_skipped: int = 0  # Counter for debugging
+        
         # # Rate limiting: track last request time (max 10 requests per minute = 6 seconds between requests)
         # self._last_request_time: float = 0.0
         # self._min_request_interval: float = 0.1  # 600 requests per minute max
@@ -223,11 +228,25 @@ class VideoStreamIngestor:
                             f"mean={frame_mean:.2f}, min={current_frame.min()}, max={current_frame.max()}"
                         )
                     
+                    # Skip VLM call if the frame is effectively identical to the last one we processed
+                    if self._is_frame_duplicate(current_frame):
+                        self._frames_skipped += 1
+                        if self._frames_skipped % 50 == 1:
+                            logger.debug(
+                                f"Camera index={self.camera_index}: skipping duplicate frame "
+                                f"(total skipped: {self._frames_skipped})"
+                            )
+                        await asyncio.sleep(0.1)
+                        continue
+                    
                     # Build prompt before inference so we can store it with the output
                     prompt = self._build_prompt()
                     
                     # Run ML processing with multimodal LLM
                     results = await self._run_ml_inference(current_frame, prompt)
+                    
+                    # Remember this frame as the last one we sent to the VLM
+                    self._last_processed_frame = current_frame.copy()
                     
                     # Store output in history with its corresponding frame and prompt
                     if results:
@@ -289,6 +308,20 @@ class VideoStreamIngestor:
             logger.info(f"Action loop cancelled for camera index={self.camera_index}")
         except Exception as e:
             logger.error(f"Error in action loop for camera index={self.camera_index}: {e}", exc_info=True)
+    
+    def _is_frame_duplicate(self, frame: Any) -> bool:
+        """Check if a frame is effectively identical to the last processed frame.
+        
+        Uses mean absolute pixel difference — very fast (single numpy op).
+        Returns True if the frame should be skipped.
+        """
+        import numpy as np
+        if self._last_processed_frame is None:
+            return False
+        if frame.shape != self._last_processed_frame.shape:
+            return False
+        diff = np.abs(frame.astype(np.int16) - self._last_processed_frame.astype(np.int16)).mean()
+        return diff < self._frame_diff_threshold
     
     def _frame_to_base64(self, frame: Any) -> str:
         """Convert OpenCV frame to base64 encoded image."""

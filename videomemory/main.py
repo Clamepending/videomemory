@@ -3,17 +3,23 @@
 
 import asyncio
 import os
+import sys
 from pathlib import Path
+
+# Allow running from repo root (uv run videomemory/main.py) or from videomemory/ dir
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from dotenv import load_dotenv
 from google.adk.sessions import DatabaseSessionService
 from google.adk.runners import Runner
 from google.genai import types
 import httpx
-import agents
-import system
-from system.database import TaskDatabase, get_default_data_dir
-from system.logging_config import setup_logging
-from system.model_providers import get_VLM_provider
+import videomemory.agents as agents
+import videomemory.system as system
+import videomemory.tools
+from videomemory.system.database import TaskDatabase, get_default_data_dir
+from videomemory.system.logging_config import setup_logging
+from videomemory.system.model_providers import get_VLM_provider
 
 # Load environment variables from .env file
 load_dotenv()
@@ -65,8 +71,7 @@ async def main():
     )
     
     # Set managers in tools so they can access them
-    import tools
-    tools.tasks.set_managers(io_manager, task_manager)
+    videomemory.tools.tasks.set_managers(io_manager, task_manager)
     
     # Create or resume admin conversation session
     USER_ID = "user_1"
