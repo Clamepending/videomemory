@@ -7,18 +7,10 @@ This document describes how to run the server and interact with it via HTTP to a
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
-cd videomemory
-pip install -r requirements.txt
-
-# 2. Set required environment variable
-export GOOGLE_API_KEY=<your-key>
-
-# 3. Start the HTTP server (runs on port 5050)
-python flask_app/app.py
+uv run flask_app/app.py
 ```
 
-The server is now available at `http://localhost:5050`.
+The server is now available at `http://localhost:5050`. API keys are configured via the Settings tab in the web UI, or via `PUT /api/settings/{key}` (see Configuration section below).
 
 ## OpenAPI Spec
 

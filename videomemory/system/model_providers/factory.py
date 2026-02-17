@@ -45,8 +45,7 @@ def get_VLM_provider(model_name: Optional[str] = None) -> BaseModelProvider:
         ValueError: If model name is not recognized
     """
     if model_name is None:
-        model_name = os.getenv("VIDEO_INGESTOR_MODEL")
-        assert model_name is not None, "VIDEO_INGESTOR_MODEL environment variable is not set, recommended: 'gemini-2.5-flash'"
+        model_name = os.getenv("VIDEO_INGESTOR_MODEL", "gemini-2.5-flash")
     
     model_name = model_name.lower().strip()
     
