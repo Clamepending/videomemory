@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}VideoMemory{% endblock %}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #212121;
+            color: #ececec;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .menu-bar {
+            background: #2d2d2d;
+            border-bottom: 1px solid #404040;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            height: 60px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        
+        .menu-bar h1 {
+            font-size: 18px;
+            font-weight: 500;
+            margin-right: 30px;
+            color: #ececec;
+        }
+        
+        .menu-nav {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .menu-nav a {
+            padding: 8px 16px;
+            text-decoration: none;
+            color: #ececec;
+            border-radius: 6px;
+            transition: background 0.2s;
+            font-size: 14px;
+        }
+        
+        .menu-nav a:hover {
+            background: #404040;
+        }
+        
+        .menu-nav a.active {
+            background: #19c37d;
+            color: white;
+        }
+        
+        .content {
+            flex: 1;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        
+        {% block extra_styles %}{% endblock %}
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <div class="menu-bar">
+        <h1>VideoMemory</h1>
+        <nav class="menu-nav">
+            <a href="/" id="nav-chat">Chat</a>
+            <a href="/tasks" id="nav-tasks">Tasks</a>
+            <a href="/devices" id="nav-devices">Devices</a>
+            <a href="/settings" id="nav-settings">Settings</a>
+        </nav>
+    </div>
+    <div class="content">
+        {% block content %}{% endblock %}
+    </div>
+    {% block extra_scripts %}{% endblock %}
+    <script>
+        // Set active menu item based on current path
+        const currentPath = window.location.pathname;
+        const navMap = {
+            '/': 'nav-chat',
+            '/chat': 'nav-chat',
+            '/tasks': 'nav-tasks',
+            '/devices': 'nav-devices',
+            '/settings': 'nav-settings'
+        };
+        // Also handle paths that start with /task/ or /device/ (detail/debug pages)
+        let matchKey = currentPath;
+        if (currentPath.startsWith('/task/')) matchKey = '/tasks';
+        if (currentPath.startsWith('/device/')) matchKey = '/devices';
+        
+        const activeId = navMap[matchKey];
+        if (activeId) {
+            const el = document.getElementById(activeId);
+            if (el) el.classList.add('active');
+        }
+    </script>
+</body>
+</html>

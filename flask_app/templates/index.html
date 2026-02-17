@@ -1,0 +1,665 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Agent Chat - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+        .content {
+            align-items: stretch;
+            padding: 0;
+        }
+
+        /* ── Layout ──────────────────────────────── */
+        .chat-page {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* ── Sidebar ─────────────────────────────── */
+        .sidebar {
+            width: 260px;
+            min-width: 260px;
+            background: #171717;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 14px;
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        .new-chat-btn {
+            width: 100%;
+            padding: 10px 14px;
+            background: #2d2d2d;
+            color: #ececec;
+            border: 1px solid #404040;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.15s;
+        }
+
+        .new-chat-btn:hover {
+            background: #404040;
+        }
+
+        .new-chat-btn .icon {
+            font-size: 16px;
+            font-weight: 300;
+        }
+
+        .session-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 6px 8px;
+        }
+
+        .session-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .session-list::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 2px;
+        }
+
+        .session-item {
+            padding: 10px 12px;
+            margin-bottom: 2px;
+            border-radius: 8px;
+            cursor: pointer;
+            color: #bbb;
+            font-size: 13px;
+            position: relative;
+            transition: background 0.1s;
+        }
+
+        .session-item:hover {
+            background: #2a2a2a;
+        }
+
+        .session-item.active {
+            background: #2d2d2d;
+            color: #fff;
+        }
+
+        .session-title {
+            font-weight: 400;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding-right: 24px;
+        }
+
+        .session-date {
+            font-size: 11px;
+            color: #666;
+            margin-top: 3px;
+        }
+
+        .session-delete {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: none;
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            line-height: 1;
+        }
+
+        .session-item:hover .session-delete {
+            display: block;
+        }
+
+        .session-delete:hover {
+            color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.1);
+        }
+
+        /* ── Chat main area ──────────────────────── */
+        .chat-main {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: stretch;
+            padding: 20px;
+            min-width: 0;
+        }
+
+        .chat-container {
+            width: 800px;
+            max-width: 100%;
+            background: #2d2d2d;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #404040;
+        }
+
+        .chat-header {
+            padding: 20px;
+            border-bottom: 1px solid #404040;
+            background: #343541;
+            color: #ececec;
+            border-radius: 12px 12px 0 0;
+        }
+
+        .chat-header h1 {
+            font-size: 20px;
+            font-weight: 500;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #212121;
+        }
+
+        .chat-messages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: #2d2d2d;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 4px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #666;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user {
+            align-items: flex-end;
+        }
+
+        .message.agent {
+            align-items: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .message.user .message-bubble {
+            background: #19c37d;
+            color: #ffffff;
+        }
+
+        .message.agent .message-bubble {
+            background: #343541;
+            color: #ececec;
+            border: 1px solid #404040;
+        }
+
+        .chat-input-container {
+            padding: 20px;
+            border-top: 1px solid #404040;
+            background: #2d2d2d;
+            display: flex;
+            gap: 10px;
+            border-radius: 0 0 12px 12px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #404040;
+            border-radius: 24px;
+            font-size: 14px;
+            outline: none;
+            background: #404040;
+            color: #ececec;
+        }
+
+        .chat-input::placeholder {
+            color: #888;
+        }
+
+        .chat-input:focus {
+            border-color: #19c37d;
+            background: #4a4a4a;
+        }
+
+        .send-button {
+            padding: 12px 24px;
+            background: #19c37d;
+            color: white;
+            border: none;
+            border-radius: 24px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .send-button:hover {
+            background: #16a86a;
+        }
+
+        .send-button:disabled {
+            background: #404040;
+            color: #888;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            color: #888;
+            font-style: italic;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            gap: 24px;
+            padding: 40px 20px;
+        }
+
+        .empty-state-title {
+            color: #666;
+            font-size: 15px;
+        }
+
+        .suggestions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+            max-width: 480px;
+        }
+
+        .suggestion {
+            padding: 14px 18px;
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 12px;
+            color: #bbb;
+            font-size: 13px;
+            line-height: 1.5;
+            cursor: pointer;
+            text-align: left;
+            transition: border-color 0.15s, background 0.15s, color 0.15s;
+        }
+
+        .suggestion:hover {
+            border-color: #19c37d;
+            background: #2d332f;
+            color: #ececec;
+        }
+
+        .suggestion-hint {
+            display: block;
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+            font-style: italic;
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="chat-page">
+        <!-- Sidebar: session list -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <button class="new-chat-btn" onclick="newSession()">
+                    <span class="icon">+</span> New Chat
+                </button>
+            </div>
+            <div class="session-list" id="sessionList"></div>
+        </aside>
+
+        <!-- Main chat area -->
+        <div class="chat-main">
+            <div class="chat-container">
+                <div class="chat-header">
+                    <h1 id="chatTitle">Admin Agent Chat</h1>
+                </div>
+                <div class="chat-messages" id="messages"></div>
+                <div class="chat-input-container">
+                    <input 
+                        type="text" 
+                        class="chat-input" 
+                        id="messageInput" 
+                        placeholder="Type your message..."
+                        autocomplete="off"
+                    >
+                    <button class="send-button" id="sendButton" onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        // ── State ───────────────────────────────────
+        let currentSessionId = null;
+        let sessionsCache = [];
+
+        const messagesDiv = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const sessionList = document.getElementById('sessionList');
+        const chatTitle = document.getElementById('chatTitle');
+
+        const SUGGESTIONS = [
+            { text: "Please describe the person in the front facing camera" },
+            { text: "Notify me on Discord when a bottle is left unattended near the sink",
+              hint: "Discord webhook needs to be set up in the Settings tab" },
+            { text: "Did anything of note happen in the USB camera during the last 2 days?",
+              hint: "You need to ask the system to watch for anomalies on that device before you can ask this" },
+        ];
+
+        // ── Empty state with suggestions ─────────────
+
+        function showEmptyState() {
+            messagesDiv.innerHTML = '';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'empty-state';
+            wrapper.id = 'emptyState';
+
+            const title = document.createElement('div');
+            title.className = 'empty-state-title';
+            title.textContent = 'Start a conversation or try an example:';
+            wrapper.appendChild(title);
+
+            const list = document.createElement('div');
+            list.className = 'suggestions';
+            SUGGESTIONS.forEach(s => {
+                const btn = document.createElement('button');
+                btn.className = 'suggestion';
+                const span = document.createElement('span');
+                span.textContent = s.text;
+                btn.appendChild(span);
+                if (s.hint) {
+                    const hint = document.createElement('span');
+                    hint.className = 'suggestion-hint';
+                    hint.textContent = `(${s.hint})`;
+                    btn.appendChild(hint);
+                }
+                btn.onclick = () => useSuggestion(s.text);
+                list.appendChild(btn);
+            });
+            wrapper.appendChild(list);
+            messagesDiv.appendChild(wrapper);
+        }
+
+        function useSuggestion(text) {
+            messageInput.value = text;
+            sendMessage();
+        }
+
+        // Show suggestions on initial load
+        showEmptyState();
+
+        // ── Sessions ────────────────────────────────
+
+        async function loadSessions() {
+            try {
+                const resp = await fetch('/api/sessions');
+                const data = await resp.json();
+                sessionsCache = data.sessions || [];
+                renderSessionList();
+
+                if (sessionsCache.length === 0) {
+                    await newSession();
+                } else if (!currentSessionId) {
+                    // Select the most recent session
+                    await selectSession(sessionsCache[0].session_id);
+                }
+            } catch (err) {
+                console.error('Failed to load sessions:', err);
+            }
+        }
+
+        function renderSessionList() {
+            sessionList.innerHTML = '';
+            sessionsCache.forEach(s => {
+                const item = document.createElement('div');
+                item.className = 'session-item' + (s.session_id === currentSessionId ? ' active' : '');
+                item.onclick = (e) => {
+                    // Don't select if clicking the delete button
+                    if (e.target.classList.contains('session-delete')) return;
+                    selectSession(s.session_id);
+                };
+
+                const title = document.createElement('div');
+                title.className = 'session-title';
+                title.textContent = s.title || 'New Chat';
+
+                const date = document.createElement('div');
+                date.className = 'session-date';
+                date.textContent = formatRelativeTime(s.created_at);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'session-delete';
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.title = 'Delete session';
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    deleteSession(s.session_id);
+                };
+
+                item.appendChild(title);
+                item.appendChild(date);
+                item.appendChild(deleteBtn);
+                sessionList.appendChild(item);
+            });
+        }
+
+        async function selectSession(sessionId) {
+            currentSessionId = sessionId;
+            renderSessionList();  // Update active highlight
+
+            // Clear messages
+            messagesDiv.innerHTML = '';
+
+            // Load messages for this session
+            try {
+                const resp = await fetch(`/api/sessions/${sessionId}/messages`);
+                const data = await resp.json();
+                const messages = data.messages || [];
+
+                if (messages.length === 0) {
+                    showEmptyState();
+                } else {
+                    messages.forEach(m => addMessage(m.text, m.role === 'user'));
+                }
+
+                // Update header title
+                const session = sessionsCache.find(s => s.session_id === sessionId);
+                chatTitle.textContent = session && session.title ? session.title : 'Admin Agent Chat';
+            } catch (err) {
+                console.error('Failed to load messages:', err);
+                messagesDiv.innerHTML = '<div class="empty-state">Failed to load messages</div>';
+            }
+
+            messageInput.focus();
+        }
+
+        async function newSession() {
+            try {
+                const resp = await fetch('/api/sessions/new', { method: 'POST' });
+                const data = await resp.json();
+                currentSessionId = data.session_id;
+
+                // Reload session list and select the new one
+                const listResp = await fetch('/api/sessions');
+                const listData = await listResp.json();
+                sessionsCache = listData.sessions || [];
+                renderSessionList();
+
+                // Clear chat and show suggestions
+                showEmptyState();
+                chatTitle.textContent = 'Admin Agent Chat';
+                messageInput.focus();
+            } catch (err) {
+                console.error('Failed to create session:', err);
+            }
+        }
+
+        async function deleteSession(sessionId) {
+            try {
+                await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+
+                // Remove from cache
+                sessionsCache = sessionsCache.filter(s => s.session_id !== sessionId);
+                renderSessionList();
+
+                // If we deleted the current session, switch to another
+                if (sessionId === currentSessionId) {
+                    if (sessionsCache.length > 0) {
+                        await selectSession(sessionsCache[0].session_id);
+                    } else {
+                        await newSession();
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to delete session:', err);
+            }
+        }
+
+        // ── Chat ────────────────────────────────────
+
+        function addMessage(text, isUser) {
+            // Remove empty state if present
+            const empty = document.getElementById('emptyState');
+            if (empty) empty.remove();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user' : 'agent'}`;
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.textContent = text;
+
+            messageDiv.appendChild(bubble);
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message || !currentSessionId) return;
+
+            // Add user message
+            addMessage(message, true);
+            messageInput.value = '';
+            sendButton.disabled = true;
+            sendButton.textContent = 'Sending...';
+
+            // Add loading indicator
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'message agent';
+            loadingDiv.id = 'loading';
+            const loadingBubble = document.createElement('div');
+            loadingBubble.className = 'message-bubble loading';
+            loadingBubble.textContent = 'Thinking...';
+            loadingDiv.appendChild(loadingBubble);
+            messagesDiv.appendChild(loadingDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: currentSessionId
+                    })
+                });
+
+                const data = await response.json();
+
+                // Remove loading
+                const loading = document.getElementById('loading');
+                if (loading) loading.remove();
+
+                if (response.ok) {
+                    addMessage(data.response, false);
+                } else {
+                    addMessage(`Error: ${data.error}`, false);
+                }
+
+                // Update session title in sidebar (first message sets the title)
+                const session = sessionsCache.find(s => s.session_id === currentSessionId);
+                if (session && !session.title) {
+                    let title = message.substring(0, 60).trim();
+                    if (message.length > 60) title += '...';
+                    session.title = title;
+                    chatTitle.textContent = title;
+                    renderSessionList();
+                }
+            } catch (error) {
+                const loading = document.getElementById('loading');
+                if (loading) loading.remove();
+                addMessage(`Error: ${error.message}`, false);
+            } finally {
+                sendButton.disabled = false;
+                sendButton.textContent = 'Send';
+                messageInput.focus();
+            }
+        }
+
+        // ── Utilities ───────────────────────────────
+
+        function formatRelativeTime(unixTimestamp) {
+            const date = new Date(unixTimestamp * 1000);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return date.toLocaleDateString();
+        }
+
+        // ── Event listeners ─────────────────────────
+
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !sendButton.disabled) {
+                sendMessage();
+            }
+        });
+
+        // ── Initialize ──────────────────────────────
+
+        loadSessions();
+    </script>
+{% endblock %}

@@ -3,7 +3,21 @@ __pycache__/
 
 outputs/datasets/*
 venv/
+.venv/
+
+logs/
+*.log
+**/*.log
 
 outputs/captioners/*
 
 apps/Qwen2-VL-7B-Instruct/
+
+misc/
+
+.env
+
+# Database files
+data/
+
+AgentDevelopmentKit_exploration/videomemory/logs/*

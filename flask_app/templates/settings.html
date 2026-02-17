@@ -1,0 +1,514 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+        .content {
+            padding: 30px 20px;
+        }
+
+        .settings-page {
+            width: 700px;
+            max-width: 100%;
+        }
+
+        .settings-page h2 {
+            font-size: 24px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .settings-page .page-desc {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 28px;
+        }
+
+        /* ── Section cards ─────────────────────── */
+        .settings-section {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .settings-section h3 {
+            font-size: 16px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 4px;
+        }
+
+        .section-desc {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 20px;
+        }
+
+        /* ── Individual setting rows ───────────── */
+        .setting-row {
+            margin-bottom: 18px;
+        }
+
+        .setting-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .setting-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .setting-label label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #ccc;
+        }
+
+        .setting-label .badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .badge-set {
+            background: rgba(25, 195, 125, 0.15);
+            color: #19c37d;
+        }
+
+        .badge-unset {
+            background: rgba(255, 180, 50, 0.15);
+            color: #ffb432;
+        }
+
+        .badge-env {
+            background: rgba(100, 150, 255, 0.15);
+            color: #8ab4ff;
+        }
+
+        .setting-hint {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 6px;
+        }
+
+        .setting-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .setting-input {
+            flex: 1;
+            padding: 10px 14px;
+            background: #1a1a1a;
+            border: 1px solid #404040;
+            border-radius: 8px;
+            color: #ececec;
+            font-size: 13px;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .setting-input:focus {
+            border-color: #19c37d;
+        }
+
+        .setting-input::placeholder {
+            color: #555;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        select.setting-input {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 32px;
+        }
+
+        /* ── Buttons ───────────────────────────── */
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+
+        .btn-save {
+            background: #19c37d;
+            color: white;
+        }
+
+        .btn-save:hover {
+            background: #16a86a;
+        }
+
+        .btn-save:disabled {
+            background: #404040;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        .btn-test {
+            background: #2d5aa0;
+            color: white;
+        }
+
+        .btn-test:hover {
+            background: #3a6fbe;
+        }
+
+        .btn-test:disabled {
+            background: #404040;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        .btn-clear {
+            background: none;
+            border: 1px solid #404040;
+            color: #888;
+            padding: 8px 12px;
+        }
+
+        .btn-clear:hover {
+            border-color: #ff6b6b;
+            color: #ff6b6b;
+        }
+
+        /* ── Status feedback ───────────────────── */
+        .setting-status {
+            font-size: 12px;
+            margin-top: 6px;
+            min-height: 18px;
+        }
+
+        .status-success {
+            color: #19c37d;
+        }
+
+        .status-error {
+            color: #ff6b6b;
+        }
+
+        /* ── Restart notice ────────────────────── */
+        .restart-notice {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: rgba(255, 180, 50, 0.08);
+            border: 1px solid rgba(255, 180, 50, 0.2);
+            border-radius: 8px;
+            margin-top: 16px;
+            font-size: 12px;
+            color: #d4a843;
+        }
+
+        .restart-notice .icon {
+            font-size: 14px;
+        }
+
+        /* ── Toggle show/hide ──────────────────── */
+        .toggle-vis {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 8px 6px;
+        }
+
+        .toggle-vis:hover {
+            color: #aaa;
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="settings-page">
+        <h2>Settings</h2>
+        <p class="page-desc">Configure API keys, webhooks, and external services. Settings are saved to the local database and persist across restarts.</p>
+
+        <!-- ── Notifications ──────────────────────── -->
+        <div class="settings-section">
+            <h3>Notifications</h3>
+            <p class="section-desc">Configure how VideoMemory sends notifications and alerts.</p>
+
+            <div class="setting-row" data-key="DISCORD_WEBHOOK_URL">
+                <div class="setting-label">
+                    <label>Discord Webhook URL</label>
+                    <span class="badge" id="badge-DISCORD_WEBHOOK_URL"></span>
+                </div>
+                <div class="setting-hint">Paste a Discord channel webhook URL to receive notifications. <a href="https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks" target="_blank" style="color:#8ab4ff;">How to create a webhook</a></div>
+                <div class="setting-input-row">
+                    <input type="text" class="setting-input" id="input-DISCORD_WEBHOOK_URL" placeholder="https://discord.com/api/webhooks/...">
+                    <button class="btn btn-test" onclick="testDiscord()" id="btn-test-discord">Test</button>
+                    <button class="btn btn-save" onclick="saveSetting('DISCORD_WEBHOOK_URL')">Save</button>
+                </div>
+                <div class="setting-status" id="status-DISCORD_WEBHOOK_URL"></div>
+            </div>
+        </div>
+
+        <!-- ── AI Providers ───────────────────────── -->
+        <div class="settings-section">
+            <h3>AI Model Providers</h3>
+            <p class="section-desc">API keys for the AI services that power the agent and video analysis.</p>
+
+            <div class="setting-row" data-key="GOOGLE_API_KEY">
+                <div class="setting-label">
+                    <label>Google API Key</label>
+                    <span class="badge" id="badge-GOOGLE_API_KEY"></span>
+                </div>
+                <div class="setting-hint">Required for Gemini models. Get one from <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#8ab4ff;">Google AI Studio</a></div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-GOOGLE_API_KEY" placeholder="AIza...">
+                    <button class="toggle-vis" onclick="toggleVisibility('GOOGLE_API_KEY')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('GOOGLE_API_KEY')">Save</button>
+                </div>
+                <div class="setting-status" id="status-GOOGLE_API_KEY"></div>
+            </div>
+
+            <div class="setting-row" data-key="OPENAI_API_KEY">
+                <div class="setting-label">
+                    <label>OpenAI API Key</label>
+                    <span class="badge" id="badge-OPENAI_API_KEY"></span>
+                </div>
+                <div class="setting-hint">Required for GPT models. Get one from <a href="https://platform.openai.com/api-keys" target="_blank" style="color:#8ab4ff;">OpenAI Platform</a></div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-OPENAI_API_KEY" placeholder="sk-proj-...">
+                    <button class="toggle-vis" onclick="toggleVisibility('OPENAI_API_KEY')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('OPENAI_API_KEY')">Save</button>
+                </div>
+                <div class="setting-status" id="status-OPENAI_API_KEY"></div>
+            </div>
+
+            <div class="setting-row" data-key="OPENROUTER_API_KEY">
+                <div class="setting-label">
+                    <label>OpenRouter API Key</label>
+                    <span class="badge" id="badge-OPENROUTER_API_KEY"></span>
+                </div>
+                <div class="setting-hint">For accessing models via OpenRouter. Get one from <a href="https://openrouter.ai/keys" target="_blank" style="color:#8ab4ff;">OpenRouter</a></div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-OPENROUTER_API_KEY" placeholder="sk-or-...">
+                    <button class="toggle-vis" onclick="toggleVisibility('OPENROUTER_API_KEY')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('OPENROUTER_API_KEY')">Save</button>
+                </div>
+                <div class="setting-status" id="status-OPENROUTER_API_KEY"></div>
+            </div>
+
+            <div class="setting-row" data-key="ANTHROPIC_API_KEY">
+                <div class="setting-label">
+                    <label>Anthropic API Key</label>
+                    <span class="badge" id="badge-ANTHROPIC_API_KEY"></span>
+                </div>
+                <div class="setting-hint">For Claude models. Get one from <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#8ab4ff;">Anthropic Console</a></div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-ANTHROPIC_API_KEY" placeholder="sk-ant-...">
+                    <button class="toggle-vis" onclick="toggleVisibility('ANTHROPIC_API_KEY')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('ANTHROPIC_API_KEY')">Save</button>
+                </div>
+                <div class="setting-status" id="status-ANTHROPIC_API_KEY"></div>
+            </div>
+
+            <div class="restart-notice">
+                <span class="icon">&#9888;</span>
+                API key changes take effect after restarting the application.
+            </div>
+        </div>
+
+        <!-- ── Video Processing ───────────────────── -->
+        <div class="settings-section">
+            <h3>Video Processing</h3>
+            <p class="section-desc">Configure the AI model used for analyzing camera streams.</p>
+
+            <div class="setting-row" data-key="VIDEO_INGESTOR_MODEL">
+                <div class="setting-label">
+                    <label>Video Ingestor Model</label>
+                    <span class="badge" id="badge-VIDEO_INGESTOR_MODEL"></span>
+                </div>
+                <div class="setting-hint">The model used for real-time video analysis. Different models have different speed/accuracy trade-offs.</div>
+                <div class="setting-input-row">
+                    <select class="setting-input" id="input-VIDEO_INGESTOR_MODEL">
+                        <option value="">-- Use default (gemini-2.5-flash) --</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash (Google)</option>
+                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Google)</option>
+                        <option value="gpt-4o-mini">GPT-4o Mini (OpenAI)</option>
+                        <option value="gpt-4.1-nano">GPT-4.1 Nano (OpenAI)</option>
+                        <option value="qwen-2.5-vl-7b-instruct">Qwen 2.5 VL 7B (OpenRouter/Local)</option>
+                    </select>
+                    <button class="btn btn-save" onclick="saveSetting('VIDEO_INGESTOR_MODEL')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEO_INGESTOR_MODEL"></div>
+            </div>
+
+            <div class="restart-notice">
+                <span class="icon">&#9888;</span>
+                Model changes take effect after restarting the application.
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        // ── Load current settings on page load ──
+
+        async function loadSettings() {
+            try {
+                const resp = await fetch('/api/settings');
+                const data = await resp.json();
+                const settings = data.settings || {};
+
+                for (const [key, info] of Object.entries(settings)) {
+                    const input = document.getElementById(`input-${key}`);
+                    const badge = document.getElementById(`badge-${key}`);
+
+                    if (!input || !badge) continue;
+
+                    // Set badge
+                    if (info.source === 'database') {
+                        badge.textContent = 'saved';
+                        badge.className = 'badge badge-set';
+                    } else if (info.source === 'env') {
+                        badge.textContent = '.env';
+                        badge.className = 'badge badge-env';
+                    } else {
+                        badge.textContent = 'not set';
+                        badge.className = 'badge badge-unset';
+                    }
+
+                    // Set placeholder with masked value for sensitive fields
+                    if (info.is_set && input.tagName === 'INPUT') {
+                        input.placeholder = info.value;
+                    }
+
+                    // Set select value
+                    if (input.tagName === 'SELECT' && info.is_set) {
+                        // Try to find matching option
+                        const val = info.value;
+                        for (const opt of input.options) {
+                            if (opt.value === val) {
+                                input.value = val;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to load settings:', err);
+            }
+        }
+
+        // ── Save a setting ──
+
+        async function saveSetting(key) {
+            const input = document.getElementById(`input-${key}`);
+            const status = document.getElementById(`status-${key}`);
+            let value = input.value.trim();
+
+            // For inputs, don't save if empty (they might just be viewing the masked placeholder)
+            // For select, empty string means "use default"
+            if (input.tagName === 'INPUT' && !value) {
+                status.textContent = 'Enter a value first';
+                status.className = 'setting-status status-error';
+                setTimeout(() => { status.textContent = ''; }, 3000);
+                return;
+            }
+
+            try {
+                const resp = await fetch(`/api/settings/${key}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value })
+                });
+
+                const data = await resp.json();
+
+                if (resp.ok) {
+                    status.textContent = data.status === 'cleared' ? 'Cleared — using .env value' : 'Saved successfully';
+                    status.className = 'setting-status status-success';
+                    // Clear the input so masked placeholder shows
+                    if (input.tagName === 'INPUT' && input.type === 'password') {
+                        input.value = '';
+                    }
+                    // Reload badges
+                    await loadSettings();
+                } else {
+                    status.textContent = `Error: ${data.error}`;
+                    status.className = 'setting-status status-error';
+                }
+            } catch (err) {
+                status.textContent = `Error: ${err.message}`;
+                status.className = 'setting-status status-error';
+            }
+
+            setTimeout(() => { status.textContent = ''; }, 4000);
+        }
+
+        // ── Test Discord webhook ──
+
+        async function testDiscord() {
+            const btn = document.getElementById('btn-test-discord');
+            const status = document.getElementById('status-DISCORD_WEBHOOK_URL');
+
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            status.textContent = '';
+
+            try {
+                // If there's a new URL in the input, save it first
+                const input = document.getElementById('input-DISCORD_WEBHOOK_URL');
+                if (input.value.trim()) {
+                    await saveSetting('DISCORD_WEBHOOK_URL');
+                }
+
+                const resp = await fetch('/api/settings/test/discord', { method: 'POST' });
+                const data = await resp.json();
+
+                if (data.status === 'success') {
+                    status.textContent = 'Test message sent! Check your Discord channel.';
+                    status.className = 'setting-status status-success';
+                } else {
+                    status.textContent = `Failed: ${data.message}`;
+                    status.className = 'setting-status status-error';
+                }
+            } catch (err) {
+                status.textContent = `Error: ${err.message}`;
+                status.className = 'setting-status status-error';
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Test';
+            setTimeout(() => { status.textContent = ''; }, 5000);
+        }
+
+        // ── Toggle password visibility ──
+
+        function toggleVisibility(key) {
+            const input = document.getElementById(`input-${key}`);
+            const btn = input.parentElement.querySelector('.toggle-vis');
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.textContent = 'hide';
+            } else {
+                input.type = 'password';
+                btn.textContent = 'show';
+            }
+        }
+
+        // ── Init ──
+
+        loadSettings();
+    </script>
+{% endblock %}

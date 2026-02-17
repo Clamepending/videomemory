@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+
+{% block title %}Devices - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+        .devices-container {
+            width: 100%;
+            max-width: 1400px;
+            padding: 30px 20px;
+            height: 100%;
+            overflow-y: auto;
+        }
+        
+        .devices-header {
+            margin-bottom: 30px;
+        }
+        
+        .devices-header h1 {
+            font-size: 28px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 10px;
+        }
+        
+        .devices-header p {
+            font-size: 14px;
+            color: #888;
+        }
+        
+        .refresh-button {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+            transition: background 0.2s;
+        }
+        
+        .refresh-button:hover {
+            background: #3a8eef;
+        }
+        
+        .refresh-button:active {
+            background: #2a7edf;
+        }
+        
+        .refresh-button:disabled {
+            background: #555;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        
+        .category-section {
+            margin-bottom: 40px;
+        }
+        
+        .category-title {
+            font-size: 20px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 15px;
+            text-transform: capitalize;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #404040;
+        }
+        
+        .devices-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .device-card {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+        }
+        
+        .device-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            border-color: #19c37d;
+        }
+        
+        .device-name {
+            font-size: 18px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 12px;
+            word-break: break-word;
+        }
+        
+        .device-id {
+            font-size: 12px;
+            color: #888;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            background: #1a1a1a;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #404040;
+        }
+        
+        .device-id-label {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .device-debug-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 12px;
+            padding: 7px 14px;
+            background: #353535;
+            color: #b0b0b0;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 13px;
+            transition: background 0.2s, color 0.2s;
+            border: 1px solid #444;
+        }
+
+        .device-debug-link:hover {
+            background: #19c37d;
+            color: white;
+            border-color: #19c37d;
+        }
+
+        .device-debug-link .link-icon {
+            font-size: 14px;
+        }
+        
+        .device-preview {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            background: #1a1a1a;
+            border: 1px solid #404040;
+        }
+        
+        .device-preview.error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            font-size: 12px;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .device-preview.loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 12px;
+        }
+        
+        .device-preview-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: #666;
+            font-size: 12px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            border: 1px solid #404040;
+        }
+        
+        .no-devices {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+        
+        .no-devices h2 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #666;
+        }
+        
+        .no-devices p {
+            font-size: 14px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+        
+        .error {
+            text-align: center;
+            padding: 60px 20px;
+            color: #ff6b6b;
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="devices-container">
+        <div class="devices-header">
+            <h1>Input Devices</h1>
+            <p>All available input devices detected on this system</p>
+            <button class="refresh-button" id="refreshButton" onclick="loadDevices()">
+                🔄 Refresh
+            </button>
+        </div>
+        <div id="devicesContent">
+            <div class="loading">Loading devices...</div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        async function loadDevices() {
+            const contentDiv = document.getElementById('devicesContent');
+            const refreshButton = document.getElementById('refreshButton');
+            
+            try {
+                refreshButton.disabled = true;
+                refreshButton.textContent = '🔄 Refreshing...';
+                
+                // Fetch latest devices
+                const response = await fetch('/api/devices');
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    contentDiv.innerHTML = `<div class="error">Error: ${data.error || 'Failed to load devices'}</div>`;
+                    return;
+                }
+                
+                const devicesByCategory = data.devices || {};
+                const categories = Object.keys(devicesByCategory);
+                
+                if (categories.length === 0) {
+                    contentDiv.innerHTML = `
+                        <div class="no-devices">
+                            <h2>No devices found</h2>
+                            <p>No input devices were detected on this system.</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let html = '';
+                
+                // Sort categories alphabetically
+                categories.sort();
+                
+                categories.forEach(category => {
+                    const devices = devicesByCategory[category];
+                    
+                    html += `
+                        <div class="category-section">
+                            <div class="category-title">${escapeHtml(category)} (${devices.length})</div>
+                            <div class="devices-grid">
+                    `;
+                    
+                    devices.forEach(device => {
+                        const isCamera = category.toLowerCase().includes('camera');
+                        let previewHtml;
+                        if (isCamera) {
+                            const previewId = `preview-${device.io_id.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                            // Add timestamp to force fresh image load
+                            previewHtml = `<img class="device-preview loading" id="${previewId}" src="/api/device/${escapeHtml(device.io_id)}/preview?t=${Date.now()}" alt="Camera preview" />`;
+                        } else {
+                            previewHtml = '<div class="device-preview-placeholder">No preview available</div>';
+                        }
+                        
+                        html += `
+                            <div class="device-card">
+                                ${previewHtml}
+                                <div class="device-name">${escapeHtml(device.name || 'Unknown Device')}</div>
+                                <div class="device-id-label">IO ID</div>
+                                <div class="device-id">${escapeHtml(device.io_id || 'N/A')}</div>
+                                <a href="/device/${encodeURIComponent(device.io_id)}/debug" class="device-debug-link">
+                                    <span class="link-icon">&#9881;</span> Ingestor Debug
+                                </a>
+                            </div>
+                        `;
+                    });
+                    
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                contentDiv.innerHTML = html;
+                
+                // Set up error handlers for camera previews after HTML is inserted
+                const previewImages = contentDiv.querySelectorAll('.device-preview');
+                previewImages.forEach(img => {
+                    img.addEventListener('load', function() {
+                        this.classList.remove('loading');
+                    });
+                    img.addEventListener('error', function() {
+                        this.classList.remove('loading');
+                        this.classList.add('error');
+                        this.alt = 'Device disconnected or unavailable';
+                        // Replace with error message div showing disconnected status
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'device-preview error';
+                        errorDiv.innerHTML = '<div>Device Disconnected<br/><small>Camera not available or in use</small></div>';
+                        this.parentNode.replaceChild(errorDiv, this);
+                    });
+                });
+                
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            } finally {
+                refreshButton.disabled = false;
+                refreshButton.textContent = '🔄 Refresh Devices';
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Load devices on page load
+        loadDevices();
+    </script>
+{% endblock %}

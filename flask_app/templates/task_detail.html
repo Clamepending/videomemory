@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}Task Details - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+        .task-detail-container {
+            width: 100%;
+            max-width: 1000px;
+            padding: 30px 20px;
+            height: 100%;
+            overflow-y: auto;
+        }
+        
+        .task-detail-header {
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .back-button {
+            padding: 8px 16px;
+            background: #404040;
+            color: #ececec;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        
+        .back-button:hover {
+            background: #505050;
+        }
+        
+        .task-detail-header h1 {
+            font-size: 28px;
+            font-weight: 500;
+            color: #ececec;
+            flex: 1;
+        }
+        
+        .task-info-card {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+        }
+        
+        .task-info-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #404040;
+        }
+        
+        .task-id {
+            font-size: 14px;
+            color: #888;
+            font-weight: 500;
+        }
+        
+        .task-status {
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        
+        .task-status.active {
+            background: #19c37d;
+            color: white;
+        }
+        
+        .task-status.done {
+            background: #666;
+            color: #ececec;
+        }
+        
+        .task-status.terminated {
+            background: #8b6914;
+            color: #ffe8a3;
+        }
+        
+        .task-device {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #999;
+            margin-bottom: 16px;
+        }
+
+        .task-device .device-icon {
+            font-size: 14px;
+        }
+
+        .task-description {
+            font-size: 18px;
+            color: #ececec;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+        
+        .task-notes-section {
+            margin-top: 30px;
+        }
+        
+        .task-notes-header {
+            font-size: 20px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #404040;
+        }
+        
+        .notes-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .note-card {
+            background: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            transition: border-color 0.2s;
+        }
+        
+        .note-card:hover {
+            border-color: #505050;
+        }
+        
+        .note-content {
+            font-size: 15px;
+            color: #ececec;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        
+        .note-timestamp {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .no-notes {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+            font-style: italic;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+        
+        .error {
+            text-align: center;
+            padding: 60px 20px;
+            color: #ff6b6b;
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="task-detail-container">
+        <div class="task-detail-header">
+            <a href="/tasks" class="back-button">← Back to Tasks</a>
+            <h1>Task Details</h1>
+        </div>
+        <div id="taskDetailContent">
+            <div class="loading">Loading task details...</div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        const taskId = '{{ task_id }}';
+        let deviceNames = {};
+
+        async function fetchDeviceNames() {
+            try {
+                const resp = await fetch('/api/devices');
+                const data = await resp.json();
+                const devices = data.devices || {};
+                deviceNames = {};
+                for (const category of Object.values(devices)) {
+                    for (const dev of category) {
+                        deviceNames[dev.io_id] = dev.name;
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch devices:', e);
+            }
+        }
+
+        async function loadTaskDetail() {
+            const contentDiv = document.getElementById('taskDetailContent');
+            
+            try {
+                // Fetch task and device names in parallel
+                const [response] = await Promise.all([
+                    fetch(`/api/task/${taskId}`),
+                    Object.keys(deviceNames).length === 0 ? fetchDeviceNames() : Promise.resolve()
+                ]);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    contentDiv.innerHTML = `<div class="error">Error: ${data.error || 'Failed to load task details'}</div>`;
+                    return;
+                }
+                
+                const task = data.task;
+                
+                // Build task info card
+                const status = task.status || (task.done ? 'done' : 'active');
+                const statusLabels = {
+                    'active': 'Active',
+                    'done': 'Done',
+                    'terminated': 'Terminated'
+                };
+                
+                // Resolve device name from io_id
+                const deviceName = deviceNames[task.io_id] || `Device ${task.io_id}`;
+                
+                let taskInfoHtml = `
+                    <div class="task-info-card">
+                        <div class="task-info-header">
+                            <span class="task-id">Task #${task.task_id || 'N/A'}</span>
+                            <span class="task-status ${status}">
+                                ${statusLabels[status] || status}
+                            </span>
+                        </div>
+                        <div class="task-device">
+                            <span class="device-icon">&#9654;</span>
+                            ${escapeHtml(deviceName)}
+                        </div>
+                        <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>
+                    </div>
+                `;
+                
+                // Build notes section
+                let notesHtml = `
+                    <div class="task-notes-section">
+                        <div class="task-notes-header">Task Notes (${task.task_note ? task.task_note.length : 0})</div>
+                `;
+                
+                if (task.task_note && task.task_note.length > 0) {
+                    notesHtml += '<div class="notes-list">';
+                    // Display notes in reverse order (newest first)
+                    const reversedNotes = [...task.task_note].reverse();
+                    reversedNotes.forEach(note => {
+                        notesHtml += `
+                            <div class="note-card">
+                                <div class="note-content">${escapeHtml(note.content || 'No content')}</div>
+                                <div class="note-timestamp">${note.timestamp || 'No timestamp'}</div>
+                            </div>
+                        `;
+                    });
+                    notesHtml += '</div>';
+                } else {
+                    notesHtml += '<div class="no-notes">No notes yet for this task.</div>';
+                }
+                
+                notesHtml += '</div>';
+                
+                contentDiv.innerHTML = taskInfoHtml + notesHtml;
+                
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Load task details on page load
+        loadTaskDetail();
+        
+        // Refresh task details every 5 seconds
+        setInterval(loadTaskDetail, 5000);
+    </script>
+{% endblock %}
