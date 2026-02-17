@@ -8,38 +8,21 @@ A video monitoring system that uses vision-language models to analyse camera fee
 uv run flask_app/app.py
 ```
 
-That's it. Open http://localhost:5050, then go to the **Settings** tab to enter your model API key (e.g. Google Gemini, OpenAI, or OpenRouter).
+Open http://localhost:5050. Set your model API key in the **Settings** tab. Chat with the admin agent in the **Chat** tab to manage the system through natural conversation, or browse your cameras and monitoring tasks directly in the **Devices** and **Tasks** tabs.
 
----
-
-## Standalone Usage
-
-### Web UI
-
-```bash
-uv run flask_app/app.py
-```
-
-Open http://localhost:5050 in your browser. The web UI includes a chat interface, task management, device previews, and a settings page for API keys.
-
-### CLI mode
+## CLI Mode
 
 ```bash
 uv run main.py
 ```
 
-Chat directly with the admin agent in your terminal. The agent can list your cameras, create monitoring tasks, check task status, and more through natural conversation. Requires a `GOOGLE_API_KEY` environment variable or `.env` file.
-
-### Monitoring logs
-
-```bash
-tail -f videomemory/logs/info.log
-```
+Same admin agent, but in your terminal. Requires a `GOOGLE_API_KEY` environment variable or `.env` file.
 
 ---
 
 ## OpenClaw Agent Setup
 
-After installing [OpenClaw](https://openclaw.ai/), start the VideoMemory server (`uv run flask_app/app.py`) and set your API key in the Settings tab. Then tell your agent:
+1. Install [OpenClaw](https://openclaw.ai/)
+2. Tell your agent:
 
-> Clone https://github.com/Clamepending/videomemory and read the `AGENTS.md` file to onboard to the VideoMemory system. The server is running at http://localhost:5050.
+> Clone https://github.com/Clamepending/videomemory and read the `AGENTS.md` file to onboard to the VideoMemory system.
