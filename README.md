@@ -28,7 +28,7 @@ Same admin agent, but in your terminal. Requires a `GOOGLE_API_KEY` environment 
 
 Text the system from anywhere — your phone, laptop, tablet — through Telegram. Send messages and receive real-time updates from your monitoring tasks on any device, wherever you are.
 
-<video src="assets/telegram_demo.mp4" width="300"></video>
+<img src="assets/telegram_demo.gif" width="300" alt="Telegram integration demo">
 
 ---
 
