@@ -2,6 +2,8 @@
 
 A video monitoring system that uses vision-language models to analyse camera feeds. You create **tasks** describing what to watch for, and the system continuously analyses the video stream — counting events, detecting conditions, and triggering actions like Discord notifications.
 
+<video src="https://private-user-images.githubusercontent.com/57735073/551389107-97940b8e-33de-4dd1-84c1-0171b7d5146e.mov?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzEzOTk1NTUsIm5iZiI6MTc3MTM5OTI1NSwicGF0aCI6Ii81NzczNTA3My81NTEzODkxMDctOTc5NDBiOGUtMzNkZS00ZGQxLTg0YzEtMDE3MWI3ZDUxNDZlLm1vdj9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMTglMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjE4VDA3MjA1NVomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWExNzYxMzBkYTc0NTc0YzAxMjQ4OTA5YzliMzcyOTQyNzY2OGU1N2Q3ODFiM2NhNDRlNjc5OTllZmZhYmNmNTMmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.pNsHNw0P10xd3ve2Q5nq_hlI9Rc08MyeVEEu3yT7CaY" controls width="640"></video>
+
 ## Quick Start
 
 ```bash
@@ -13,8 +15,6 @@ Open http://localhost:5050. Set your model API key in the **Settings** tab. Chat
 ## Telegram
 
 Text the system from anywhere — your phone, laptop, tablet — through Telegram. Send messages and receive real-time updates from your monitoring tasks on any device, wherever you are.
-
-![Telegram integration demo](assets/telegram_demo.mp4)
 
 Create a bot with **@BotFather** in Telegram, paste the **Bot Token** in Settings, then restart the app. Open a chat with your bot and send a message to add tasks, list devices, and so on. The app uses long polling by default (no public URL needed). With a public URL you can set the bot webhook to `https://your-server/api/telegram/webhook` instead.
 
