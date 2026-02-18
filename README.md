@@ -14,7 +14,7 @@ Open http://localhost:5050. Set your model API key in the **Settings** tab. Chat
 
 Text the system from anywhere — your phone, laptop, tablet — through Telegram. Send messages and receive real-time updates from your monitoring tasks on any device, wherever you are.
 
-<img src="assets/telegram_demo.gif" width="300" alt="Telegram integration demo">
+![Telegram integration demo](assets/telegram_demo.mp4)
 
 Create a bot with **@BotFather** in Telegram, paste the **Bot Token** in Settings, then restart the app. Open a chat with your bot and send a message to add tasks, list devices, and so on. The app uses long polling by default (no public URL needed). With a public URL you can set the bot webhook to `https://your-server/api/telegram/webhook` instead.
 
