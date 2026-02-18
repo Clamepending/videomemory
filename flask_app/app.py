@@ -650,7 +650,7 @@ def get_ingestor_tasks(io_id):
 
 # ── Action API ─────────────────────────────────────────────────
 
-from videomemory.tools.actions import send_discord_notification
+from videomemory.tools.actions import send_discord_notification, send_telegram_notification
 
 @app.route('/api/actions/discord', methods=['POST'])
 def action_send_discord():
@@ -670,6 +670,24 @@ def action_send_discord():
             message=message,
             username=data.get('username'),
         )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/actions/telegram', methods=['POST'])
+def action_send_telegram():
+    """Send a Telegram notification via Bot API.
+    
+    Body (JSON):
+        message (str, required): Message content to send.
+    """
+    try:
+        data = request.json or {}
+        message = data.get('message', '').strip()
+        if not message:
+            return jsonify({'status': 'error', 'error': 'message is required'}), 400
+        
+        result = send_telegram_notification(message=message)
         return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
@@ -893,6 +911,24 @@ def openapi_spec():
                     "responses": {"200": {"description": "Notification sent"}},
                 }
             },
+            "/api/actions/telegram": {
+                "post": {
+                    "operationId": "send_telegram_notification",
+                    "summary": "Send a Telegram notification",
+                    "description": "Sends a message to Telegram via the Bot API (requires TELEGRAM_BOT_TOKEN; optional TELEGRAM_CHAT_ID in env for one-way notifications).",
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "required": ["message"],
+                            "properties": {
+                                "message": {"type": "string", "description": "Message content"},
+                            },
+                        }}},
+                    },
+                    "responses": {"200": {"description": "Notification sent"}},
+                }
+            },
         },
         "components": {
             "schemas": {
@@ -915,12 +951,14 @@ def openapi_spec():
 
 # Keys that should be masked when returned to the frontend
 _SENSITIVE_KEYS = {
-    'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY'
+    'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY',
+    'TELEGRAM_BOT_TOKEN',
 }
 
 # All known setting keys (for the settings page)
 _KNOWN_SETTINGS = [
     'DISCORD_WEBHOOK_URL',
+    'TELEGRAM_BOT_TOKEN',
     'GOOGLE_API_KEY',
     'OPENAI_API_KEY',
     'OPENROUTER_API_KEY',
@@ -1011,6 +1049,142 @@ def test_discord_webhook():
     except Exception as e:
         flask_logger.error(f"Discord test failed: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# ── Telegram two-way chat (admin agent via Telegram) ───────────
+
+def _get_or_create_telegram_session(chat_id: int) -> str:
+    """Get or create an admin-agent session for this Telegram chat. Returns session_id."""
+    session_id = f"telegram_{chat_id}"
+
+    async def _ensure():
+        session = await session_service.get_session(
+            app_name=app_name, user_id=USER_ID, session_id=session_id
+        )
+        if session is None:
+            await session_service.create_session(
+                app_name=app_name, user_id=USER_ID, session_id=session_id
+            )
+            db.save_session_metadata(session_id, title="Telegram")
+        return session_id
+
+    return run_async(_ensure(), timeout=15)
+
+
+def _run_agent_for_message(session_id: str, user_message: str) -> str:
+    """Run the admin agent with the given message in the given session; return reply text."""
+    content = types.Content(role="user", parts=[types.Part(text=user_message)])
+    final_response_text = "No response received"
+
+    async def get_response():
+        nonlocal final_response_text
+        gen = runner.run_async(
+            user_id=USER_ID,
+            session_id=session_id,
+            new_message=content,
+        )
+        try:
+            async for event in gen:
+                if event.is_final_response():
+                    if event.content and event.content.parts:
+                        final_response_text = event.content.parts[0].text
+                    break
+        finally:
+            await gen.aclose()
+
+    run_async(get_response(), timeout=60)
+    return final_response_text
+
+
+def _send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:
+    """Send a text message to a Telegram chat. Returns True on success."""
+    try:
+        resp = http_requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=10,
+        )
+        return resp.ok and resp.json().get("ok", False)
+    except Exception as e:
+        flask_logger.error(f"Telegram sendMessage failed: {e}", exc_info=True)
+        return False
+
+
+def _process_telegram_update(update: dict) -> None:
+    """Process one Telegram update: run agent, send reply. Runs in background thread."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not bot_token:
+        return
+    message = update.get("message") or update.get("edited_message")
+    if not message:
+        return
+    chat = message.get("chat", {})
+    chat_id = chat.get("id")
+    text = (message.get("text") or "").strip()
+    if chat_id is None or not text:
+        return
+    try:
+        session_id = _get_or_create_telegram_session(chat_id)
+        reply = _run_agent_for_message(session_id, text)
+        # Telegram message length limit is 4096
+        if len(reply) > 4096:
+            reply = reply[:4093] + "..."
+        _send_telegram_message(bot_token, chat_id, reply)
+    except Exception as e:
+        flask_logger.error(f"Telegram update processing failed: {e}", exc_info=True)
+        _send_telegram_message(
+            bot_token,
+            chat_id,
+            f"Sorry, something went wrong: {str(e)[:500]}",
+        )
+
+
+@app.route("/api/telegram/webhook", methods=["POST"])
+def telegram_webhook():
+    """Receive Telegram updates (set bot webhook to this URL). Returns 200 immediately; processes in background."""
+    data = request.get_json(silent=True) or {}
+    # Return 200 quickly so Telegram doesn't retry
+    threading.Thread(target=_process_telegram_update, args=(data,), daemon=True).start()
+    return "", 200
+
+
+def _telegram_polling_loop():
+    """Long-poll Telegram getUpdates and process messages. Run in a daemon thread."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not bot_token:
+        return
+    last_update_id = 0
+    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+    flask_logger.info("Telegram polling started — you can chat with the admin agent via Telegram.")
+    while True:
+        try:
+            resp = http_requests.get(
+                url,
+                params={"offset": last_update_id, "timeout": 30},
+                timeout=35,
+            )
+            if not resp.ok:
+                continue
+            data = resp.json()
+            if not data.get("ok"):
+                continue
+            for update in data.get("result", []):
+                last_update_id = update.get("update_id", 0) + 1
+                _process_telegram_update(update)
+        except Exception as e:
+            flask_logger.debug(f"Telegram polling error: {e}")
+        except Exception:
+            break
+
+
+# Start Telegram polling in background if token is set (so chat works without a public URL)
+_telegram_poll_thread = None
+if os.getenv("TELEGRAM_BOT_TOKEN", "").strip():
+    _telegram_poll_thread = threading.Thread(
+        target=_telegram_polling_loop,
+        daemon=True,
+        name="TelegramPolling",
+    )
+    _telegram_poll_thread.start()
 
 # ── Chat API ──────────────────────────────────────────────────
 

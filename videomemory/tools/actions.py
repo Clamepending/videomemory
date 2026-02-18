@@ -180,6 +180,71 @@ def send_discord_notification(message: str, username: Optional[str] = None) -> d
         }
 
 
+def send_telegram_notification(message: str) -> dict:
+    """Sends a notification message to Telegram via the Bot API.
+    
+    Args:
+        message: The message content to send to Telegram.
+    
+    Returns:
+        dict: A dictionary containing the status and details of the Telegram notification operation.
+    """
+    logger.info(f"send_telegram_notification(message={message}) was called")
+    
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    
+    if not bot_token:
+        error_msg = "TELEGRAM_BOT_TOKEN environment variable is not set"
+        logger.error(error_msg)
+        return {
+            "status": "error",
+            "message": error_msg,
+            "error": "Missing environment variable",
+        }
+    
+    if not chat_id:
+        error_msg = "TELEGRAM_CHAT_ID environment variable is not set"
+        logger.error(error_msg)
+        return {
+            "status": "error",
+            "message": error_msg,
+            "error": "Missing environment variable",
+        }
+    
+    try:
+        result = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": message},
+            timeout=10,
+        )
+        
+        data = result.json()
+        if data.get("ok"):
+            logger.info("Telegram notification sent successfully")
+            return {
+                "status": "success",
+                "message": f"Telegram notification sent successfully: {message}",
+                "content": message,
+            }
+        else:
+            error_msg = f"Telegram API error: {data.get('description', 'Unknown error')}"
+            logger.error(error_msg)
+            return {
+                "status": "error",
+                "message": error_msg,
+                "error_code": data.get("error_code"),
+            }
+    except Exception as e:
+        error_msg = f"Error sending Telegram notification: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return {
+            "status": "error",
+            "message": error_msg,
+            "error": str(e),
+        }
+
+
 def main():
     """Test all action tools."""
     print("=" * 60)
