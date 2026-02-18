@@ -14,6 +14,7 @@ action_router_agent = Agent(
     Available tools:
     - send_email: For sending emails. Requires 'to' (email address), optional 'subject', and 'content' (body text).
     - send_discord_notification: For sending notifications to Discord. Requires 'message' (the notification text), optional 'username' (to override bot name).
+    - send_telegram_notification: For sending notifications to Telegram. Requires 'message' (the notification text).
     - open_door: For opening doors. Requires 'door_name' (e.g., 'front door', 'garage door').
     - close_door: For closing doors. Requires 'door_name'.
     - turn_on_light: For turning on lights. Requires 'light_name'.
@@ -28,13 +29,18 @@ action_router_agent = Agent(
     Examples:
     - "send email to example@gmail.com with content hello!" -> call send_email(to="example@gmail.com", content="hello!")
     - "send discord notification: motion detected in the living room!" -> call send_discord_notification(message="motion detected in the living room!")
+    - "send telegram notification: someone is at the door" -> call send_telegram_notification(message="someone is at the door")
     - "open front door" -> call open_door(door_name="front door")
     - "turn on the living room light" -> call turn_on_light(light_name="living room")
+    
+    If the user asks to "send a notification" or "send a message" without specifying which service, 
+    prefer Telegram if configured, then Discord, then fall back to print_to_user.
     
     Be smart about extracting parameters from natural language descriptions.""",
     tools=[
         actions.send_email,
         actions.send_discord_notification,
+        actions.send_telegram_notification,
         actions.open_door,
         actions.close_door,
         actions.turn_on_light,

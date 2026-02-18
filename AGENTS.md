@@ -145,6 +145,25 @@ POST /api/actions/discord
 
 Requires `DISCORD_WEBHOOK_URL` to be configured (via settings API or environment variable).
 
+#### Send Telegram notification
+
+```
+POST /api/actions/telegram
+```
+
+**Body:** `{"message": "Alert: motion detected"}`
+
+Requires `TELEGRAM_BOT_TOKEN`. For one-way notifications to a specific chat, set `TELEGRAM_CHAT_ID` in the environment (not in the Settings UI).
+
+### Telegram two-way chat (admin agent)
+
+Users can chat with the same admin agent through Telegram (same capabilities as the web Chat tab). Two options:
+
+- **Long polling (default)** — If `TELEGRAM_BOT_TOKEN` is set, the server starts a background thread that polls Telegram for new messages. No public URL needed; restart the app after setting the token.
+- **Webhook** — Set the bot’s webhook to `https://your-server/api/telegram/webhook`. Telegram will POST updates to that URL. Respond with 200 quickly; the server processes the message and sends the agent’s reply in the background.
+
+Each Telegram chat gets its own session (conversation state). No Chat ID is required for chat; Chat ID is only used for one-way notifications.
+
 ---
 
 ### Chat (Admin Agent Proxy)
@@ -173,7 +192,7 @@ POST /api/sessions/new  ->  {"session_id": "chat_abc123"}
 4. **Create a task:** `POST /api/tasks` with an `io_id` and `task_description`.
 5. **Monitor progress:** `GET /api/task/{task_id}` to read the notes (video analysis results).
 6. **Edit if needed:** `PUT /api/task/{task_id}` to amend the task description (e.g., add an action trigger).
-7. **Take actions:** Use `POST /api/actions/discord` to send Discord notifications.
+7. **Take actions:** Use `POST /api/actions/discord` or `POST /api/actions/telegram` to send notifications.
 8. **Stop or delete:** `POST /api/task/{task_id}/stop` or `DELETE /api/task/{task_id}`.
 
 ## Error Format
@@ -234,6 +253,7 @@ Returns all settings with their status. Sensitive values are masked — check th
 | `ANTHROPIC_API_KEY` | Anthropic models (alternative) |
 | `VIDEO_INGESTOR_MODEL` | Which model to use for video analysis (default: `gemini-2.5-flash`) |
 | `DISCORD_WEBHOOK_URL` | Discord webhook for notifications |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token (from @BotFather); enables chat with the agent and optional one-way notifications if `TELEGRAM_CHAT_ID` is set in env |
 
 #### Onboarding: setting keys on behalf of the user
 
