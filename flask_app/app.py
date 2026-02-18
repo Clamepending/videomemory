@@ -1050,6 +1050,35 @@ def test_discord_webhook():
         flask_logger.error(f"Discord test failed: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+# ── Telegram bot info (for "Open in Telegram" link) ─────────────
+
+@app.route('/api/telegram/bot-info', methods=['GET'])
+def telegram_bot_info():
+    """Return the bot's t.me link if TELEGRAM_BOT_TOKEN is set. Uses Telegram getMe to resolve username."""
+    try:
+        bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
+        if not bot_token:
+            return jsonify({'ok': False})
+        resp = http_requests.get(
+            f'https://api.telegram.org/bot{bot_token}/getMe',
+            timeout=5,
+        )
+        if not resp.ok:
+            return jsonify({'ok': False})
+        data = resp.json()
+        if not data.get('ok'):
+            return jsonify({'ok': False})
+        username = (data.get('result') or {}).get('username')
+        if not username:
+            return jsonify({'ok': False})
+        return jsonify({
+            'ok': True,
+            'url': f'https://t.me/{username}',
+            'username': username,
+        })
+    except Exception:
+        return jsonify({'ok': False})
+
 # ── Telegram two-way chat (admin agent via Telegram) ───────────
 
 def _get_or_create_telegram_session(chat_id: int) -> str:

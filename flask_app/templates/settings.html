@@ -273,6 +273,7 @@
                     <button class="btn btn-save" onclick="saveSetting('TELEGRAM_BOT_TOKEN')">Save</button>
                 </div>
                 <div class="setting-status" id="status-TELEGRAM_BOT_TOKEN"></div>
+                <div id="telegram-bot-link" class="setting-status" style="margin-top: 8px;"></div>
             </div>
 
             <div class="telegram-setup-guide" style="margin-top: 16px; padding: 14px 16px; background: rgba(100, 150, 255, 0.06); border: 1px solid rgba(100, 150, 255, 0.15); border-radius: 8px; font-size: 13px; color: #aaa; line-height: 1.6;">
@@ -430,9 +431,29 @@
                         }
                     }
                 }
+                await updateTelegramBotLink();
             } catch (err) {
                 console.error('Failed to load settings:', err);
             }
+        }
+
+        async function updateTelegramBotLink() {
+            const el = document.getElementById('telegram-bot-link');
+            if (!el) return;
+            el.innerHTML = '';
+            try {
+                const resp = await fetch('/api/telegram/bot-info');
+                const data = await resp.json();
+                if (data.ok && data.url) {
+                    const a = document.createElement('a');
+                    a.href = data.url;
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                    a.style.color = '#8ab4ff';
+                    a.textContent = 'Open in Telegram →';
+                    el.appendChild(a);
+                }
+            } catch (err) {}
         }
 
         // ── Save a setting ──
@@ -467,7 +488,7 @@
                     if (input.tagName === 'INPUT' && input.type === 'password') {
                         input.value = '';
                     }
-                    // Reload badges
+                    // Reload badges and Telegram bot link
                     await loadSettings();
                 } else {
                     status.textContent = `Error: ${data.error}`;
