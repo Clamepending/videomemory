@@ -153,10 +153,11 @@ class VideoStreamIngestor:
     async def _process_input(self):
         """Unified loop that captures frames and processes them through ML pipeline."""
         try:
-            # On macOS, try AVFoundation backend first (better permission handling)
             import platform
-            if platform.system() == 'Darwin':  # macOS
+            if platform.system() == 'Darwin':
                 self._camera = cv2.VideoCapture(self.camera_index, cv2.CAP_AVFOUNDATION)
+            elif platform.system() == 'Linux':
+                self._camera = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
             else:
                 self._camera = cv2.VideoCapture(self.camera_index)
             

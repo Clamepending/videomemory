@@ -372,8 +372,10 @@ def _get_camera_preview_frame(camera_index: int) -> Optional[bytes]:
     """
     cap = None
     try:
-        if platform.system() == 'Darwin':  # macOS
+        if platform.system() == 'Darwin':
             cap = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+        elif platform.system() == 'Linux':
+            cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
         else:
             cap = cv2.VideoCapture(camera_index)
         
