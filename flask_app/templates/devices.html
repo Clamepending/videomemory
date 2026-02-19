@@ -208,16 +208,151 @@
             padding: 60px 20px;
             color: #ff6b6b;
         }
+
+        .add-network-form {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .add-network-form h3 {
+            font-size: 16px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 14px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .form-group label {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            background: #1a1a1a;
+            border: 1px solid #404040;
+            color: #ececec;
+            padding: 9px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus {
+            border-color: #4a9eff;
+        }
+
+        .form-group input::placeholder {
+            color: #555;
+        }
+
+        .add-button {
+            background: #19c37d;
+            color: white;
+            border: none;
+            padding: 9px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+
+        .add-button:hover { background: #15a86b; }
+        .add-button:active { background: #128f5b; }
+        .add-button:disabled { background: #555; cursor: not-allowed; opacity: 0.6; }
+
+        .form-message {
+            margin-top: 10px;
+            font-size: 13px;
+            min-height: 20px;
+        }
+
+        .form-message.success { color: #19c37d; }
+        .form-message.error { color: #ff6b6b; text-align: left; padding: 0; }
+
+        .device-badge {
+            display: inline-block;
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        .badge-network {
+            background: #4a9eff22;
+            color: #4a9eff;
+            border: 1px solid #4a9eff44;
+        }
+
+        .badge-local {
+            background: #19c37d22;
+            color: #19c37d;
+            border: 1px solid #19c37d44;
+        }
+
+        .remove-btn {
+            background: none;
+            border: 1px solid #ff6b6b44;
+            color: #ff6b6b;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 8px;
+            transition: background 0.2s;
+        }
+
+        .remove-btn:hover {
+            background: #ff6b6b22;
+        }
 {% endblock %}
 
 {% block content %}
     <div class="devices-container">
         <div class="devices-header">
             <h1>Input Devices</h1>
-            <p>All available input devices detected on this system</p>
+            <p>Local cameras and network streams</p>
             <button class="refresh-button" id="refreshButton" onclick="loadDevices()">
                 🔄 Refresh
             </button>
+        </div>
+        <div class="add-network-form">
+            <h3>Add Network Camera</h3>
+            <div class="form-row">
+                <div class="form-group" style="flex:2; min-width: 250px;">
+                    <label for="netUrl">Stream URL</label>
+                    <input type="text" id="netUrl" placeholder="rtsp://admin:password@192.168.1.50:554/stream1" />
+                </div>
+                <div class="form-group" style="flex:1; min-width: 160px;">
+                    <label for="netName">Name (optional)</label>
+                    <input type="text" id="netName" placeholder="Front door camera" />
+                </div>
+                <button class="add-button" id="addNetBtn" onclick="addNetworkCamera()">Add Camera</button>
+            </div>
+            <div class="form-message" id="formMsg"></div>
         </div>
         <div id="devicesContent">
             <div class="loading">Loading devices...</div>
@@ -227,6 +362,64 @@
 
 {% block extra_scripts %}
     <script>
+        async function addNetworkCamera() {
+            const urlInput = document.getElementById('netUrl');
+            const nameInput = document.getElementById('netName');
+            const btn = document.getElementById('addNetBtn');
+            const msg = document.getElementById('formMsg');
+
+            const url = urlInput.value.trim();
+            if (!url) {
+                msg.className = 'form-message error';
+                msg.textContent = 'Stream URL is required.';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Adding...';
+            msg.className = 'form-message';
+            msg.textContent = '';
+
+            try {
+                const body = { url };
+                const name = nameInput.value.trim();
+                if (name) body.name = name;
+
+                const resp = await fetch('/api/devices/network', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+                if (resp.ok && data.status === 'success') {
+                    msg.className = 'form-message success';
+                    msg.textContent = `Added ${data.device.name} (${data.device.io_id})`;
+                    urlInput.value = '';
+                    nameInput.value = '';
+                    loadDevices();
+                } else {
+                    msg.className = 'form-message error';
+                    msg.textContent = data.error || 'Failed to add camera';
+                }
+            } catch (e) {
+                msg.className = 'form-message error';
+                msg.textContent = e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Add Camera';
+            }
+        }
+
+        async function removeNetworkCamera(ioId) {
+            if (!confirm('Remove this network camera?')) return;
+            try {
+                const resp = await fetch(`/api/devices/network/${encodeURIComponent(ioId)}`, { method: 'DELETE' });
+                if (resp.ok) loadDevices();
+            } catch (e) {
+                alert('Failed to remove camera: ' + e.message);
+            }
+        }
+
         async function loadDevices() {
             const contentDiv = document.getElementById('devicesContent');
             const refreshButton = document.getElementById('refreshButton');
@@ -235,7 +428,6 @@
                 refreshButton.disabled = true;
                 refreshButton.textContent = '🔄 Refreshing...';
                 
-                // Fetch latest devices
                 const response = await fetch('/api/devices');
                 const data = await response.json();
                 
@@ -251,15 +443,13 @@
                     contentDiv.innerHTML = `
                         <div class="no-devices">
                             <h2>No devices found</h2>
-                            <p>No input devices were detected on this system.</p>
+                            <p>No input devices were detected. Try adding a network camera above.</p>
                         </div>
                     `;
                     return;
                 }
                 
                 let html = '';
-                
-                // Sort categories alphabetically
                 categories.sort();
                 
                 categories.forEach(category => {
@@ -273,24 +463,33 @@
                     
                     devices.forEach(device => {
                         const isCamera = category.toLowerCase().includes('camera');
+                        const isNetwork = device.source === 'network';
+                        const badgeHtml = isNetwork
+                            ? '<span class="device-badge badge-network">Network</span>'
+                            : '<span class="device-badge badge-local">Local</span>';
+
                         let previewHtml;
                         if (isCamera) {
                             const previewId = `preview-${device.io_id.replace(/[^a-zA-Z0-9]/g, '-')}`;
-                            // Add timestamp to force fresh image load
                             previewHtml = `<img class="device-preview loading" id="${previewId}" src="/api/device/${escapeHtml(device.io_id)}/preview?t=${Date.now()}" alt="Camera preview" />`;
                         } else {
                             previewHtml = '<div class="device-preview-placeholder">No preview available</div>';
                         }
+
+                        const removeHtml = isNetwork
+                            ? `<button class="remove-btn" onclick="removeNetworkCamera('${escapeHtml(device.io_id)}')">Remove</button>`
+                            : '';
                         
                         html += `
                             <div class="device-card">
                                 ${previewHtml}
-                                <div class="device-name">${escapeHtml(device.name || 'Unknown Device')}</div>
+                                <div class="device-name">${escapeHtml(device.name || 'Unknown Device')}${badgeHtml}</div>
                                 <div class="device-id-label">IO ID</div>
                                 <div class="device-id">${escapeHtml(device.io_id || 'N/A')}</div>
                                 <a href="/device/${encodeURIComponent(device.io_id)}/debug" class="device-debug-link">
                                     <span class="link-icon">&#9881;</span> Ingestor Debug
                                 </a>
+                                ${removeHtml}
                             </div>
                         `;
                     });
@@ -303,7 +502,6 @@
                 
                 contentDiv.innerHTML = html;
                 
-                // Set up error handlers for camera previews after HTML is inserted
                 const previewImages = contentDiv.querySelectorAll('.device-preview');
                 previewImages.forEach(img => {
                     img.addEventListener('load', function() {
@@ -313,7 +511,6 @@
                         this.classList.remove('loading');
                         this.classList.add('error');
                         this.alt = 'Device disconnected or unavailable';
-                        // Replace with error message div showing disconnected status
                         const errorDiv = document.createElement('div');
                         errorDiv.className = 'device-preview error';
                         errorDiv.innerHTML = '<div>Device Disconnected<br/><small>Camera not available or in use</small></div>';
@@ -335,7 +532,11 @@
             return div.innerHTML;
         }
         
-        // Load devices on page load
+        // Submit on Enter in the URL field
+        document.getElementById('netUrl').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') addNetworkCamera();
+        });
+        
         loadDevices();
     </script>
 {% endblock %}

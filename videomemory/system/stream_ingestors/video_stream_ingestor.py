@@ -52,11 +52,12 @@ class VideoIngestorOutput(BaseModel):
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
     
-    def __init__(self, camera_index: int, action_runner: Runner, model_provider: BaseModelProvider, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None):
+    def __init__(self, camera_source, action_runner: Runner, model_provider: BaseModelProvider, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None):
         """Initialize the video stream ingestor.
         
         Args:
-            camera_index: The index of the camera to use
+            camera_source: Either an int (local OpenCV camera index) or a str
+                          (network stream URL, e.g. rtsp://... or http://...).
             action_runner: The runner for executing actions (see google adk: https://google.github.io/adk-docs/runtime/#key-components-of-the-runtime)
             session_service: The session service used by the runner (required to create sessions)
             app_name: The app name used by the runner (must match the runner's app_name)
@@ -65,7 +66,10 @@ class VideoStreamIngestor:
             model_provider: Model provider instance for ML inference.
             on_task_updated: Optional callback(task, new_note) called when a task is modified by the ingestor.
         """
-        self.camera_index = camera_index
+        self.camera_source = camera_source
+        self.is_network_stream = isinstance(camera_source, str)
+        # Keep camera_index for backward compat in logging/session naming
+        self.camera_index = camera_source
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
         self._action_queue = AsyncQueue()
         self._running = False
@@ -150,67 +154,103 @@ class VideoStreamIngestor:
         # Give tasks a moment to start and report any immediate errors
         await asyncio.sleep(0.1)
     
+    def _open_camera(self) -> bool:
+        """Open the camera (local or network). Returns True on success."""
+        if self.is_network_stream:
+            self._camera = cv2.VideoCapture(self.camera_source)
+        else:
+            import platform
+            if platform.system() == 'Darwin':
+                self._camera = cv2.VideoCapture(self.camera_source, cv2.CAP_AVFOUNDATION)
+            elif platform.system() == 'Linux':
+                self._camera = cv2.VideoCapture(self.camera_source, cv2.CAP_V4L2)
+            else:
+                self._camera = cv2.VideoCapture(self.camera_source)
+        return self._camera.isOpened()
+
     async def _process_input(self):
         """Unified loop that captures frames and processes them through ML pipeline."""
         try:
-            import platform
-            if platform.system() == 'Darwin':
-                self._camera = cv2.VideoCapture(self.camera_index, cv2.CAP_AVFOUNDATION)
-            elif platform.system() == 'Linux':
-                self._camera = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
-            else:
-                self._camera = cv2.VideoCapture(self.camera_index)
+            opened = await asyncio.to_thread(self._open_camera)
             
-            # Check if camera opened successfully (for all platforms)
-            if not self._camera.isOpened():
-                error_msg = (
-                    f"ERROR: Could not open camera {self.camera_index} for camera index={self.camera_index}\n"
-                    f"  This is likely a macOS camera permission issue.\n"
-                    f"  To fix:\n"
-                    f"  1. Go to System Settings > Privacy & Security > Camera\n"
-                    f"  2. Enable camera access for Terminal (or Python/your IDE)\n"
-                    f"  3. Restart the application\n"
-                    f"  Alternatively, the camera may be in use by another application."
-                )
+            if not opened:
+                if self.is_network_stream:
+                    error_msg = (
+                        f"ERROR: Could not open network stream: {self.camera_source}\n"
+                        f"  Check that the URL is correct and the camera is online.\n"
+                        f"  Common issues: wrong IP, wrong port, camera offline, auth required."
+                    )
+                    note_content = f"Could not connect to network camera at {self.camera_source}. Check URL and that camera is online."
+                else:
+                    error_msg = (
+                        f"ERROR: Could not open camera {self.camera_source} for camera index={self.camera_index}\n"
+                        f"  This is likely a macOS camera permission issue.\n"
+                        f"  To fix:\n"
+                        f"  1. Go to System Settings > Privacy & Security > Camera\n"
+                        f"  2. Enable camera access for Terminal (or Python/your IDE)\n"
+                        f"  3. Restart the application\n"
+                        f"  Alternatively, the camera may be in use by another application."
+                    )
+                    note_content = "Camera access denied. Please grant camera permissions in System Settings."
                 logger.error(error_msg)
-                # Update task notes to indicate camera failure
                 for task in self._tasks_list:
-                    error_note = NoteEntry(content="Camera access denied. Please grant camera permissions in System Settings.")
+                    error_note = NoteEntry(content=note_content)
                     task.task_note.append(error_note)
                 return
             
-            # Log which camera we're actually using (for debugging)
-            try:
-                from cv2_enumerate_cameras import enumerate_cameras
-                enum_cams = list(enumerate_cameras(cv2.CAP_AVFOUNDATION))
-                for c in enum_cams:
-                    if c.index == self.camera_index:
-                        logger.info(f"Opening camera index={self.camera_index}: {c.name} (unique ID: {c.path})")
-                        break
-            except Exception:
-                logger.info(f"Opening camera index={self.camera_index} (could not verify device name)")
+            # Log which camera we're actually using
+            if self.is_network_stream:
+                logger.info(f"Connected to network stream: {self.camera_source}")
+            else:
+                try:
+                    from cv2_enumerate_cameras import enumerate_cameras
+                    enum_cams = list(enumerate_cameras(cv2.CAP_AVFOUNDATION))
+                    for c in enum_cams:
+                        if c.index == self.camera_source:
+                            logger.info(f"Opening camera index={self.camera_source}: {c.name} (unique ID: {c.path})")
+                            break
+                except Exception:
+                    logger.info(f"Opening camera index={self.camera_source} (could not verify device name)")
             
-            logger.info(f"Started process input loop for camera index={self.camera_index}")
+            logger.info(f"Started process input loop for camera source={self.camera_source}")
             
             # Warm up camera by reading a few frames (especially important for USB cameras)
-            # This helps avoid black frames at the start
             for _ in range(5):
                 ret, _ = await asyncio.to_thread(self._camera.read)
                 if ret:
                     break
                 await asyncio.sleep(0.1)
             
+            consecutive_failures = 0
+            max_consecutive_failures = 30 if self.is_network_stream else 10
+            
             while self._running:
                 try:
                     # Capture frame from camera
                     ret, current_frame = await asyncio.to_thread(self._camera.read)
                     if not ret:
-                        logger.debug(f"Failed to read frame from camera index={self.camera_index}")
+                        consecutive_failures += 1
+                        if self.is_network_stream and consecutive_failures >= max_consecutive_failures:
+                            logger.warning(f"Network stream {self.camera_source}: {consecutive_failures} consecutive failures, attempting reconnect...")
+                            if self._camera:
+                                self._camera.release()
+                            await asyncio.sleep(2.0)
+                            reopened = await asyncio.to_thread(self._open_camera)
+                            if reopened:
+                                logger.info(f"Reconnected to network stream: {self.camera_source}")
+                                consecutive_failures = 0
+                            else:
+                                logger.error(f"Failed to reconnect to {self.camera_source}, will retry...")
+                            continue
+                        logger.debug(f"Failed to read frame from camera source={self.camera_source}")
+                        await asyncio.sleep(0.1)
                         continue
+                    
+                    consecutive_failures = 0
                     
                     # Validate frame
                     if current_frame is None or current_frame.size == 0:
-                        logger.debug(f"Invalid frame from camera index={self.camera_index}")
+                        logger.debug(f"Invalid frame from camera source={self.camera_source}")
                         continue
                     
                     # Resize frame to target resolution if needed
@@ -569,30 +609,24 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
         # Start the ingestor if not already running
         if not self._running:
             logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Ingestor not running, scheduling start()")
-            # Schedule start in the event loop
+
+            async def start_with_error_handling():
+                try:
+                    await self.start()
+                except Exception as e:
+                    logger.error(f"[ERROR] VideoStreamIngestor.start_with_error_handling: Error in start(): {e}", exc_info=True)
+
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Event loop is running, creating async task")
-                    # Wrap start() to catch and log any errors
-                    async def start_with_error_handling():
-                        try:
-                            logger.debug(f"[DEBUG] VideoStreamIngestor.start_with_error_handling: About to call start()")
-                            await self.start()
-                            logger.debug(f"[DEBUG] VideoStreamIngestor.start_with_error_handling: start() completed successfully")
-                        except Exception as e:
-                            logger.error(f"[ERROR] VideoStreamIngestor.start_with_error_handling: Error in start(): {e}", exc_info=True)
-                            # Don't re-raise - log the error but don't crash
-                    asyncio.create_task(start_with_error_handling())
-                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Async task created")
+                loop = asyncio.get_running_loop()
+                asyncio.create_task(start_with_error_handling())
+            except RuntimeError:
+                # Not inside an async context — use the Flask background loop if available
+                bg_loop = getattr(sys.modules[__name__], '_flask_background_loop', None)
+                if bg_loop and bg_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(start_with_error_handling(), bg_loop)
+                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Scheduled start() on Flask background loop")
                 else:
-                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Event loop not running, calling run_until_complete")
-                    loop.run_until_complete(self.start())
-            except RuntimeError as e:
-                # No event loop running, will need to be started manually
-                logger.warning(f"No event loop available. Call start() manually. Error: {e}")
-            except Exception as e:
-                logger.error(f"[ERROR] VideoStreamIngestor.add_task: Unexpected error scheduling start(): {e}", exc_info=True)
+                    logger.warning(f"No event loop available. Call start() manually.")
         else:
             logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Ingestor already running, skipping start()")
     
@@ -621,13 +655,14 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
         # Stop ingestor if no tasks remain (async call)
         if len(self._tasks_list) == 0:
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.create_task(self.stop())
-                else:
-                    loop.run_until_complete(self.stop())
+                loop = asyncio.get_running_loop()
+                asyncio.create_task(self.stop())
             except RuntimeError:
-                logger.warning(f"Could not stop ingestor - no event loop")
+                bg_loop = getattr(sys.modules[__name__], '_flask_background_loop', None)
+                if bg_loop and bg_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(self.stop(), bg_loop)
+                else:
+                    logger.warning(f"Could not stop ingestor - no event loop")
     
     def edit_task(self, old_task_desc: str, new_task_desc: str):
         """Edit/update a task description in the video stream ingestor.

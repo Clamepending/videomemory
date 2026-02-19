@@ -137,46 +137,46 @@ class TaskManager:
         
         # Initialize video ingestor if not already created for this io_id
         if io_id not in self._ingestors:
-            # For cameras, io_id is now the OpenCV camera index as a string
-            # Convert to int for VideoStreamIngestor
-            try:
-                camera_index = int(io_id)
-            except (ValueError, TypeError):
-                return {
-                    "status": "error",
-                    "message": f"Invalid camera io_id '{io_id}'. Expected numeric index.",
-                }
-            
-            # Verify the camera index matches the expected device name
-            # This helps catch cases where camera order has changed
-            expected_device_name = stream_info.get("name", "Unknown")
-            
-            # Verify that the camera index actually corresponds to the expected device
-            # by checking current device list
-            try:
-                current_cameras = self._io_manager._detector.detect_cameras()
-                camera_found = False
-                for idx, name in current_cameras:
-                    if idx == camera_index:
-                        if name != expected_device_name:
-                            logger.warning(
-                                f"Camera index mismatch! io_id={io_id} expects '{expected_device_name}' "
-                                f"but index {camera_index} is now '{name}'. Camera order may have changed."
-                            )
-                        camera_found = True
-                        break
-                if not camera_found:
-                    logger.warning(
-                        f"Camera index {camera_index} not found in current device list. "
-                        f"Device may have been disconnected."
-                    )
-            except Exception as e:
-                logger.debug(f"Could not verify camera index: {e}")
-            
-            logger.info(f"Creating VideoStreamIngestor for io_id={io_id} (camera_index={camera_index}, device={expected_device_name})")
+            # Determine camera source: URL for network cameras, int index for local
+            stream_url = stream_info.get("url")
+            if stream_url:
+                camera_source = stream_url
+                logger.info(f"Creating VideoStreamIngestor for network camera io_id={io_id} (url={stream_url})")
+            else:
+                try:
+                    camera_source = int(io_id)
+                except (ValueError, TypeError):
+                    return {
+                        "status": "error",
+                        "message": f"Invalid camera io_id '{io_id}'. Expected numeric index.",
+                    }
+                
+                expected_device_name = stream_info.get("name", "Unknown")
+                
+                try:
+                    current_cameras = self._io_manager._detector.detect_cameras()
+                    camera_found = False
+                    for idx, name in current_cameras:
+                        if idx == camera_source:
+                            if name != expected_device_name:
+                                logger.warning(
+                                    f"Camera index mismatch! io_id={io_id} expects '{expected_device_name}' "
+                                    f"but index {camera_source} is now '{name}'. Camera order may have changed."
+                                )
+                            camera_found = True
+                            break
+                    if not camera_found:
+                        logger.warning(
+                            f"Camera index {camera_source} not found in current device list. "
+                            f"Device may have been disconnected."
+                        )
+                except Exception as e:
+                    logger.debug(f"Could not verify camera index: {e}")
+                
+                logger.info(f"Creating VideoStreamIngestor for io_id={io_id} (camera_index={camera_source}, device={expected_device_name})")
             
             self._ingestors[io_id] = VideoStreamIngestor(
-                camera_index, 
+                camera_source, 
                 action_runner=self._action_runner,
                 model_provider=self._model_provider,
                 session_service=self._session_service,

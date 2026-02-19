@@ -50,7 +50,7 @@ db = TaskDatabase(str(data_dir / 'videomemory.db'))
 db.load_settings_to_env()
 
 # ── System components ─────────────────────────────────────────
-io_manager = videomemory.system.IOmanager()
+io_manager = videomemory.system.IOmanager(db=db)
 app_name = "videomemory_app"
 session_service = DatabaseSessionService(db_url=sessions_db_url)
 runner = Runner(
@@ -453,10 +453,14 @@ def get_devices():
             category = device.get('category', 'unknown')
             if category not in by_category:
                 by_category[category] = []
-            by_category[category].append({
+            entry = {
                 'io_id': device.get('io_id', ''),
-                'name': device.get('name', 'Unknown')
-            })
+                'name': device.get('name', 'Unknown'),
+                'source': device.get('source', 'local'),
+            }
+            if device.get('url'):
+                entry['url'] = device['url']
+            by_category[category].append(entry)
         
         import logging
         logger = logging.getLogger(__name__)
@@ -468,6 +472,68 @@ def get_devices():
         logger = logging.getLogger(__name__)
         logger.error(f"Error in get_devices: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/devices/network', methods=['POST'])
+def add_network_camera():
+    """Add a network camera (RTSP/HTTP stream)."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'error': 'Request body required'}), 400
+
+    url = data.get('url', '').strip()
+    name = data.get('name', '').strip() or None
+
+    if not url:
+        return jsonify({'status': 'error', 'error': 'url is required'}), 400
+
+    try:
+        camera_info = io_manager.add_network_camera(url, name)
+        return jsonify({'status': 'success', 'device': camera_info})
+    except Exception as e:
+        flask_logger.error(f"Error adding network camera: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/devices/network/<io_id>', methods=['DELETE'])
+def remove_network_camera(io_id):
+    """Remove a network camera."""
+    # Stop any active tasks for this device first
+    active_tasks = [t for t in task_manager.list_tasks(io_id) if t.get('status') == 'active']
+    for t in active_tasks:
+        task_manager.stop_task(t['task_id'])
+
+    if io_manager.remove_network_camera(io_id):
+        return jsonify({'status': 'success', 'message': f'Network camera {io_id} removed'})
+    return jsonify({'status': 'error', 'error': f'Network camera {io_id} not found'}), 404
+
+
+def _get_network_preview_frame(url: str) -> Optional[bytes]:
+    """Capture a single preview frame from a network stream URL."""
+    cap = None
+    try:
+        cap = cv2.VideoCapture(url)
+        if not cap.isOpened():
+            return None
+        # Read a few frames to let the stream stabilize
+        frame = None
+        import time
+        for _ in range(5):
+            ret, test_frame = cap.read()
+            if ret and test_frame is not None and test_frame.size > 0:
+                frame = test_frame
+            time.sleep(0.05)
+        if frame is None:
+            return None
+        if frame.shape[1] > 640 or frame.shape[0] > 480:
+            frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LINEAR)
+        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return buffer.tobytes()
+    except Exception as e:
+        flask_logger.debug(f"Error capturing preview from network stream {url}: {e}")
+        return None
+    finally:
+        if cap is not None:
+            cap.release()
+
 
 @app.route('/api/device/<io_id>/preview', methods=['GET'])
 def get_device_preview(io_id):
@@ -484,29 +550,15 @@ def get_device_preview(io_id):
             return jsonify({'error': 'Device not found'}), 404
         
         category = device_info.get('category', '').lower()
-        device_name = device_info.get('name', '')
         
-        # Only generate previews for cameras
         if 'camera' not in category:
-            # Return a placeholder image or empty response
-            return Response(
-                response=b'',
-                status=204,  # No Content
-                mimetype='image/jpeg'
-            )
+            return Response(response=b'', status=204, mimetype='image/jpeg')
         
         # Try to get frame from active video ingestor first (much faster)
         latest_frame = task_manager.get_latest_frame_for_device(io_id)
         if latest_frame is not None and latest_frame.size > 0:
-            # For debugging: show whatever frame we have, even if black
-            # But if frame is completely black (mean < 1), try direct capture instead
-            # as the ingestor might have an old/stale black frame
             frame_mean = latest_frame.mean()
-            if frame_mean < 1:
-                # Frame is completely black - try direct capture to get fresh frame
-                pass  # Fall through to direct capture
-            else:
-                # Use ingestor frame (even if somewhat dark, but not pure black)
+            if frame_mean >= 1:
                 _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 return Response(
                     response=buffer.tobytes(),
@@ -514,26 +566,19 @@ def get_device_preview(io_id):
                     headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
                 )
         
-        # Fallback: open camera directly if no active ingestor
-        try:
-            camera_index = int(io_id)
-        except (ValueError, TypeError):
-            # Invalid io_id - return 404 to indicate device not found
-            return Response(
-                response=b'',
-                status=404,
-                mimetype='image/jpeg'
-            )
+        # Fallback: open camera directly
+        stream_url = device_info.get('url')
+        if stream_url:
+            frame_data = _get_network_preview_frame(stream_url)
+        else:
+            try:
+                camera_index = int(io_id)
+            except (ValueError, TypeError):
+                return Response(response=b'', status=404, mimetype='image/jpeg')
+            frame_data = _get_camera_preview_frame(camera_index)
         
-        # Capture preview frame
-        frame_data = _get_camera_preview_frame(camera_index)
         if frame_data is None:
-            # Camera disconnected or unavailable - return 404 to trigger error handler
-            return Response(
-                response=b'',
-                status=404,
-                mimetype='image/jpeg'
-            )
+            return Response(response=b'', status=404, mimetype='image/jpeg')
         
         return Response(
             response=frame_data,
@@ -541,12 +586,7 @@ def get_device_preview(io_id):
             headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
         )
     except Exception as e:
-        # Device error/disconnected - return 404 to trigger error handler
-        return Response(
-            response=b'',
-            status=404,
-            mimetype='image/jpeg'
-        )
+        return Response(response=b'', status=404, mimetype='image/jpeg')
 
 # ── Ingestor Debug API ────────────────────────────────────────
 
@@ -889,6 +929,40 @@ def openapi_spec():
                     "responses": {
                         "200": {"description": "Task stopped"},
                         "404": {"description": "Task not found"},
+                    },
+                }
+            },
+            "/api/devices/network": {
+                "post": {
+                    "operationId": "add_network_camera",
+                    "summary": "Add a network camera",
+                    "description": "Register a network camera by providing its RTSP or HTTP stream URL. The camera will appear in the device list and can be used for tasks.",
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "required": ["url"],
+                            "properties": {
+                                "url": {"type": "string", "description": "Stream URL (e.g. rtsp://admin:pass@192.168.1.50:554/stream1)"},
+                                "name": {"type": "string", "description": "Optional display name for the camera"},
+                            },
+                        }}},
+                    },
+                    "responses": {
+                        "200": {"description": "Camera added successfully"},
+                        "400": {"description": "Validation error"},
+                    },
+                }
+            },
+            "/api/devices/network/{io_id}": {
+                "delete": {
+                    "operationId": "remove_network_camera",
+                    "summary": "Remove a network camera",
+                    "description": "Removes a previously added network camera. Active tasks for the camera will be stopped first.",
+                    "parameters": [{"name": "io_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {
+                        "200": {"description": "Camera removed"},
+                        "404": {"description": "Camera not found"},
                     },
                 }
             },
