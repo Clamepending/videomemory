@@ -85,6 +85,13 @@ class TaskDatabase:
                     value TEXT NOT NULL,
                     updated_at REAL NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS network_cameras (
+                    io_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                );
             """)
             
             # Migration: add status column if missing (for existing DBs)
@@ -256,6 +263,58 @@ class TaskDatabase:
                 "DELETE FROM session_metadata WHERE session_id = ?",
                 (session_id,)
             )
+
+    # ── Network camera methods ────────────────────────────────────
+
+    def save_network_camera(self, io_id: str, name: str, url: str) -> None:
+        """Insert or update a network camera."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO network_cameras (io_id, name, url, created_at)
+                   VALUES (?, ?, ?, coalesce(
+                       (SELECT created_at FROM network_cameras WHERE io_id = ?), ?
+                   ))""",
+                (io_id, name, url, io_id, time.time())
+            )
+
+    def delete_network_camera(self, io_id: str) -> bool:
+        """Delete a network camera. Returns True if a row was deleted."""
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM network_cameras WHERE io_id = ?", (io_id,)
+            )
+            return cursor.rowcount > 0
+
+    def load_network_cameras(self) -> List[Dict]:
+        """Load all network cameras."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT io_id, name, url, created_at FROM network_cameras ORDER BY created_at"
+            ).fetchall()
+            return [
+                {'io_id': r['io_id'], 'name': r['name'], 'url': r['url'],
+                 'created_at': r['created_at']}
+                for r in rows
+            ]
+
+    def get_next_network_camera_id(self) -> str:
+        """Get the next available network camera io_id (e.g. 'net0', 'net1')."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT io_id FROM network_cameras"
+            ).fetchall()
+            existing = set()
+            for r in rows:
+                io_id = r['io_id']
+                if io_id.startswith('net'):
+                    try:
+                        existing.add(int(io_id[3:]))
+                    except ValueError:
+                        pass
+            idx = 0
+            while idx in existing:
+                idx += 1
+            return f"net{idx}"
 
     # ── Settings methods ─────────────────────────────────────────
 
