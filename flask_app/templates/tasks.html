@@ -141,6 +141,23 @@
             color: #666;
             margin-top: 6px;
         }
+
+        .task-note-action-badge {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #19c37d;
+            background: rgba(25, 195, 125, 0.15);
+            padding: 2px 8px;
+            border-radius: 6px;
+            margin-bottom: 6px;
+        }
+
+        .task-note-content.action-taken {
+            border-left: 3px solid #19c37d;
+            padding-left: 10px;
+        }
         
         .no-tasks {
             text-align: center;
@@ -276,7 +293,8 @@
                         <div class="task-note">
                             <div class="task-note-label">Latest Note</div>
                             ${latestNote 
-                                ? `<div class="task-note-content">${escapeHtml(latestNote.content || 'No content')}</div>
+                                ? `${latestNote.content && latestNote.content.startsWith('Action taken:') ? '<div class="task-note-action-badge">Action taken</div>' : ''}
+                                   <div class="task-note-content ${latestNote.content && latestNote.content.startsWith('Action taken:') ? 'action-taken' : ''}">${escapeHtml(latestNote.content || 'No content')}</div>
                                    <div class="task-note-timestamp">${latestNote.timestamp || ''}</div>`
                                 : '<div class="task-note-empty">No notes yet</div>'
                             }

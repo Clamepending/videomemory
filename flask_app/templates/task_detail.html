@@ -135,6 +135,11 @@
         .note-card:hover {
             border-color: #505050;
         }
+
+        .note-card.action-taken {
+            border-left: 4px solid #19c37d;
+            background: rgba(25, 195, 125, 0.06);
+        }
         
         .note-content {
             font-size: 15px;
@@ -257,8 +262,9 @@
                     // Display notes in reverse order (newest first)
                     const reversedNotes = [...task.task_note].reverse();
                     reversedNotes.forEach(note => {
+                        const isAction = note.content && note.content.startsWith('Action taken:');
                         notesHtml += `
-                            <div class="note-card">
+                            <div class="note-card ${isAction ? 'action-taken' : ''}">
                                 <div class="note-content">${escapeHtml(note.content || 'No content')}</div>
                                 <div class="note-timestamp">${note.timestamp || 'No timestamp'}</div>
                             </div>

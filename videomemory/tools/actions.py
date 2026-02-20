@@ -1,6 +1,6 @@
 """Mock action tools for executing various actions like sending emails, controlling doors, etc."""
 
-from typing import Optional
+from typing import Optional, Callable
 import logging
 import os
 import requests
@@ -180,8 +180,29 @@ def send_discord_notification(message: str, username: Optional[str] = None) -> d
         }
 
 
+# Optional resolver: app sets this to e.g. lambda: db.get_setting("TELEGRAM_NOTIFICATION_CHAT_ID")
+# so notifications use the chat where you last messaged the bot (single source of truth in DB).
+_telegram_notification_chat_id_resolver: Optional[Callable[[], Optional[str]]] = None
+
+
+def set_telegram_notification_chat_id_resolver(resolver: Callable[[], Optional[str]]) -> None:
+    """Register a function that returns the chat ID for one-way notifications (e.g. from DB)."""
+    global _telegram_notification_chat_id_resolver
+    _telegram_notification_chat_id_resolver = resolver
+
+
+def get_telegram_notification_chat_id() -> Optional[str]:
+    """Chat ID for one-way notifications: env TELEGRAM_CHAT_ID, or result of registered resolver."""
+    return os.getenv("TELEGRAM_CHAT_ID") or (
+        _telegram_notification_chat_id_resolver() if _telegram_notification_chat_id_resolver else None
+    )
+
+
 def send_telegram_notification(message: str) -> dict:
     """Sends a notification message to Telegram via the Bot API.
+    
+    Uses TELEGRAM_BOT_TOKEN. For the destination chat: uses TELEGRAM_CHAT_ID if set in env,
+    otherwise uses the chat where you last messaged the bot (so you only need the bot token).
     
     Args:
         message: The message content to send to Telegram.
@@ -192,7 +213,7 @@ def send_telegram_notification(message: str) -> dict:
     logger.info(f"send_telegram_notification(message={message}) was called")
     
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    chat_id = get_telegram_notification_chat_id()
     
     if not bot_token:
         error_msg = "TELEGRAM_BOT_TOKEN environment variable is not set"
@@ -204,12 +225,15 @@ def send_telegram_notification(message: str) -> dict:
         }
     
     if not chat_id:
-        error_msg = "TELEGRAM_CHAT_ID environment variable is not set"
+        error_msg = (
+            "No Telegram chat for notifications. Either set TELEGRAM_CHAT_ID in the environment, "
+            "or send one message to your bot on Telegram — that chat will then be used for notifications."
+        )
         logger.error(error_msg)
         return {
             "status": "error",
             "message": error_msg,
-            "error": "Missing environment variable",
+            "error": "Missing chat ID",
         }
     
     try:
