@@ -504,18 +504,24 @@
                 
                 const previewImages = contentDiv.querySelectorAll('.device-preview');
                 previewImages.forEach(img => {
-                    img.addEventListener('load', function() {
-                        this.classList.remove('loading');
-                    });
-                    img.addEventListener('error', function() {
-                        this.classList.remove('loading');
-                        this.classList.add('error');
-                        this.alt = 'Device disconnected or unavailable';
-                        const errorDiv = document.createElement('div');
-                        errorDiv.className = 'device-preview error';
-                        errorDiv.innerHTML = '<div>Device Disconnected<br/><small>Camera not available or in use</small></div>';
-                        this.parentNode.replaceChild(errorDiv, this);
-                    });
+                    const originalSrc = img.getAttribute('src');
+                    img.removeAttribute('src');
+                    fetch(originalSrc, { cache: 'no-store' })
+                        .then(resp => {
+                            if (!resp.ok) throw new Error('preview failed');
+                            return resp.blob();
+                        })
+                        .then(blob => {
+                            img.src = URL.createObjectURL(blob);
+                            img.classList.remove('loading');
+                        })
+                        .catch(() => {
+                            img.classList.remove('loading');
+                            const errorDiv = document.createElement('div');
+                            errorDiv.className = 'device-preview error';
+                            errorDiv.innerHTML = '<div>Device Disconnected<br/><small>Camera not available or in use</small></div>';
+                            img.parentNode.replaceChild(errorDiv, img);
+                        });
                 });
                 
             } catch (error) {

@@ -48,6 +48,10 @@ db = TaskDatabase(str(data_dir / 'videomemory.db'))
 # Load saved settings into os.environ BEFORE initializing providers
 # This allows DB-stored API keys and config to override .env values
 db.load_settings_to_env()
+# Notifications go to TELEGRAM_CHAT_ID if set, else to the chat where you last messaged the bot (from DB)
+videomemory.tools.actions.set_telegram_notification_chat_id_resolver(
+    lambda: db.get_setting("TELEGRAM_NOTIFICATION_CHAT_ID")
+)
 
 # ── System components ─────────────────────────────────────────
 io_manager = videomemory.system.IOmanager(db=db)
@@ -58,10 +62,17 @@ runner = Runner(
     app_name=app_name,
     session_service=session_service
 )
+# Dedicated runner for video-ingestor actions (Telegram, Discord, etc.). Uses action_router
+# agent so "send telegram notification: ..." is executed directly without going through admin agent.
+action_router_runner = Runner(
+    agent=videomemory.agents.action_router_agent,
+    app_name=app_name,
+    session_service=session_service
+)
 model_provider = get_VLM_provider()
 task_manager = videomemory.system.TaskManager(
     io_manager=io_manager,
-    action_runner=runner,
+    action_runner=action_router_runner,
     session_service=session_service,
     app_name=app_name,
     model_provider=model_provider,
@@ -1091,6 +1102,10 @@ def update_setting(key):
         db.set_setting(key, value)
         os.environ[key] = value
         
+        # Auto-start Telegram polling if the token was just set and isn't running yet
+        if key == 'TELEGRAM_BOT_TOKEN':
+            _ensure_telegram_polling()
+        
         return jsonify({'status': 'saved', 'key': key})
     except Exception as e:
         flask_logger.error(f"Failed to update setting {key}: {e}", exc_info=True)
@@ -1225,6 +1240,11 @@ def _process_telegram_update(update: dict) -> None:
     text = (message.get("text") or "").strip()
     if chat_id is None or not text:
         return
+    # Use this chat for one-way notifications (read from DB when TELEGRAM_CHAT_ID is not set)
+    try:
+        db.set_setting("TELEGRAM_NOTIFICATION_CHAT_ID", str(chat_id))
+    except Exception as e:
+        flask_logger.debug(f"Could not save Telegram notification chat_id: {e}")
     try:
         session_id = _get_or_create_telegram_session(chat_id)
         reply = _run_agent_for_message(session_id, text)
@@ -1279,15 +1299,24 @@ def _telegram_polling_loop():
             break
 
 
-# Start Telegram polling in background if token is set (so chat works without a public URL)
 _telegram_poll_thread = None
-if os.getenv("TELEGRAM_BOT_TOKEN", "").strip():
+
+def _ensure_telegram_polling():
+    """Start the Telegram polling thread if a token is set and it isn't already running."""
+    global _telegram_poll_thread
+    if _telegram_poll_thread and _telegram_poll_thread.is_alive():
+        return
+    if not os.getenv("TELEGRAM_BOT_TOKEN", "").strip():
+        return
     _telegram_poll_thread = threading.Thread(
         target=_telegram_polling_loop,
         daemon=True,
         name="TelegramPolling",
     )
     _telegram_poll_thread.start()
+
+# Start on boot if token is already available
+_ensure_telegram_polling()
 
 # ── Chat API ──────────────────────────────────────────────────
 

@@ -153,7 +153,7 @@ POST /api/actions/telegram
 
 **Body:** `{"message": "Alert: motion detected"}`
 
-Requires `TELEGRAM_BOT_TOKEN`. For one-way notifications to a specific chat, set `TELEGRAM_CHAT_ID` in the environment (not in the Settings UI).
+Requires `TELEGRAM_BOT_TOKEN`. The notification is sent to the chat where you last messaged the bot (no extra config). Optionally set `TELEGRAM_CHAT_ID` in the environment to fix the destination chat.
 
 ### Telegram two-way chat (admin agent)
 
@@ -162,7 +162,7 @@ Users can chat with the same admin agent through Telegram (same capabilities as 
 - **Long polling (default)** — If `TELEGRAM_BOT_TOKEN` is set, the server starts a background thread that polls Telegram for new messages. No public URL needed; restart the app after setting the token.
 - **Webhook** — Set the bot’s webhook to `https://your-server/api/telegram/webhook`. Telegram will POST updates to that URL. Respond with 200 quickly; the server processes the message and sends the agent’s reply in the background.
 
-Each Telegram chat gets its own session (conversation state). No Chat ID is required for chat; Chat ID is only used for one-way notifications.
+Each Telegram chat gets its own session (conversation state). For one-way notifications (e.g. from task conditions), the app uses the chat where you last sent a message to the bot, so you only need the bot token.
 
 ---
 
@@ -253,7 +253,7 @@ Returns all settings with their status. Sensitive values are masked — check th
 | `ANTHROPIC_API_KEY` | Anthropic models (alternative) |
 | `VIDEO_INGESTOR_MODEL` | Which model to use for video analysis (default: `gemini-2.5-flash`) |
 | `DISCORD_WEBHOOK_URL` | Discord webhook for notifications |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token (from @BotFather); enables chat with the agent and optional one-way notifications if `TELEGRAM_CHAT_ID` is set in env |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token (from @BotFather); enables chat with the agent and one-way notifications to the chat where you messaged the bot (optional: set `TELEGRAM_CHAT_ID` in env to fix the notification chat) |
 
 #### Onboarding: setting keys on behalf of the user
 

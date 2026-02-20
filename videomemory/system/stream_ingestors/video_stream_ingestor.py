@@ -8,7 +8,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Tuple
 from asyncio import Queue as AsyncQueue
 from collections import deque
 from google.adk.runners import Runner
@@ -71,7 +71,8 @@ class VideoStreamIngestor:
         # Keep camera_index for backward compat in logging/session naming
         self.camera_index = camera_source
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
-        self._action_queue = AsyncQueue()
+        # Queue items: (action_description: str, tasks_to_attach_note: List[Task])
+        self._action_queue: AsyncQueue = AsyncQueue()
         self._running = False
         self._tasks: list[asyncio.Task] = []
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
@@ -330,13 +331,24 @@ class VideoStreamIngestor:
             while self._running:
                 try:
                     # Use timeout to allow checking _running flag periodically
-                    action = await asyncio.wait_for(
+                    item = await asyncio.wait_for(
                         self._action_queue.get(),
                         timeout=0.5
                     )
-                    logger.debug(f"Action loop: Action {action} got from action loop queue for camera index={self.camera_index}")
-                    if action is not None:
-                        await self._execute_action(action)
+                    logger.debug(f"Action loop: got item from queue for camera index={self.camera_index}")
+                    if item is not None:
+                        action_str, tasks_for_note = item
+                        success, detail = await self._execute_action(action_str)
+                        # Record action in task notes for debugging/visibility
+                        note_content = f"Action taken: {detail}" if detail else ("Action taken: success." if success else "Action taken: failed.")
+                        for task in tasks_for_note:
+                            new_note = NoteEntry(content=note_content)
+                            task.task_note.append(new_note)
+                            if self._on_task_updated:
+                                try:
+                                    self._on_task_updated(task, new_note)
+                                except Exception as e:
+                                    logger.error(f"Failed to persist action note for task {getattr(task, 'task_id', None)}: {e}")
                     
                 except asyncio.TimeoutError:
                     # Timeout allows us to check _running flag
@@ -459,7 +471,7 @@ Include updates for:
 - Changes in status, counts, positions, or states (including transitions to/from zero)
 - Progress that advances task tracking
 
-SYSTEM_ACTIONS: Only include if a task requires an action and conditions are met.
+SYSTEM_ACTIONS: Only include if a task requires an action and conditions are met. When the task asks to "notify me", "text me", "send Telegram/Discord" or similar when a condition is detected, output a system_action with a clear description, e.g. "send telegram notification: <what was detected>" or "send discord notification: <message>".
 
 Output format (JSON only, nothing else):
 [{task_number: <number>, task_note: <description>, task_done: <true/false>}, ...], [{take_action: <description>}, ...]
@@ -484,6 +496,8 @@ When there is no new information and the task notes perfectly match the image (o
 For multiple task updates: [{task_number: 0, task_note: "Clap count: 5", task_done: false}, {task_number: 1, task_note: "2 people visible", task_done: false}], []
 
 When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps counted", task_done: true}], [{take_action: "send notification that clap counting task is complete"}]
+
+When task says "notify me on Telegram when I hold up X" and you see X: [{task_number: 0, task_note: "Person is holding up the requested object.", task_done: false}], [{take_action: "send telegram notification: Condition met - person is holding up the requested object."}]
 </instructions>"""
         
         # return "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines) + "\n\n" + instructions
@@ -560,25 +574,37 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                     except Exception as e:
                         logger.error(f"Failed to persist task update: {e}")
         
-        # Queue actions
+        # Tasks that were updated this round (for attaching "action taken" notes)
+        updated_tasks = []
+        for update in ml_results.get("task_updates", []):
+            task = next((t for t in self._tasks_list if t.task_number == update.get("task_number")), None)
+            if task and task not in updated_tasks:
+                updated_tasks.append(task)
+        tasks_for_note = updated_tasks if updated_tasks else list(self._tasks_list)
+
+        # Queue actions with task context so we can append "action taken" notes
         for action in ml_results.get("system_actions", []):
             if action.get("take_action"):
-                await self._action_queue.put(action["take_action"])
+                await self._action_queue.put((action["take_action"], tasks_for_note))
     
-    async def _execute_action(self, action: str):
+    async def _execute_action(self, action: str) -> Tuple[bool, str]:
         """
-        Execute an action using the shared admin agent runner.
-        
+        Execute an action using the action_router runner (Telegram, Discord, etc.).
+
         Args:
-            action: String describing the action to execute
+            action: Natural-language description of the action (e.g. "send telegram notification: person held up something")
+
+        Returns:
+            (success, detail_message) for recording in task notes.
         """
         if not self._action_runner:
             logger.error("Action runner not available. Cannot execute action.")
-            return
-        
+            return False, "Action runner not available."
+
         try:
-            content = genai_types.Content(role='user', parts=[genai_types.Part(text=f"Execute this action: {action}")])
-            
+            # Send the raw action description so the action_router agent routes to the right tool
+            content = genai_types.Content(role='user', parts=[genai_types.Part(text=action)])
+            result_text = ""
             async for event in self._action_runner.run_async(
                 user_id=self._action_user_id,
                 session_id=self.session_id,
@@ -586,10 +612,15 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
             ):
                 if event.is_final_response():
                     if event.content and event.content.parts:
-                        logger.info(f"Action result: {event.content.parts[0].text}")
+                        result_text = event.content.parts[0].text or ""
                     break
+            logger.info(f"Action result: {result_text}")
+            # Heuristic: treat as failure if response mentions error or not set
+            success = "error" not in result_text.lower() and "not set" not in result_text.lower()
+            return success, result_text[:500] if result_text else ("Done." if success else "No response.")
         except Exception as e:
             logger.error(f"Error executing action: {e}", exc_info=True)
+            return False, f"Failed: {str(e)[:200]}"
     
     def add_task(self, task: Task):
         """Add a task to the video stream ingestor.
@@ -717,17 +748,16 @@ When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps c
                 logger.warning(f"Tasks didn't complete within timeout for camera index={self.camera_index}")
         
         # 4. Drain queues (prevents memory leaks)
-        # Drain action queue
-        remaining_actions = []
+        # Drain action queue (items are (action_str, tasks) tuples)
+        remaining = []
         while not self._action_queue.empty():
             try:
-                action = self._action_queue.get_nowait()
-                remaining_actions.append(action)
+                remaining.append(self._action_queue.get_nowait())
             except asyncio.QueueEmpty:
                 break
-        
-        if remaining_actions:
-            logger.info(f"Discarding {len(remaining_actions)} queued actions for camera index={self.camera_index}")
+
+        if remaining:
+            logger.info(f"Discarding {len(remaining)} queued actions for camera index={self.camera_index}")
         
         # 5. Clear task list
         self._tasks = []
