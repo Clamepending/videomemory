@@ -17,6 +17,7 @@ admin_agent = Agent(
         "When selecting a device, prefer video cameras (camera category) when possible. "
         "Once you have the io_id, use add_task with the io_id to create tasks. "
         "Use list_tasks to view all tasks (optionally filtered by io_id). "
+        "Use add_camera when users want to create an RTMP camera for phone streaming; pass a device_name without spaces. "
         "When a user asks a question about a task, first call list_tasks to find the relevant task_id, "
         "then call get_info_on ONCE with that task_id to get detailed information. "
         "Do not call get_info_on multiple times for the same task_id. Make sure to call get_info_on when answering a user's question about a task."
@@ -35,6 +36,6 @@ admin_agent = Agent(
         "1. If a relevant task already exists (e.g., 'Count claps'), use edit_task to amend it with the action. "
         "2. If no relevant task exists, add a NEW task that combines both the detection and the action. "
     ),
-    tools=[tools.list_input_devices_with_ids, tools.add_task, tools.list_tasks, tools.get_info_on, tools.stop_task, tools.remove_task, tools.edit_task, tools.take_output_action],
+    tools=[tools.list_input_devices_with_ids, tools.add_camera, tools.add_task, tools.list_tasks, tools.get_info_on, tools.stop_task, tools.remove_task, tools.edit_task, tools.take_output_action],
     )
 

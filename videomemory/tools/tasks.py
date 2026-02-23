@@ -2,6 +2,8 @@
 
 import json
 import logging
+import os
+import re
 from typing import Optional
 
 
@@ -78,6 +80,63 @@ def list_input_devices_with_ids() -> dict:
         return {
             "status": "error",
             "message": f"Failed to list input devices: {str(e)}",
+        }
+
+
+def add_camera(device_name: str) -> dict:
+    """Create an RTMP camera with a caller-provided device name and return its push URL.
+
+    Args:
+        device_name: Camera device name. Must not contain spaces.
+
+    Returns:
+        dict: Status, created device metadata, and rtmp_url.
+    """
+    if _context is None:
+        return {
+            "status": "error",
+            "message": "Tool context not initialized. System managers not available.",
+        }
+
+    if _context.io_manager is None:
+        return {
+            "status": "error",
+            "message": "IO manager not available in context",
+        }
+
+    raw_name = (device_name or "").strip()
+    if not raw_name:
+        return {
+            "status": "error",
+            "message": "device_name is required",
+        }
+    if " " in raw_name:
+        return {
+            "status": "error",
+            "message": "device_name cannot contain spaces",
+        }
+    if not re.match(r"^[A-Za-z0-9_-]+$", raw_name):
+        return {
+            "status": "error",
+            "message": "device_name can only contain letters, numbers, underscore, or dash",
+        }
+
+    host = (os.environ.get("RTMP_SERVER_HOST", "") or "").strip()
+    host = host.split(":")[0] if host else "YOUR_SERVER_IP"
+    stream_key = f"live/{raw_name.lower()}"
+    rtmp_url = f"rtmp://{host}:1935/{stream_key}"
+
+    try:
+        camera_info = _context.io_manager.add_network_camera(rtmp_url, raw_name)
+        return {
+            "status": "success",
+            "device": camera_info,
+            "rtmp_url": rtmp_url,
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to add camera: {str(e)}",
         }
 
 

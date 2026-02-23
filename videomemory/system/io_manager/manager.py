@@ -104,6 +104,15 @@ class IOmanager:
                 name = f"Network Camera ({parsed.hostname or url})"
             except Exception:
                 name = f"Network Camera ({url})"
+
+        for existing in self._network_cameras.values():
+            if existing.get("url") == url:
+                logger.info(
+                    "Network camera already exists for url=%s (io_id=%s); returning existing device",
+                    url,
+                    existing.get("io_id"),
+                )
+                return existing
         
         if self._db:
             io_id = self._db.get_next_network_camera_id()

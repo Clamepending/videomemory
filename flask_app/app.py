@@ -510,12 +510,24 @@ def create_rtmp_camera():
     """Create a network camera with a generated RTMP URL for the Android app to push to."""
     try:
         data = request.get_json(silent=True) or {}
+        requested_device_name = (data.get('device_name') or '').strip()
         requested_name = (data.get('name') or '').strip()
+        provided_name = requested_device_name or requested_name
         host = _rtmp_url_host()
-        stream_name = _stream_key_from_name(requested_name)
+        if requested_device_name and " " in requested_device_name:
+            return jsonify({
+                "status": "error",
+                "error": "device_name cannot contain spaces",
+            }), 400
+        if requested_device_name and not re.match(r"^[A-Za-z0-9_-]+$", requested_device_name):
+            return jsonify({
+                "status": "error",
+                "error": "device_name can only contain letters, numbers, underscore, or dash",
+            }), 400
+        stream_name = _stream_key_from_name(provided_name)
         if stream_name:
             stream_key = f"live/{stream_name}"
-            name = requested_name
+            name = provided_name
         else:
             stream_key = f"live/phone_{uuid.uuid4().hex[:8]}"
             name = f"RTMP Camera ({stream_key.split('/')[-1]})"
@@ -1011,6 +1023,33 @@ def openapi_spec():
                     "responses": {
                         "200": {"description": "Task stopped"},
                         "404": {"description": "Task not found"},
+                    },
+                }
+            },
+            "/api/devices/network/rtmp": {
+                "post": {
+                    "operationId": "add_camera",
+                    "summary": "Create an RTMP camera",
+                    "description": (
+                        "Creates a network camera and returns an RTMP push URL. "
+                        "Use this when setting up phone streaming. device_name must not contain spaces."
+                    ),
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "required": ["device_name"],
+                            "properties": {
+                                "device_name": {
+                                    "type": "string",
+                                    "description": "Camera name and stream key suffix (letters, numbers, underscore, dash; no spaces)"
+                                },
+                            },
+                        }}},
+                    },
+                    "responses": {
+                        "200": {"description": "RTMP camera created successfully"},
+                        "400": {"description": "Validation error"},
                     },
                 }
             },
