@@ -176,12 +176,27 @@ class VideoStreamIngestor:
             
             if not opened:
                 if self.is_network_stream:
-                    error_msg = (
-                        f"ERROR: Could not open network stream: {self.camera_source}\n"
-                        f"  Check that the URL is correct and the camera is online.\n"
-                        f"  Common issues: wrong IP, wrong port, camera offline, auth required."
-                    )
                     note_content = f"Could not connect to network camera at {self.camera_source}. Check URL and that camera is online."
+                    logger.warning(
+                        "Could not open network stream at startup: %s. "
+                        "Will keep retrying until it becomes available.",
+                        self.camera_source,
+                    )
+                    for task in self._tasks_list:
+                        error_note = NoteEntry(content=note_content)
+                        task.task_note.append(error_note)
+
+                    reconnect_interval = float(os.environ.get("VIDEOMEMORY_NETWORK_RETRY_SECONDS", "2.0"))
+                    while self._running and not opened:
+                        await asyncio.sleep(reconnect_interval)
+                        opened = await asyncio.to_thread(self._open_camera)
+                        if opened:
+                            logger.info(f"Connected to network stream after retry: {self.camera_source}")
+                            break
+
+                    if not opened:
+                        # Stopped while retrying.
+                        return
                 else:
                     error_msg = (
                         f"ERROR: Could not open camera {self.camera_source} for camera index={self.camera_index}\n"
@@ -193,11 +208,11 @@ class VideoStreamIngestor:
                         f"  Alternatively, the camera may be in use by another application."
                     )
                     note_content = "Camera access denied. Please grant camera permissions in System Settings."
-                logger.error(error_msg)
-                for task in self._tasks_list:
-                    error_note = NoteEntry(content=note_content)
-                    task.task_note.append(error_note)
-                return
+                    logger.error(error_msg)
+                    for task in self._tasks_list:
+                        error_note = NoteEntry(content=note_content)
+                        task.task_note.append(error_note)
+                    return
             
             # Log which camera we're actually using
             if self.is_network_stream:

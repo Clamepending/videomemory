@@ -53,7 +53,12 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         }
         if (rtmpStream == null) {
             rtmpStream = RtmpStream(this, this)
-            val ok = rtmpStream!!.prepareVideo(1280, 720, 1_200_000) &&
+            val ok = rtmpStream!!.prepareVideo(
+                width = 1280,
+                height = 720,
+                bitrate = 1_200_000,
+                rotation = 90
+            ) &&
                 rtmpStream!!.prepareAudio(48000, true, 128 * 1024)
             if (!ok) {
                 Toast.makeText(this, "Prepare failed", Toast.LENGTH_SHORT).show()
