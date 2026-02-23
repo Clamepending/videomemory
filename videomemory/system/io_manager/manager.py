@@ -3,6 +3,7 @@
 import logging
 from typing import Dict, List, Optional
 from .detection import DeviceDetector
+from .url_utils import get_pull_url
 
 logger = logging.getLogger('IOmanager')
 
@@ -86,10 +87,11 @@ class IOmanager:
             return False
     
     def add_network_camera(self, url: str, name: str = None) -> Dict:
-        """Register a network camera (RTSP/HTTP stream).
+        """Register a network camera (RTSP/HTTP/RTMP stream).
         
         Args:
-            url: The stream URL (e.g. rtsp://admin:pass@192.168.1.50:554/stream1)
+            url: The stream URL (e.g. rtsp://..., http://..., or rtmp://... for
+                 push sources like the Android app; RTMP is converted to RTSP for pulling).
             name: Optional display name. Defaults to the URL host.
         
         Returns:
@@ -196,8 +198,13 @@ class IOmanager:
                     f"No cached stream data available."
                 )
         
-        return self._io_streams.get(io_id)
-    
+        info = self._io_streams.get(io_id)
+        if info is None:
+            return None
+        if "url" in info:
+            return {**info, "pull_url": get_pull_url(info["url"])}
+        return info
+
     def list_all_streams(self, skip_refresh: bool = False) -> List[Dict]:
         """List all available camera streams with their IDs.
         
@@ -215,5 +222,8 @@ class IOmanager:
                         f"Error: {self._last_error}. "
                         f"No cached stream data available."
                     )
-        
-        return list(self._io_streams.values())
+
+        return [
+            {**s, "pull_url": get_pull_url(s["url"])} if "url" in s else s
+            for s in self._io_streams.values()
+        ]

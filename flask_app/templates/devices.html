@@ -328,6 +328,86 @@
         .remove-btn:hover {
             background: #ff6b6b22;
         }
+
+        .create-rtmp-section {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .create-rtmp-section h3 {
+            font-size: 16px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 14px;
+        }
+
+        .create-rtmp-btn {
+            background: #9c4aff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .create-rtmp-btn:hover { background: #8b3de6; }
+        .create-rtmp-btn:disabled { background: #555; cursor: not-allowed; opacity: 0.6; }
+
+        .rtmp-url-box {
+            margin-top: 16px;
+            padding: 14px;
+            background: #1a1a1a;
+            border: 1px solid #404040;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .rtmp-url-box.visible { display: block; }
+
+        .rtmp-url-label {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .rtmp-url-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .rtmp-url-input {
+            flex: 1;
+            background: #0d0d0d;
+            border: 1px solid #404040;
+            color: #19c37d;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        }
+
+        .copy-btn {
+            background: #19c37d;
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .copy-btn:hover { background: #15a86b; }
+        .copy-btn.copied { background: #0d8554; }
 {% endblock %}
 
 {% block content %}
@@ -338,6 +418,24 @@
             <button class="refresh-button" id="refreshButton" onclick="loadDevices()">
                 🔄 Refresh
             </button>
+        </div>
+        <div class="create-rtmp-section">
+            <h3>RTMP camera (Android app)</h3>
+            <div class="form-row" style="margin-bottom: 12px;">
+                <div class="form-group" style="flex:1; min-width: 220px;">
+                    <label for="rtmpCamName">Name (used in stream key)</label>
+                    <input type="text" id="rtmpCamName" placeholder="Front Door (creates live/front-door)" />
+                </div>
+            </div>
+            <button class="create-rtmp-btn" id="createRtmpBtn" type="button">Create RTMP camera</button>
+            <div class="rtmp-url-box" id="rtmpUrlBox">
+                <div class="rtmp-url-label">Paste this URL into the VideoMemory Stream app on your phone</div>
+                <div class="rtmp-url-row">
+                    <input type="text" class="rtmp-url-input" id="rtmpUrlInput" readonly />
+                    <button class="copy-btn" id="copyRtmpBtn" type="button">Copy</button>
+                </div>
+                <div class="rtmp-url-label" id="rtmpUrlHint" style="margin-top: 8px; color: #888; text-transform: none; display: none;">Replace YOUR_SERVER_IP with this computer's LAN IP (e.g. 192.168.1.42) so your phone can connect.</div>
+            </div>
         </div>
         <div class="add-network-form">
             <h3>Add Network Camera</h3>
@@ -362,6 +460,59 @@
 
 {% block extra_scripts %}
     <script>
+        async function createRtmpCamera() {
+            const btn = document.getElementById('createRtmpBtn');
+            const box = document.getElementById('rtmpUrlBox');
+            const input = document.getElementById('rtmpUrlInput');
+            const nameInput = document.getElementById('rtmpCamName');
+            btn.disabled = true;
+            btn.textContent = 'Creating...';
+            try {
+                const body = {};
+                const name = nameInput.value.trim();
+                if (name) body.name = name;
+                const resp = await fetch('/api/devices/network/rtmp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json();
+                if (resp.ok && data.status === 'success') {
+                    input.value = data.rtmp_url;
+                    box.classList.add('visible');
+                    const hint = document.getElementById('rtmpUrlHint');
+                    hint.style.display = data.rtmp_url.indexOf('YOUR_SERVER_IP') !== -1 ? 'block' : 'none';
+                    loadDevices();
+                } else {
+                    alert(data.error || 'Failed to create RTMP camera');
+                }
+            } catch (e) {
+                alert(e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create RTMP camera';
+            }
+        }
+
+        function copyRtmpUrl() {
+            const input = document.getElementById('rtmpUrlInput');
+            if (!input.value) return;
+            input.select();
+            input.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(input.value).then(function() {
+                const copyBtn = document.getElementById('copyRtmpBtn');
+                copyBtn.textContent = 'Copied!';
+                copyBtn.classList.add('copied');
+                setTimeout(function() {
+                    copyBtn.textContent = 'Copy';
+                    copyBtn.classList.remove('copied');
+                }, 2000);
+            });
+        }
+
+        document.getElementById('createRtmpBtn').addEventListener('click', createRtmpCamera);
+        document.getElementById('copyRtmpBtn').addEventListener('click', copyRtmpUrl);
+
         async function addNetworkCamera() {
             const urlInput = document.getElementById('netUrl');
             const nameInput = document.getElementById('netName');

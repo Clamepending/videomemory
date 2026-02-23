@@ -1,0 +1,7 @@
+# MediaMTX config for VideoMemory: accept RTMP push, expose RTSP pull.
+# Defaults: RTMP :1935, RTSP :8554. No auth; any path (e.g. /live/stream) works.
+logLevel: info
+logDestinations: [stdout]
+
+paths:
+  all_others: {}

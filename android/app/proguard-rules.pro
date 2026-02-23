@@ -1,0 +1,2 @@
+-dontwarn com.pedro.**
+-keep class com.pedro.** { *; }
