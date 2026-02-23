@@ -5,10 +5,10 @@ A video monitoring system that uses vision-language models to analyse camera fee
 ## Quick Start
 
 ```bash
-uv run flask_app/app.py
+./start.sh
 ```
 
-Open http://localhost:5050. Set your model API key in the **Settings** tab. Chat with the admin agent in the **Chat** tab to manage the system through natural conversation, or browse your cameras and monitoring tasks directly in the **Devices** and **Tasks** tabs.
+This launches MediaMTX and VideoMemory together for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab. Chat with the admin agent in the **Chat** tab to manage the system through natural conversation, or browse your cameras and monitoring tasks directly in the **Devices** and **Tasks** tabs.
 
 ## Telegram
 
