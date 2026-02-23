@@ -140,8 +140,8 @@ class TaskManager:
             # Determine camera source: URL for network cameras, int index for local
             stream_url = stream_info.get("url")
             if stream_url:
-                camera_source = stream_url
-                logger.info(f"Creating VideoStreamIngestor for network camera io_id={io_id} (url={stream_url})")
+                camera_source = stream_info.get("pull_url") or stream_url
+                logger.info(f"Creating VideoStreamIngestor for network camera io_id={io_id} (pull url={camera_source})")
             else:
                 try:
                     camera_source = int(io_id)

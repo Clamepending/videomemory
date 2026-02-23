@@ -82,6 +82,7 @@ class VideoStreamIngestor:
         # History tracking: past 20 model outputs (each dict includes the frame that produced it)
         self._output_history: deque = deque(maxlen=20)  # Store last 20 model outputs
         self._total_output_count: int = 0  # Track total number of outputs processed (for debugging)
+        self._process_loop_ticks: int = 0
         
         # Frame deduplication: skip VLM calls when the frame hasn't changed
         self._last_processed_frame: Optional[Any] = None  # Last frame sent to VLM
@@ -145,7 +146,8 @@ class VideoStreamIngestor:
         # Start all processing loops
         # Note: These tasks run concurrently in the background
         self._tasks = [
-            asyncio.create_task(self._process_input(), name=f"process_input_{self.camera_index}"),
+            asyncio.create_task(self._capture_loop(), name=f"capture_{self.camera_index}"),
+            asyncio.create_task(self._process_input(), name=f"process_{self.camera_index}"),
             asyncio.create_task(self._action_loop(), name=f"action_{self.camera_index}"),
         ]
         
@@ -158,7 +160,28 @@ class VideoStreamIngestor:
     def _open_camera(self) -> bool:
         """Open the camera (local or network). Returns True on success."""
         if self.is_network_stream:
-            self._camera = cv2.VideoCapture(self.camera_source)
+            if not os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"):
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|"
+                    "max_delay;500000|reorder_queue_size;0"
+                )
+            self._camera = cv2.VideoCapture()
+            if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+                self._camera.set(
+                    cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
+                    float(os.environ.get("VIDEOMEMORY_STREAM_OPEN_TIMEOUT_MS", "5000")),
+                )
+            if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+                self._camera.set(
+                    cv2.CAP_PROP_READ_TIMEOUT_MSEC,
+                    float(os.environ.get("VIDEOMEMORY_STREAM_READ_TIMEOUT_MS", "5000")),
+                )
+            if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+                self._camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if hasattr(cv2, "CAP_FFMPEG"):
+                self._camera.open(self.camera_source, cv2.CAP_FFMPEG)
+            else:
+                self._camera.open(self.camera_source)
         else:
             import platform
             if platform.system() == 'Darwin':
@@ -169,34 +192,97 @@ class VideoStreamIngestor:
                 self._camera = cv2.VideoCapture(self.camera_source)
         return self._camera.isOpened()
 
-    async def _process_input(self):
-        """Unified loop that captures frames and processes them through ML pipeline."""
+    def _release_camera(self):
+        """Release current capture handle if open."""
+        if self._camera:
+            self._camera.release()
+            self._camera = None
+
+    def _append_note_to_tasks(self, content: str):
+        """Append a note to all tracked tasks."""
+        for task in self._tasks_list:
+            task.task_note.append(NoteEntry(content=content))
+
+    async def _ensure_camera_open(self) -> bool:
+        """Open camera, with retry behavior for network streams."""
+        opened = await asyncio.to_thread(self._open_camera)
+        if opened:
+            return True
+
+        if self.is_network_stream:
+            note_content = f"Could not connect to network camera at {self.camera_source}. Check URL and that camera is online."
+            logger.warning(
+                "Could not open network stream at startup: %s. Will keep retrying until it becomes available.",
+                self.camera_source,
+            )
+            self._append_note_to_tasks(note_content)
+            reconnect_interval = float(os.environ.get("VIDEOMEMORY_NETWORK_RETRY_SECONDS", "2.0"))
+            while self._running and not opened:
+                await asyncio.sleep(reconnect_interval)
+                opened = await asyncio.to_thread(self._open_camera)
+                if opened:
+                    logger.info(f"Connected to network stream after retry: {self.camera_source}")
+                    return True
+            return False
+
+        error_msg = (
+            f"ERROR: Could not open camera {self.camera_source} for camera index={self.camera_index}\n"
+            f"  This is likely a macOS camera permission issue.\n"
+            f"  To fix:\n"
+            f"  1. Go to System Settings > Privacy & Security > Camera\n"
+            f"  2. Enable camera access for Terminal (or Python/your IDE)\n"
+            f"  3. Restart the application\n"
+            f"  Alternatively, the camera may be in use by another application."
+        )
+        logger.error(error_msg)
+        self._append_note_to_tasks("Camera access denied. Please grant camera permissions in System Settings.")
+        return False
+
+    async def _reconnect_network_stream(self) -> bool:
+        """Reconnect network stream after repeated read failures."""
+        self._release_camera()
+        await asyncio.sleep(2.0)
+        reopened = await asyncio.to_thread(self._open_camera)
+        if reopened:
+            logger.info(f"Reconnected to network stream: {self.camera_source}")
+        else:
+            logger.error(f"Failed to reconnect to {self.camera_source}, will retry...")
+        return reopened
+
+    def _read_latest_frame(self) -> Tuple[bool, Optional[Any]]:
+        """Read the freshest available frame from the current capture.
+
+        For network streams, we briefly drain buffered frames and keep the newest
+        one so each VLM cycle works on near-live content.
+        """
+        if self._camera is None:
+            return False, None
+
+        if not self.is_network_stream:
+            return self._camera.read()
+
+        drain_seconds = float(os.environ.get("VIDEOMEMORY_STREAM_DRAIN_SECONDS", "0.25"))
+        deadline = time.monotonic() + max(0.01, drain_seconds)
+        latest_frame = None
+        got_frame = False
+
+        while time.monotonic() < deadline:
+            ret, frame = self._camera.read()
+            if ret and frame is not None and frame.size > 0:
+                latest_frame = frame
+                got_frame = True
+                continue
+            time.sleep(0.005)
+
+        if got_frame:
+            return True, latest_frame
+
+        return self._camera.read()
+
+    async def _capture_loop(self):
+        """Continuously capture the newest frame into a single-slot mailbox."""
         try:
-            opened = await asyncio.to_thread(self._open_camera)
-            
-            if not opened:
-                if self.is_network_stream:
-                    error_msg = (
-                        f"ERROR: Could not open network stream: {self.camera_source}\n"
-                        f"  Check that the URL is correct and the camera is online.\n"
-                        f"  Common issues: wrong IP, wrong port, camera offline, auth required."
-                    )
-                    note_content = f"Could not connect to network camera at {self.camera_source}. Check URL and that camera is online."
-                else:
-                    error_msg = (
-                        f"ERROR: Could not open camera {self.camera_source} for camera index={self.camera_index}\n"
-                        f"  This is likely a macOS camera permission issue.\n"
-                        f"  To fix:\n"
-                        f"  1. Go to System Settings > Privacy & Security > Camera\n"
-                        f"  2. Enable camera access for Terminal (or Python/your IDE)\n"
-                        f"  3. Restart the application\n"
-                        f"  Alternatively, the camera may be in use by another application."
-                    )
-                    note_content = "Camera access denied. Please grant camera permissions in System Settings."
-                logger.error(error_msg)
-                for task in self._tasks_list:
-                    error_note = NoteEntry(content=note_content)
-                    task.task_note.append(error_note)
+            if not await self._ensure_camera_open():
                 return
             
             # Log which camera we're actually using
@@ -213,7 +299,7 @@ class VideoStreamIngestor:
                 except Exception:
                     logger.info(f"Opening camera index={self.camera_source} (could not verify device name)")
             
-            logger.info(f"Started process input loop for camera source={self.camera_source}")
+            logger.info(f"Started capture loop for camera source={self.camera_source}")
             
             # Warm up camera by reading a few frames (especially important for USB cameras)
             for _ in range(5):
@@ -227,24 +313,16 @@ class VideoStreamIngestor:
             
             while self._running:
                 try:
-                    # Capture frame from camera
-                    ret, current_frame = await asyncio.to_thread(self._camera.read)
+                    ret, current_frame = await asyncio.to_thread(self._read_latest_frame)
                     if not ret:
                         consecutive_failures += 1
                         if self.is_network_stream and consecutive_failures >= max_consecutive_failures:
                             logger.warning(f"Network stream {self.camera_source}: {consecutive_failures} consecutive failures, attempting reconnect...")
-                            if self._camera:
-                                self._camera.release()
-                            await asyncio.sleep(2.0)
-                            reopened = await asyncio.to_thread(self._open_camera)
+                            reopened = await self._reconnect_network_stream()
                             if reopened:
-                                logger.info(f"Reconnected to network stream: {self.camera_source}")
                                 consecutive_failures = 0
-                            else:
-                                logger.error(f"Failed to reconnect to {self.camera_source}, will retry...")
                             continue
-                        logger.debug(f"Failed to read frame from camera source={self.camera_source}")
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.05)
                         continue
                     
                     consecutive_failures = 0
@@ -258,19 +336,46 @@ class VideoStreamIngestor:
                     if current_frame.shape[1] != self._target_resolution[0] or current_frame.shape[0] != self._target_resolution[1]:
                         current_frame = cv2.resize(current_frame, self._target_resolution, interpolation=cv2.INTER_LINEAR)
                     
-                    # Always update latest frame for preview (show whatever we get, even if black)
+                    # Single-slot mailbox: always overwrite with freshest frame.
                     if current_frame.size > 0:
                         self._latest_frame = current_frame.copy()
+                            
+                except Exception as e:
+                    logger.error(f"Error capturing frame for camera index={self.camera_index}: {e}", exc_info=True)
+                    continue
+            logger.info(f"Stopped capture loop for camera index={self.camera_index}")
                     
-                    # Log frame info periodically for debugging (every 100 frames)
-                    if self._total_output_count % 100 == 0:
+        except asyncio.CancelledError:
+            logger.info(f"Capture loop cancelled for camera index={self.camera_index}")
+        except Exception as e:
+            logger.error(f"Error in capture loop for camera index={self.camera_index}: {e}", exc_info=True)
+            self._running = False
+        finally:
+            self._release_camera()
+
+    async def _process_input(self):
+        """Run VLM processing against the most recent captured frame."""
+        try:
+            logger.info(f"Started processing loop for camera source={self.camera_source}")
+
+            while self._running:
+                try:
+                    if self._latest_frame is None:
+                        await asyncio.sleep(0.05)
+                        continue
+
+                    current_frame = self._latest_frame.copy()
+                    self._process_loop_ticks += 1
+
+                    # Log frame info periodically for debugging.
+                    if self._process_loop_ticks % 100 == 0:
                         frame_mean = current_frame.mean()
                         logger.debug(
                             f"Camera index={self.camera_index}: frame shape={current_frame.shape}, "
                             f"mean={frame_mean:.2f}, min={current_frame.min()}, max={current_frame.max()}"
                         )
-                    
-                    # Skip VLM call if the frame is effectively identical to the last one we processed
+
+                    # Skip VLM call if frame is effectively identical to the last processed frame.
                     if self._is_frame_duplicate(current_frame):
                         self._frames_skipped += 1
                         if self._frames_skipped % 50 == 1:
@@ -280,48 +385,29 @@ class VideoStreamIngestor:
                             )
                         await asyncio.sleep(0.1)
                         continue
-                    
-                    # Build prompt before inference so we can store it with the output
+
                     prompt = self._build_prompt()
-                    
-                    # Run ML processing with multimodal LLM
                     results = await self._run_ml_inference(current_frame, prompt)
-                    
-                    # Remember this frame as the last one we sent to the VLM
                     self._last_processed_frame = current_frame.copy()
-                    
-                    # Store output in history with its corresponding frame and prompt
+
                     if results:
-                        # Add frame and prompt to the output dict
                         results["frame"] = current_frame.copy()
                         results["prompt"] = prompt
                         self._output_history.append(results)
                         self._total_output_count += 1
-                        
-                        # Process results: update task notes and queue actions
                         await self._process_ml_results(results)
-                            
+
                 except Exception as e:
                     logger.error(f"Error processing frame for camera index={self.camera_index}: {e}", exc_info=True)
+                    await asyncio.sleep(0.1)
                     continue
-            
-            # Cleanup camera
-            if self._camera:
-                self._camera.release()
-                self._camera = None
-            logger.info(f"Stopped process input loop for camera index={self.camera_index}")
-                    
+
+            logger.info(f"Stopped processing loop for camera index={self.camera_index}")
         except asyncio.CancelledError:
-            logger.info(f"Process input loop cancelled for camera index={self.camera_index}")
-            if self._camera:
-                self._camera.release()
-                self._camera = None
+            logger.info(f"Processing loop cancelled for camera index={self.camera_index}")
         except Exception as e:
-            logger.error(f"Error in process input loop for camera index={self.camera_index}: {e}", exc_info=True)
+            logger.error(f"Error in processing loop for camera index={self.camera_index}: {e}", exc_info=True)
             self._running = False
-            if self._camera:
-                self._camera.release()
-                self._camera = None
     
     async def _action_loop(self):
         """Execute actions based on task conditions."""

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VideoMemory Stream</string>
+    <string name="hint_rtmp_url">rtmp://YOUR_IP:1935/live/phone1</string>
+    <string name="start">Start stream</string>
+    <string name="stop">Stop stream</string>
+</resources>

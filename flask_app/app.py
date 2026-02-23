@@ -3,6 +3,7 @@
 
 import asyncio
 import os
+import re
 import sys
 import threading
 import uuid
@@ -484,9 +485,55 @@ def get_devices():
         logger.error(f"Error in get_devices: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+def _rtmp_url_host() -> str:
+    """Host for generated RTMP URLs: from request, env, or placeholder."""
+    host = os.environ.get("RTMP_SERVER_HOST", "").strip()
+    if host:
+        return host.split(":")[0]
+    try:
+        h = request.host
+        if h and h != "localhost" and not h.startswith("127."):
+            return h.split(":")[0]
+    except Exception:
+        pass
+    return "YOUR_SERVER_IP"
+
+
+def _stream_key_from_name(name: str) -> str:
+    """Build a safe stream key segment from a user-provided name."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
+    return slug[:48] if slug else ""
+
+
+@app.route('/api/devices/network/rtmp', methods=['POST'])
+def create_rtmp_camera():
+    """Create a network camera with a generated RTMP URL for the Android app to push to."""
+    try:
+        data = request.get_json(silent=True) or {}
+        requested_name = (data.get('name') or '').strip()
+        host = _rtmp_url_host()
+        stream_name = _stream_key_from_name(requested_name)
+        if stream_name:
+            stream_key = f"live/{stream_name}"
+            name = requested_name
+        else:
+            stream_key = f"live/phone_{uuid.uuid4().hex[:8]}"
+            name = f"RTMP Camera ({stream_key.split('/')[-1]})"
+        url = f"rtmp://{host}:1935/{stream_key}"
+        camera_info = io_manager.add_network_camera(url, name)
+        return jsonify({
+            "status": "success",
+            "device": camera_info,
+            "rtmp_url": url,
+        })
+    except Exception as e:
+        flask_logger.error(f"Error creating RTMP camera: {e}", exc_info=True)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 @app.route('/api/devices/network', methods=['POST'])
 def add_network_camera():
-    """Add a network camera (RTSP/HTTP stream)."""
+    """Add a network camera (RTSP/HTTP/RTMP stream). RTMP URLs are converted to RTSP for pulling (SRS-compatible)."""
     data = request.get_json()
     if not data:
         return jsonify({'status': 'error', 'error': 'Request body required'}), 400
@@ -518,20 +565,44 @@ def remove_network_camera(io_id):
 
 
 def _get_network_preview_frame(url: str) -> Optional[bytes]:
-    """Capture a single preview frame from a network stream URL."""
+    """Capture a single preview frame from a network stream URL.
+
+    This path is used by the Devices page; fail fast so one dead stream doesn't
+    stall all preview requests.
+    """
     cap = None
     try:
-        cap = cv2.VideoCapture(url)
-        if not cap.isOpened():
+        # Favor low-latency RTSP reads for preview snapshots.
+        if not os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"):
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|"
+                "max_delay;500000|reorder_queue_size;0"
+            )
+        open_timeout_ms = int(os.environ.get("VIDEOMEMORY_PREVIEW_OPEN_TIMEOUT_MS", "2500"))
+        read_timeout_ms = int(os.environ.get("VIDEOMEMORY_PREVIEW_READ_TIMEOUT_MS", "2500"))
+        drain_seconds = float(os.environ.get("VIDEOMEMORY_PREVIEW_DRAIN_SECONDS", "0.35"))
+        cap = cv2.VideoCapture()
+        if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, float(open_timeout_ms))
+        if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, float(read_timeout_ms))
+        if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        opened = cap.open(url, cv2.CAP_FFMPEG) if hasattr(cv2, "CAP_FFMPEG") else cap.open(url)
+        if not opened or not cap.isOpened():
             return None
-        # Read a few frames to let the stream stabilize
+
+        # Drain buffered frames briefly and keep the newest one.
         frame = None
         import time
-        for _ in range(5):
+        deadline = time.monotonic() + max(0.05, drain_seconds)
+        while time.monotonic() < deadline:
             ret, test_frame = cap.read()
             if ret and test_frame is not None and test_frame.size > 0:
                 frame = test_frame
-            time.sleep(0.05)
+                continue
+            time.sleep(0.01)
         if frame is None:
             return None
         if frame.shape[1] > 640 or frame.shape[0] > 480:
@@ -577,10 +648,10 @@ def get_device_preview(io_id):
                     headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
                 )
         
-        # Fallback: open camera directly
-        stream_url = device_info.get('url')
-        if stream_url:
-            frame_data = _get_network_preview_frame(stream_url)
+        # Fallback: open camera directly (use pull_url for capture; RTMP→RTSP is in io_manager)
+        pull_url = device_info.get('pull_url') or device_info.get('url')
+        if pull_url:
+            frame_data = _get_network_preview_frame(pull_url)
         else:
             try:
                 camera_index = int(io_id)
@@ -954,7 +1025,7 @@ def openapi_spec():
                             "type": "object",
                             "required": ["url"],
                             "properties": {
-                                "url": {"type": "string", "description": "Stream URL (e.g. rtsp://admin:pass@192.168.1.50:554/stream1)"},
+                                "url": {"type": "string", "description": "Stream URL (e.g. rtsp://..., http://..., or rtmp://server/live/key for push sources; RTMP is auto-converted to RTSP)"},
                                 "name": {"type": "string", "description": "Optional display name for the camera"},
                             },
                         }}},
@@ -1375,4 +1446,4 @@ def chat():
 
 if __name__ == '__main__':
     debug = os.getenv('FLASK_DEBUG', '0') == '1'
-    app.run(debug=debug, host='0.0.0.0', port=5050)
+    app.run(debug=debug, host='0.0.0.0', port=5050, threaded=True)
