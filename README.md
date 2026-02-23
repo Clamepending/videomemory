@@ -10,6 +10,24 @@ A video monitoring system that uses vision-language models to analyse camera fee
 
 This launches MediaMTX and VideoMemory together for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab. Chat with the admin agent in the **Chat** tab to manage the system through natural conversation, or browse your cameras and monitoring tasks directly in the **Devices** and **Tasks** tabs.
 
+## One-click cloud deployment (Fly.io)
+
+[![Deploy to Fly.io](https://fly.io/button.svg)](https://fly.io/apps/new?repo=https://github.com/Clamepending/videomemory)
+
+This deploys VideoMemory and MediaMTX together so phones can stream via RTMP and VideoMemory can pull via RTSP in the same Fly app.
+
+After deployment:
+
+1. Open your Fly app URL.
+2. Go to **Settings** and set `GOOGLE_API_KEY` (or another supported provider key).
+3. Go to **Devices** → **Create RTMP camera** and copy the generated RTMP URL.
+4. Paste that URL into the Android app and start streaming.
+5. Create tasks for that camera by talking in chat.
+6. Link Telegram to talk to the system from telegram.
+
+Recommended for RTMP stability: keep a single Fly machine for this app (`fly scale count 1`).
+If Fly asks to create a volume during deploy, accept it (the app stores SQLite data at `/app/data`).
+
 ## Telegram
 
 Text the system from anywhere — your phone, laptop, tablet — through Telegram. Send messages and receive real-time updates from your monitoring tasks on any device, wherever you are.
