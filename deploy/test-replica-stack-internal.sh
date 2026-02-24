@@ -12,12 +12,19 @@ dc() {
 gw_py_post() {
   local path="$1"
   local json_payload="$2"
-  dc exec -T admin-gateway-replica sh -lc "python - <<'PY'\nimport requests\nresp = requests.post('http://127.0.0.1:18789${path}', json=${json_payload}, timeout=30)\nprint(resp.text)\nraise SystemExit(0 if resp.ok else 1)\nPY"
+  dc exec -T \
+    -e GW_PATH="$path" \
+    -e GW_JSON="$json_payload" \
+    admin-gateway-replica \
+    python -c "import json, os, requests; resp=requests.post('http://127.0.0.1:18789'+os.environ['GW_PATH'], json=json.loads(os.environ['GW_JSON']), timeout=30); print(resp.text); raise SystemExit(0 if resp.ok else 1)"
 }
 
 gw_py_get() {
   local path="$1"
-  dc exec -T admin-gateway-replica sh -lc "python - <<'PY'\nimport requests\nresp = requests.get('http://127.0.0.1:18789${path}', timeout=30)\nprint(resp.text)\nraise SystemExit(0 if resp.ok else 1)\nPY"
+  dc exec -T \
+    -e GW_PATH="$path" \
+    admin-gateway-replica \
+    python -c "import os, requests; resp=requests.get('http://127.0.0.1:18789'+os.environ['GW_PATH'], timeout=30); print(resp.text); raise SystemExit(0 if resp.ok else 1)"
 }
 
 echo "[1] Containers up"
