@@ -83,6 +83,22 @@ class VideoMemoryApiClient:
             body["name"] = name
         return self._request("POST", "/api/devices/network/rtmp", json_body=body)
 
+    def create_srt_camera(self, device_name: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
+        body: Dict[str, Any] = {}
+        if device_name:
+            body["device_name"] = device_name
+        if name:
+            body["name"] = name
+        return self._request("POST", "/api/devices/network/srt", json_body=body)
+
+    def create_whip_camera(self, device_name: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
+        body: Dict[str, Any] = {}
+        if device_name:
+            body["device_name"] = device_name
+        if name:
+            body["name"] = name
+        return self._request("POST", "/api/devices/network/whip", json_body=body)
+
     def add_network_camera(self, url: str, name: Optional[str] = None) -> Dict[str, Any]:
         body = {"url": url}
         if name:
@@ -161,6 +177,36 @@ class VideoMemoryMcpServer:
                     "additionalProperties": False,
                 },
                 "handler": lambda args: self.api.create_rtmp_camera(
+                    device_name=(args or {}).get("device_name"),
+                    name=(args or {}).get("name"),
+                ),
+            },
+            "create_srt_camera": {
+                "description": "Create a network camera entry and return an SRT publish URL (lower latency and more resilient than RTMP). VideoMemory pulls via RTSP automatically.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "device_name": {"type": "string"},
+                        "name": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                "handler": lambda args: self.api.create_srt_camera(
+                    device_name=(args or {}).get("device_name"),
+                    name=(args or {}).get("name"),
+                ),
+            },
+            "create_whip_camera": {
+                "description": "Create a network camera entry and return a WebRTC/WHIP ingest URL for very low-latency phone/web publishers. VideoMemory pulls via RTSP automatically.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "device_name": {"type": "string"},
+                        "name": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                "handler": lambda args: self.api.create_whip_camera(
                     device_name=(args or {}).get("device_name"),
                     name=(args or {}).get("name"),
                 ),

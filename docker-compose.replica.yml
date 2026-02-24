@@ -22,6 +22,9 @@ services:
       - "8765:8765"   # VideoMemory MCP HTTP endpoint
       - "1935:1935"   # RTMP push from Android
       - "8554:8554"   # RTSP pull for VideoMemory ingest
+      - "8890:8890"   # SRT ingest (low latency)
+      - "8889:8889"   # WebRTC/WHIP signaling endpoint (MediaMTX)
+      - "8189:8189/udp" # WebRTC ICE/UDP (MediaMTX default)
     volumes:
       - videomemory-data:/root/.local/share/videomemory
 

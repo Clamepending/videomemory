@@ -22,6 +22,9 @@ services:
       - "8765:8765"
       - "1935:1935"
       - "8554:8554"
+      - "8890:8890"
+      - "8889:8889"
+      - "8189:8189/udp"
     volumes:
       - videomemory-data:/root/.local/share/videomemory
 

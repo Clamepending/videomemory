@@ -508,41 +508,108 @@ def _stream_key_from_name(name: str) -> str:
     return slug[:48] if slug else ""
 
 
+def _generated_stream_key(data: dict) -> tuple[str, str]:
+    """Return (stream_key, display_name) from request payload."""
+    requested_device_name = (data.get('device_name') or '').strip()
+    requested_name = (data.get('name') or '').strip()
+    provided_name = requested_device_name or requested_name
+    if requested_device_name and " " in requested_device_name:
+        raise ValueError("device_name cannot contain spaces")
+    if requested_device_name and not re.match(r"^[A-Za-z0-9_-]+$", requested_device_name):
+        raise ValueError("device_name can only contain letters, numbers, underscore, or dash")
+    stream_name = _stream_key_from_name(provided_name)
+    if stream_name:
+        stream_key = f"live/{stream_name}"
+        display_name = provided_name
+    else:
+        stream_key = f"live/phone_{uuid.uuid4().hex[:8]}"
+        display_name = f"Network Camera ({stream_key.split('/')[-1]})"
+    return stream_key, display_name
+
+
 @app.route('/api/devices/network/rtmp', methods=['POST'])
 def create_rtmp_camera():
     """Create a network camera with a generated RTMP URL for the Android app to push to."""
     try:
         data = request.get_json(silent=True) or {}
-        requested_device_name = (data.get('device_name') or '').strip()
-        requested_name = (data.get('name') or '').strip()
-        provided_name = requested_device_name or requested_name
         host = _rtmp_url_host()
-        if requested_device_name and " " in requested_device_name:
-            return jsonify({
-                "status": "error",
-                "error": "device_name cannot contain spaces",
-            }), 400
-        if requested_device_name and not re.match(r"^[A-Za-z0-9_-]+$", requested_device_name):
-            return jsonify({
-                "status": "error",
-                "error": "device_name can only contain letters, numbers, underscore, or dash",
-            }), 400
-        stream_name = _stream_key_from_name(provided_name)
-        if stream_name:
-            stream_key = f"live/{stream_name}"
-            name = provided_name
-        else:
-            stream_key = f"live/phone_{uuid.uuid4().hex[:8]}"
+        try:
+            stream_key, name = _generated_stream_key(data)
+        except ValueError as ve:
+            return jsonify({"status": "error", "error": str(ve)}), 400
+        if name.startswith("Network Camera "):
             name = f"RTMP Camera ({stream_key.split('/')[-1]})"
         url = f"rtmp://{host}:1935/{stream_key}"
         camera_info = io_manager.add_network_camera(url, name)
+        stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
         return jsonify({
             "status": "success",
             "device": camera_info,
             "rtmp_url": url,
+            "rtsp_pull_url": stream_info.get("pull_url"),
         })
     except Exception as e:
         flask_logger.error(f"Error creating RTMP camera: {e}", exc_info=True)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+@app.route('/api/devices/network/srt', methods=['POST'])
+def create_srt_camera():
+    """Create a network camera with a generated SRT publish URL (low-latency uplink)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        host = _rtmp_url_host()
+        try:
+            stream_key, name = _generated_stream_key(data)
+        except ValueError as ve:
+            return jsonify({"status": "error", "error": str(ve)}), 400
+        if name.startswith("Network Camera "):
+            name = f"SRT Camera ({stream_key.split('/')[-1]})"
+
+        # MediaMTX/SRT convention: streamid encodes publish:path
+        srt_url = f"srt://{host}:8890?streamid=publish:{stream_key}"
+        camera_info = io_manager.add_network_camera(srt_url, name)
+        stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
+        return jsonify({
+            "status": "success",
+            "device": camera_info,
+            "srt_url": srt_url,
+            "rtsp_pull_url": stream_info.get("pull_url"),
+            "notes": "Use SRT caller mode from the phone/app. VideoMemory will pull via RTSP.",
+        })
+    except Exception as e:
+        flask_logger.error(f"Error creating SRT camera: {e}", exc_info=True)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+@app.route('/api/devices/network/whip', methods=['POST'])
+def create_whip_camera():
+    """Create a network camera for WebRTC/WHIP ingest (very low latency)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        host = _rtmp_url_host()
+        scheme = "https" if request.is_secure else "http"
+        try:
+            stream_key, name = _generated_stream_key(data)
+        except ValueError as ve:
+            return jsonify({"status": "error", "error": str(ve)}), 400
+        if name.startswith("Network Camera "):
+            name = f"WHIP Camera ({stream_key.split('/')[-1]})"
+
+        # Store a synthetic 'whip://' source so VideoMemory derives RTSP pull cleanly.
+        stored_url = f"whip://{host}:8889/{stream_key}"
+        whip_url = f"{scheme}://{host}:8889/{stream_key}/whip"
+        camera_info = io_manager.add_network_camera(stored_url, name)
+        stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
+        return jsonify({
+            "status": "success",
+            "device": camera_info,
+            "whip_url": whip_url,
+            "rtsp_pull_url": stream_info.get("pull_url"),
+            "notes": "Use a WHIP-capable WebRTC publisher. For internet deployment, set proper ICE/public host config in MediaMTX.",
+        })
+    except Exception as e:
+        flask_logger.error(f"Error creating WHIP camera: {e}", exc_info=True)
         return jsonify({"status": "error", "error": str(e)}), 500
 
 

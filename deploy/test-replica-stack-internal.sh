@@ -38,15 +38,23 @@ echo "[4] Create RTMP camera (Android-compatible)"
 RTMP_RESP="$(dc exec -T videomemory bash -lc "curl -fsS http://127.0.0.1:5050/api/devices/network/rtmp -H 'Content-Type: application/json' -d '{\"device_name\":\"phone_test\"}'")"
 echo "$RTMP_RESP"
 
-echo "[5] Admin gateway replica health"
+echo "[5] Create SRT camera (low-latency uplink)"
+dc exec -T videomemory bash -lc "curl -fsS http://127.0.0.1:5050/api/devices/network/srt -H 'Content-Type: application/json' -d '{\"device_name\":\"phone_srt\"}'"
+echo
+
+echo "[6] Create WHIP camera (WebRTC ingest)"
+dc exec -T videomemory bash -lc "curl -fsS http://127.0.0.1:5050/api/devices/network/whip -H 'Content-Type: application/json' -d '{\"device_name\":\"phone_webrtc\"}'"
+echo
+
+echo "[7] Admin gateway replica health"
 gw_py_get /health
 echo
 
-echo "[6] Trigger gateway wakeup (forwards to VideoMemory /chat)"
+echo "[8] Trigger gateway wakeup (forwards to VideoMemory /chat)"
 TRIGGER_RESP="$(gw_py_post /api/trigger '{"payload":{"io_id":"net0","task_id":"test","note":"Smoke test alert","task_description":"Smoke test"}}')"
 echo "$TRIGGER_RESP"
 
-echo "[7] Inspect gateway events"
+echo "[9] Inspect gateway events"
 gw_py_get /api/events
 echo
 

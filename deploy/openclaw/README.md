@@ -10,6 +10,8 @@ This folder contains a working webhook wake-up config example and a compose stac
 - VideoMemory can wake OpenClaw via `POST /hooks/videomemory-alert` whenever a task gets a new detection note.
 - VideoMemory exposes an MCP server (`http://videomemory:8765/mcp`) for tool/resource access.
 - Android RTMP push is supported via MediaMTX (`rtmp://HOST:1935/live/...`), while VideoMemory pulls via RTSP (`:8554`) automatically.
+- SRT ingest is exposed on `srt://HOST:8890?...` (lower latency / more resilient uplink).
+- WebRTC/WHIP ingest is exposed on `http://HOST:8889/<path>/whip` (very low latency; configure public ICE candidates for internet deployments).
 
 ## OpenClaw webhook setup
 
@@ -31,3 +33,11 @@ OpenClaw MCP support/config syntax has changed across releases. Two paths:
 - MCP bridge/plugin path: point the bridge to `http://videomemory:8765/mcp`.
 
 If your OpenClaw build does not support native MCP yet, the webhook wake-up still works immediately and the MCP server remains usable from other MCP clients.
+
+## Ingest protocol choices (phone -> cloud)
+
+- `RTMP` easiest compatibility path (many Android apps)
+- `SRT` better resilience and latency over poor networks
+- `WHIP/WebRTC` best latency and future bidirectional control path
+
+VideoMemory stores the ingest URL and derives an RTSP pull URL internally for processing workers.

@@ -31,6 +31,6 @@ RUN curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${MEDI
 
 RUN chmod +x /usr/local/bin/mediamtx /app/deploy/start-cloud.sh /app/deploy/start-with-mcp.sh
 
-EXPOSE 5050 8765 1935 8554
+EXPOSE 5050 8765 1935 8554 8889 8890 8189/udp
 
 CMD ["bash", "/app/deploy/start-cloud.sh"]
