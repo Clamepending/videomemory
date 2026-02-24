@@ -1,0 +1,32 @@
+services:
+  videomemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: videomemory
+    restart: unless-stopped
+    command: ["bash", "/app/deploy/start-with-mcp.sh"]
+    environment:
+      PORT: "5050"
+      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-videomemory}"
+      VIDEOMEMORY_RTSP_PULL_PORT: "8554"
+      VIDEOMEMORY_MCP_PORT: "8765"
+      # Optional outbound hook for external gateways/agents (OpenClaw-like contract).
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_URL: "${VIDEOMEMORY_OPENCLAW_WEBHOOK_URL:-}"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN:-}"
+      VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S: "30"
+      VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S: "1"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+    ports:
+      - "5050:5050"      # Frontend + core HTTP API
+      - "8765:8765"      # VideoMemory MCP HTTP endpoint
+      - "1935:1935"      # RTMP push from Android
+      - "8554:8554"      # RTSP pull for VideoMemory ingest
+      - "8890:8890"      # SRT ingest
+      - "8889:8889"      # WebRTC/WHIP signaling endpoint (MediaMTX)
+      - "8189:8189/udp"  # WebRTC ICE/UDP (MediaMTX default)
+    volumes:
+      - videomemory-data:/root/.local/share/videomemory
+
+volumes:
+  videomemory-data:

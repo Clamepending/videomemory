@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple Flask app for chat interface with admin agent."""
+"""Flask app for VideoMemory core APIs and UI."""
 
 import asyncio
 import os
@@ -12,12 +12,8 @@ from pathlib import Path
 # Add parent directory to path so we can import videomemory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify, Response, redirect
 from dotenv import load_dotenv
-from google.adk.sessions import DatabaseSessionService
-from google.adk.runners import Runner
-from google.genai import types
-import videomemory.agents
 import videomemory.system
 import videomemory.tools
 from videomemory.integrations import OpenClawWakeNotifier
@@ -26,7 +22,6 @@ from videomemory.system.model_providers import get_VLM_provider
 from videomemory.system.database import TaskDatabase, get_default_data_dir
 import cv2
 import platform
-import requests as http_requests
 from typing import Optional
 import logging
 
@@ -44,40 +39,18 @@ app = Flask(__name__)
 data_dir = get_default_data_dir()
 data_dir.mkdir(parents=True, exist_ok=True)
 
-sessions_db_url = f"sqlite+aiosqlite:///{data_dir / 'sessions.db'}"
 db = TaskDatabase(str(data_dir / 'videomemory.db'))
 
 # Load saved settings into os.environ BEFORE initializing providers
 # This allows DB-stored API keys and config to override .env values
 db.load_settings_to_env()
-# Notifications go to TELEGRAM_CHAT_ID if set, else to the chat where you last messaged the bot (from DB)
-videomemory.tools.actions.set_telegram_notification_chat_id_resolver(
-    lambda: db.get_setting("TELEGRAM_NOTIFICATION_CHAT_ID")
-)
 
 # ── System components ─────────────────────────────────────────
 io_manager = videomemory.system.IOmanager(db=db)
-app_name = "videomemory_app"
-session_service = DatabaseSessionService(db_url=sessions_db_url)
-runner = Runner(
-    agent=videomemory.agents.admin_agent,
-    app_name=app_name,
-    session_service=session_service
-)
-# Dedicated runner for video-ingestor actions (Telegram, Discord, etc.). Uses action_router
-# agent so "send telegram notification: ..." is executed directly without going through admin agent.
-action_router_runner = Runner(
-    agent=videomemory.agents.action_router_agent,
-    app_name=app_name,
-    session_service=session_service
-)
 model_provider = get_VLM_provider()
 openclaw_notifier = OpenClawWakeNotifier.from_env()
 task_manager = videomemory.system.TaskManager(
     io_manager=io_manager,
-    action_runner=action_router_runner,
-    session_service=session_service,
-    app_name=app_name,
     model_provider=model_provider,
     db=db,
     on_detection_event=openclaw_notifier.notify_task_update,
@@ -85,9 +58,6 @@ task_manager = videomemory.system.TaskManager(
 
 # Set managers in tools
 videomemory.tools.tasks.set_managers(io_manager, task_manager)
-
-# Shared user id for admin chat sessions
-USER_ID = "user_1"
 
 # Create a persistent event loop in a background thread
 # This allows async tasks (like video ingestor) to run continuously
@@ -124,19 +94,12 @@ background_loop = get_background_loop()
 import videomemory.system.stream_ingestors.video_stream_ingestor as vsi_module
 vsi_module._flask_background_loop = background_loop
 
-# ── Helper: run async in background loop ─────────────────────
-
-def run_async(coro, timeout=60):
-    """Run an async coroutine in the background event loop and return the result."""
-    future = asyncio.run_coroutine_threadsafe(coro, background_loop)
-    return future.result(timeout=timeout)
-
 # ── Page routes ───────────────────────────────────────────────
 
 @app.route('/')
 def index():
-    """Render the chat interface."""
-    return render_template('index.html')
+    """Redirect to the device-focused UI."""
+    return redirect('/devices')
 
 @app.route('/tasks')
 def tasks():
@@ -280,96 +243,6 @@ def stop_task_endpoint(task_id):
     except Exception as e:
         flask_logger.error(f"Failed to stop task {task_id}: {e}", exc_info=True)
         return jsonify({'status': 'error', 'error': str(e)}), 500
-
-# ── Session API ───────────────────────────────────────────────
-
-@app.route('/api/sessions', methods=['GET'])
-def list_sessions():
-    """List all admin chat sessions (metadata only)."""
-    try:
-        sessions = db.list_session_metadata()
-        return jsonify({'sessions': sessions})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/sessions/new', methods=['POST'])
-def create_session():
-    """Create a new admin chat session."""
-    try:
-        session_id = f"chat_{uuid.uuid4().hex[:12]}"
-        
-        async def _create():
-            await session_service.create_session(
-                app_name=app_name,
-                user_id=USER_ID,
-                session_id=session_id
-            )
-        
-        run_async(_create())
-        db.save_session_metadata(session_id, title='')
-        
-        return jsonify({'session_id': session_id})
-    except Exception as e:
-        flask_logger.error(f"Failed to create session: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/sessions/<session_id>/messages', methods=['GET'])
-def get_session_messages(session_id):
-    """Get all messages for a session."""
-    try:
-        async def _get():
-            session = await session_service.get_session(
-                app_name=app_name,
-                user_id=USER_ID,
-                session_id=session_id
-            )
-            return session
-        
-        session = run_async(_get())
-        if session is None:
-            return jsonify({'error': 'Session not found'}), 404
-        
-        messages = []
-        for event in session.events:
-            if not event.content or not event.content.parts:
-                continue
-            # Extract text parts only
-            text_parts = []
-            for part in event.content.parts:
-                if hasattr(part, 'text') and part.text:
-                    text_parts.append(part.text)
-            if not text_parts:
-                continue
-            
-            messages.append({
-                'role': 'user' if event.author == 'user' else 'agent',
-                'text': ' '.join(text_parts),
-                'timestamp': event.timestamp if hasattr(event, 'timestamp') else None
-            })
-        
-        return jsonify({'messages': messages})
-    except Exception as e:
-        flask_logger.error(f"Failed to get messages for session {session_id}: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/sessions/<session_id>', methods=['DELETE'])
-def delete_session(session_id):
-    """Delete a chat session."""
-    try:
-        async def _delete():
-            await session_service.delete_session(
-                app_name=app_name,
-                user_id=USER_ID,
-                session_id=session_id
-            )
-        
-        run_async(_delete())
-        db.delete_session_metadata(session_id)
-        
-        return jsonify({'status': 'ok'})
-    except Exception as e:
-        flask_logger.error(f"Failed to delete session {session_id}: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
 
 # ── Device API ────────────────────────────────────────────────
 
@@ -852,50 +725,6 @@ def get_ingestor_tasks(io_id):
         flask_logger.error(f"Error in debug tasks for {io_id}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-# ── Action API ─────────────────────────────────────────────────
-
-from videomemory.tools.actions import send_discord_notification, send_telegram_notification
-
-@app.route('/api/actions/discord', methods=['POST'])
-def action_send_discord():
-    """Send a Discord notification via webhook.
-    
-    Body (JSON):
-        message (str, required): Message content to send.
-        username (str, optional): Override the webhook's bot name.
-    """
-    try:
-        data = request.json or {}
-        message = data.get('message', '').strip()
-        if not message:
-            return jsonify({'status': 'error', 'error': 'message is required'}), 400
-        
-        result = send_discord_notification(
-            message=message,
-            username=data.get('username'),
-        )
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
-
-@app.route('/api/actions/telegram', methods=['POST'])
-def action_send_telegram():
-    """Send a Telegram notification via Bot API.
-    
-    Body (JSON):
-        message (str, required): Message content to send.
-    """
-    try:
-        data = request.json or {}
-        message = data.get('message', '').strip()
-        if not message:
-            return jsonify({'status': 'error', 'error': 'message is required'}), 400
-        
-        result = send_telegram_notification(message=message)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
-
 # ── Health & OpenAPI ──────────────────────────────────────────
 
 @app.route('/api/health', methods=['GET'])
@@ -929,8 +758,8 @@ def openapi_spec():
             "description": (
                 "VideoMemory is a video monitoring system that lets you create tasks for "
                 "camera input devices. The system analyses video streams using vision-language "
-                "models and can trigger actions when conditions are detected. This API exposes "
-                "the admin agent's tool calls so an external agent can act as a stand-in."
+                "models and records task updates when conditions are detected. This API exposes "
+                "the core ingestion and task-management capabilities for external agents."
             ),
         },
         "servers": [{"url": "http://localhost:5050", "description": "Local dev server"}],
@@ -1157,43 +986,6 @@ def openapi_spec():
                     },
                 }
             },
-            "/api/actions/discord": {
-                "post": {
-                    "operationId": "send_discord_notification",
-                    "summary": "Send a Discord notification",
-                    "description": "Sends a message to Discord via the configured webhook (DISCORD_WEBHOOK_URL setting).",
-                    "requestBody": {
-                        "required": True,
-                        "content": {"application/json": {"schema": {
-                            "type": "object",
-                            "required": ["message"],
-                            "properties": {
-                                "message": {"type": "string", "description": "Message content"},
-                                "username": {"type": "string", "description": "Override bot display name"},
-                            },
-                        }}},
-                    },
-                    "responses": {"200": {"description": "Notification sent"}},
-                }
-            },
-            "/api/actions/telegram": {
-                "post": {
-                    "operationId": "send_telegram_notification",
-                    "summary": "Send a Telegram notification",
-                    "description": "Sends a message to Telegram via the Bot API (requires TELEGRAM_BOT_TOKEN; optional TELEGRAM_CHAT_ID in env for one-way notifications).",
-                    "requestBody": {
-                        "required": True,
-                        "content": {"application/json": {"schema": {
-                            "type": "object",
-                            "required": ["message"],
-                            "properties": {
-                                "message": {"type": "string", "description": "Message content"},
-                            },
-                        }}},
-                    },
-                    "responses": {"200": {"description": "Notification sent"}},
-                }
-            },
         },
         "components": {
             "schemas": {
@@ -1217,13 +1009,10 @@ def openapi_spec():
 # Keys that should be masked when returned to the frontend
 _SENSITIVE_KEYS = {
     'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY',
-    'TELEGRAM_BOT_TOKEN',
 }
 
 # All known setting keys (for the settings page)
 _KNOWN_SETTINGS = [
-    'DISCORD_WEBHOOK_URL',
-    'TELEGRAM_BOT_TOKEN',
     'GOOGLE_API_KEY',
     'OPENAI_API_KEY',
     'OPENROUTER_API_KEY',
@@ -1282,275 +1071,9 @@ def update_setting(key):
         db.set_setting(key, value)
         os.environ[key] = value
         
-        # Auto-start Telegram polling if the token was just set and isn't running yet
-        if key == 'TELEGRAM_BOT_TOKEN':
-            _ensure_telegram_polling()
-        
         return jsonify({'status': 'saved', 'key': key})
     except Exception as e:
         flask_logger.error(f"Failed to update setting {key}: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/settings/test/discord', methods=['POST'])
-def test_discord_webhook():
-    """Send a test message to the configured Discord webhook."""
-    try:
-        webhook_url = os.getenv('DISCORD_WEBHOOK_URL', '')
-        if not webhook_url:
-            return jsonify({'status': 'error', 'message': 'Discord webhook URL is not configured'}), 400
-        
-        test_payload = {
-            'content': 'Test notification from VideoMemory — your webhook is working!',
-            'username': 'VideoMemory'
-        }
-        
-        resp = http_requests.post(webhook_url, json=test_payload, timeout=10)
-        
-        if resp.status_code == 204:
-            return jsonify({'status': 'success', 'message': 'Test message sent successfully!'})
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Discord returned status {resp.status_code}'
-            }), 400
-    except http_requests.exceptions.Timeout:
-        return jsonify({'status': 'error', 'message': 'Request timed out'}), 504
-    except Exception as e:
-        flask_logger.error(f"Discord test failed: {e}", exc_info=True)
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-# ── Telegram bot info (for "Open in Telegram" link) ─────────────
-
-@app.route('/api/telegram/bot-info', methods=['GET'])
-def telegram_bot_info():
-    """Return the bot's t.me link if TELEGRAM_BOT_TOKEN is set. Uses Telegram getMe to resolve username."""
-    try:
-        bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
-        if not bot_token:
-            return jsonify({'ok': False})
-        resp = http_requests.get(
-            f'https://api.telegram.org/bot{bot_token}/getMe',
-            timeout=5,
-        )
-        if not resp.ok:
-            return jsonify({'ok': False})
-        data = resp.json()
-        if not data.get('ok'):
-            return jsonify({'ok': False})
-        username = (data.get('result') or {}).get('username')
-        if not username:
-            return jsonify({'ok': False})
-        return jsonify({
-            'ok': True,
-            'url': f'https://t.me/{username}',
-            'username': username,
-        })
-    except Exception:
-        return jsonify({'ok': False})
-
-# ── Telegram two-way chat (admin agent via Telegram) ───────────
-
-def _get_or_create_telegram_session(chat_id: int) -> str:
-    """Get or create an admin-agent session for this Telegram chat. Returns session_id."""
-    session_id = f"telegram_{chat_id}"
-
-    async def _ensure():
-        session = await session_service.get_session(
-            app_name=app_name, user_id=USER_ID, session_id=session_id
-        )
-        if session is None:
-            await session_service.create_session(
-                app_name=app_name, user_id=USER_ID, session_id=session_id
-            )
-            db.save_session_metadata(session_id, title="Telegram")
-        return session_id
-
-    return run_async(_ensure(), timeout=15)
-
-
-def _run_agent_for_message(session_id: str, user_message: str) -> str:
-    """Run the admin agent with the given message in the given session; return reply text."""
-    content = types.Content(role="user", parts=[types.Part(text=user_message)])
-    final_response_text = "No response received"
-
-    async def get_response():
-        nonlocal final_response_text
-        gen = runner.run_async(
-            user_id=USER_ID,
-            session_id=session_id,
-            new_message=content,
-        )
-        try:
-            async for event in gen:
-                if event.is_final_response():
-                    if event.content and event.content.parts:
-                        final_response_text = event.content.parts[0].text
-                    break
-        finally:
-            await gen.aclose()
-
-    run_async(get_response(), timeout=60)
-    return final_response_text
-
-
-def _send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:
-    """Send a text message to a Telegram chat. Returns True on success."""
-    try:
-        resp = http_requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": text},
-            timeout=10,
-        )
-        return resp.ok and resp.json().get("ok", False)
-    except Exception as e:
-        flask_logger.error(f"Telegram sendMessage failed: {e}", exc_info=True)
-        return False
-
-
-def _process_telegram_update(update: dict) -> None:
-    """Process one Telegram update: run agent, send reply. Runs in background thread."""
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    if not bot_token:
-        return
-    message = update.get("message") or update.get("edited_message")
-    if not message:
-        return
-    chat = message.get("chat", {})
-    chat_id = chat.get("id")
-    text = (message.get("text") or "").strip()
-    if chat_id is None or not text:
-        return
-    # Use this chat for one-way notifications (read from DB when TELEGRAM_CHAT_ID is not set)
-    try:
-        db.set_setting("TELEGRAM_NOTIFICATION_CHAT_ID", str(chat_id))
-    except Exception as e:
-        flask_logger.debug(f"Could not save Telegram notification chat_id: {e}")
-    try:
-        session_id = _get_or_create_telegram_session(chat_id)
-        reply = _run_agent_for_message(session_id, text)
-        # Telegram message length limit is 4096
-        if len(reply) > 4096:
-            reply = reply[:4093] + "..."
-        _send_telegram_message(bot_token, chat_id, reply)
-    except Exception as e:
-        flask_logger.error(f"Telegram update processing failed: {e}", exc_info=True)
-        _send_telegram_message(
-            bot_token,
-            chat_id,
-            f"Sorry, something went wrong: {str(e)[:500]}",
-        )
-
-
-@app.route("/api/telegram/webhook", methods=["POST"])
-def telegram_webhook():
-    """Receive Telegram updates (set bot webhook to this URL). Returns 200 immediately; processes in background."""
-    data = request.get_json(silent=True) or {}
-    # Return 200 quickly so Telegram doesn't retry
-    threading.Thread(target=_process_telegram_update, args=(data,), daemon=True).start()
-    return "", 200
-
-
-def _telegram_polling_loop():
-    """Long-poll Telegram getUpdates and process messages. Run in a daemon thread."""
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    if not bot_token:
-        return
-    last_update_id = 0
-    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
-    flask_logger.info("Telegram polling started — you can chat with the admin agent via Telegram.")
-    while True:
-        try:
-            resp = http_requests.get(
-                url,
-                params={"offset": last_update_id, "timeout": 30},
-                timeout=35,
-            )
-            if not resp.ok:
-                continue
-            data = resp.json()
-            if not data.get("ok"):
-                continue
-            for update in data.get("result", []):
-                last_update_id = update.get("update_id", 0) + 1
-                _process_telegram_update(update)
-        except Exception as e:
-            flask_logger.debug(f"Telegram polling error: {e}")
-        except Exception:
-            break
-
-
-_telegram_poll_thread = None
-
-def _ensure_telegram_polling():
-    """Start the Telegram polling thread if a token is set and it isn't already running."""
-    global _telegram_poll_thread
-    if _telegram_poll_thread and _telegram_poll_thread.is_alive():
-        return
-    if not os.getenv("TELEGRAM_BOT_TOKEN", "").strip():
-        return
-    _telegram_poll_thread = threading.Thread(
-        target=_telegram_polling_loop,
-        daemon=True,
-        name="TelegramPolling",
-    )
-    _telegram_poll_thread.start()
-
-# Start on boot if token is already available
-_ensure_telegram_polling()
-
-# ── Chat API ──────────────────────────────────────────────────
-
-@app.route('/chat', methods=['POST'])
-def chat():
-    """Handle chat messages."""
-    data = request.json
-    user_message = data.get('message', '').strip()
-    session_id = data.get('session_id', '').strip()
-    
-    if not user_message:
-        return jsonify({'error': 'Message cannot be empty'}), 400
-    
-    if not session_id:
-        return jsonify({'error': 'session_id is required'}), 400
-    
-    try:
-        # Update session title with first message (if still untitled)
-        meta = db.get_session_metadata(session_id)
-        if meta and not meta['title']:
-            title = user_message[:60].strip()
-            if len(user_message) > 60:
-                title += '...'
-            db.update_session_title(session_id, title)
-        
-        # Run the agent and get response using the background event loop
-        content = types.Content(role='user', parts=[types.Part(text=user_message)])
-        
-        final_response_text = "No response received"
-        async def get_response():
-            nonlocal final_response_text
-            # Use async generator properly with try/finally to ensure cleanup
-            gen = runner.run_async(
-                user_id=USER_ID,
-                session_id=session_id,
-                new_message=content
-            )
-            try:
-                async for event in gen:
-                    if event.is_final_response():
-                        if event.content and event.content.parts:
-                            final_response_text = event.content.parts[0].text
-                        break
-            finally:
-                # Properly close the async generator to avoid resource leaks
-                await gen.aclose()
-
-        # Run the coroutine in the background loop
-        future = asyncio.run_coroutine_threadsafe(get_response(), background_loop)
-        future.result(timeout=60)  # 60 second timeout
-        
-        return jsonify({'response': final_response_text})
-    
-    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

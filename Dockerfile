@@ -18,7 +18,6 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock ./
 COPY videomemory ./videomemory
 COPY flask_app ./flask_app
-COPY admin_gateway_replica ./admin_gateway_replica
 COPY rtmp-server ./rtmp-server
 COPY deploy ./deploy
 COPY tests ./tests

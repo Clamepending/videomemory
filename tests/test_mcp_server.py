@@ -51,13 +51,6 @@ class FakeApi:
     def update_setting(self, key, value):
         return {"status": "saved", "key": key, "value": value}
 
-    def send_telegram(self, message):
-        return {"status": "success", "message": message}
-
-    def send_discord(self, message, username=None):
-        return {"status": "success", "message": message, "username": username}
-
-
 class McpServerTests(unittest.TestCase):
     def setUp(self):
         self.server = VideoMemoryMcpServer(FakeApi())

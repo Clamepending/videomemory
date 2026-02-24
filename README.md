@@ -1,6 +1,6 @@
 # VideoMemory
 
-A video monitoring system that uses vision-language models to analyse camera feeds. You create **tasks** describing what to watch for, and the system continuously analyses the video stream — counting events, detecting conditions, and triggering actions like Discord notifications.
+A video monitoring system that uses vision-language models to analyse camera feeds. You create **tasks** describing what to watch for, and the system continuously analyses the video stream.
 
 ## Quick Start
 
@@ -8,7 +8,36 @@ A video monitoring system that uses vision-language models to analyse camera fee
 ./start.sh
 ```
 
-This launches MediaMTX and VideoMemory together for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab. Chat with the admin agent in the **Chat** tab to manage the system through natural conversation, or browse your cameras and monitoring tasks directly in the **Devices** and **Tasks** tabs.
+This launches MediaMTX and VideoMemory together for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
+
+## Core + external agent architecture
+
+VideoMemory is the **core ingest/task service**. Run your conversational/admin agent separately and integrate it using the VideoMemory HTTP API, webhook callbacks, and MCP server.
+
+Integration contract:
+
+- [docs/agent-integration-contract.md](docs/agent-integration-contract.md)
+
+Run VideoMemory core with MCP:
+
+```bash
+docker compose -f docker-compose.core.yml up --build
+```
+
+Then launch OpenClaw (or your own admin gateway/agent) separately and connect it to VideoMemory.
+
+### Testing flow options
+
+- **Core only (bring your own external service):**
+  - `docker compose -f docker-compose.core.yml up --build`
+- **Core + OpenClaw:**
+  - `docker compose -f docker-compose.openclaw.yml up --build`
+  - `bash deploy/test-openclaw-stack.sh`
+- **Core + local AdminAgent (from sibling repo `../adminagent`):**
+  - `docker compose -f docker-compose.adminagent.yml up --build`
+  - `bash deploy/test-adminagent-stack.sh`
+
+AdminAgent repository: `https://github.com/Clamepending/adminagent.git`
 
 ## One-click cloud deployment (Fly.io)
 
@@ -22,19 +51,16 @@ After deployment:
 2. Go to **Settings** and set `GOOGLE_API_KEY` (or another supported provider key).
 3. Go to **Devices** → **Create RTMP camera** and copy the generated RTMP URL.
 4. Paste that URL into the Android app and start streaming.
-5. Create tasks for that camera by talking in chat.
-6. Link Telegram to talk to the system from telegram.
+5. Create tasks for that camera through the VideoMemory UI or API.
+6. Optionally connect an external agent that calls VideoMemory's API.
 
 Recommended for RTMP stability: keep a single Fly machine for this app (`fly scale count 1`).
 If Fly asks to create a volume during deploy, accept it (the app stores SQLite data at `/app/data`).
 
-## Telegram
+## Notifications and external actions
 
-Text the system from anywhere — your phone, laptop, tablet — through Telegram. Send messages and receive real-time updates from your monitoring tasks on any device, wherever you are.
-
-Create a bot with **@BotFather** in Telegram, paste the **Bot Token** in Settings, then restart the app. Open a chat with your bot and send a message to add tasks, list devices, and so on. The app uses long polling by default (no public URL needed). With a public URL you can set the bot webhook to `https://your-server/api/telegram/webhook` instead.
-
-<video src="https://private-user-images.githubusercontent.com/57735073/551389107-97940b8e-33de-4dd1-84c1-0171b7d5146e.mov?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzEzOTk1NTUsIm5iZiI6MTc3MTM5OTI1NSwicGF0aCI6Ii81NzczNTA3My81NTEzODkxMDctOTc5NDBiOGUtMzNkZS00ZGQxLTg0YzEtMDE3MWI3ZDUxNDZlLm1vdj9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMTglMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjE4VDA3MjA1NVomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWExNzYxMzBkYTc0NTc0YzAxMjQ4OTA5YzliMzcyOTQyNzY2OGU1N2Q3ODFiM2NhNDRlNjc5OTllZmZhYmNmNTMmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.pNsHNw0P10xd3ve2Q5nq_hlI9Rc08MyeVEEu3yT7CaY" controls width="640"></video>
+VideoMemory core focuses on video ingestion and tasking. Notification/chat channels
+(Telegram, SMS, email workflows, etc.) should be handled by external agent services.
 
 ## Mobile camera (Android)
 
@@ -51,16 +77,6 @@ Use your Android phone as a wireless camera: the phone pushes video via **RTMP**
 4. Create tasks for that device as usual.
 
 Replace `YOUR_PC_IP` with the LAN IP of the machine running MediaMTX (e.g. `192.168.1.42`). Phone and VideoMemory must be on the same LAN as that machine.
-
-## CLI Mode
-
-```bash
-uv run videomemory/main.py
-```
-
-Same admin agent, but in your terminal. Requires a `GOOGLE_API_KEY` environment variable or `.env` file.
-
----
 
 ## Raspberry Pi Deployment
 

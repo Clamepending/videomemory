@@ -2,7 +2,7 @@
 
 VideoMemory is a video monitoring system. You create **tasks** for camera input devices, and the system analyses the video feed using vision-language models to fulfil those tasks (counting events, detecting conditions, triggering actions, etc.).
 
-This document describes how to run the server and interact with it via HTTP to act as a **stand-in for the admin agent**.
+This document describes how to run the VideoMemory **core service** and interact with it via HTTP/MCP from an external agent or gateway.
 
 ## Quick Start
 
@@ -13,6 +13,12 @@ uv run flask_app/app.py
 ```
 
 The server is available at `http://localhost:5050` (or at the host's IP on port 5050 if deployed on a remote machine like a Raspberry Pi). API keys are configured via the Settings tab in the web UI, or via `PUT /api/settings/{key}` (see Configuration section below).
+
+For local integration testing, choose one stack:
+
+- Core only: `docker compose -f docker-compose.core.yml up --build`
+- Core + OpenClaw: `docker compose -f docker-compose.openclaw.yml up --build`
+- Core + AdminAgent (sibling repo): `docker compose -f docker-compose.adminagent.yml up --build`
 
 ## OpenAPI Spec
 
@@ -133,54 +139,12 @@ Permanently removes a task and all its notes. Only use when you want to erase a 
 
 ---
 
-### Actions
+### External agent integration
 
-#### Send Discord notification
+Run your conversational/admin agent separately and have it call VideoMemory APIs.
 
-```
-POST /api/actions/discord
-```
-
-**Body:** `{"message": "Alert: motion detected", "username": "VideoMemory"}`
-
-Requires `DISCORD_WEBHOOK_URL` to be configured (via settings API or environment variable).
-
-#### Send Telegram notification
-
-```
-POST /api/actions/telegram
-```
-
-**Body:** `{"message": "Alert: motion detected"}`
-
-Requires `TELEGRAM_BOT_TOKEN`. The notification is sent to the chat where you last messaged the bot (no extra config). Optionally set `TELEGRAM_CHAT_ID` in the environment to fix the destination chat.
-
-### Telegram two-way chat (admin agent)
-
-Users can chat with the same admin agent through Telegram (same capabilities as the web Chat tab). Two options:
-
-- **Long polling (default)** — If `TELEGRAM_BOT_TOKEN` is set, the server starts a background thread that polls Telegram for new messages. No public URL needed; restart the app after setting the token.
-- **Webhook** — Set the bot’s webhook to `https://your-server/api/telegram/webhook`. Telegram will POST updates to that URL. Respond with 200 quickly; the server processes the message and sends the agent’s reply in the background.
-
-Each Telegram chat gets its own session (conversation state). For one-way notifications (e.g. from task conditions), the app uses the chat where you last sent a message to the bot, so you only need the bot token.
-
----
-
-### Chat (Admin Agent Proxy)
-
-If you want to send a natural-language message to the LLM-powered admin agent (instead of calling the tool endpoints directly), use:
-
-```
-POST /chat
-```
-
-**Body:** `{"message": "Add a task to count people on camera 0", "session_id": "my_session"}`
-
-You must first create a session:
-
-```
-POST /api/sessions/new  ->  {"session_id": "chat_abc123"}
-```
+- HTTP contract and examples: `docs/agent-integration-contract.md`
+- OpenAPI schema: `GET /openapi.json`
 
 ---
 
@@ -192,7 +156,7 @@ POST /api/sessions/new  ->  {"session_id": "chat_abc123"}
 4. **Create a task:** `POST /api/tasks` with an `io_id` and `task_description`.
 5. **Monitor progress:** `GET /api/task/{task_id}` to read the notes (video analysis results).
 6. **Edit if needed:** `PUT /api/task/{task_id}` to amend the task description (e.g., add an action trigger).
-7. **Take actions:** Use `POST /api/actions/discord` or `POST /api/actions/telegram` to send notifications.
+7. **Handle external actions:** If you need notifications or messaging channels, use an external agent service.
 8. **Stop or delete:** `POST /api/task/{task_id}/stop` or `DELETE /api/task/{task_id}`.
 
 ## Error Format
@@ -252,8 +216,6 @@ Returns all settings with their status. Sensitive values are masked — check th
 | `OPENROUTER_API_KEY` | OpenRouter models (alternative) |
 | `ANTHROPIC_API_KEY` | Anthropic models (alternative) |
 | `VIDEO_INGESTOR_MODEL` | Which model to use for video analysis (default: `gemini-2.5-flash`) |
-| `DISCORD_WEBHOOK_URL` | Discord webhook for notifications |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token (from @BotFather); enables chat with the agent and one-way notifications to the chat where you messaged the bot (optional: set `TELEGRAM_CHAT_ID` in env to fix the notification chat) |
 
 #### Onboarding: setting keys on behalf of the user
 

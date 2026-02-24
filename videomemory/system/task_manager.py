@@ -7,21 +7,16 @@ from .io_manager import IOmanager
 from .task_types import NoteEntry, Task, STATUS_ACTIVE, STATUS_DONE, STATUS_TERMINATED
 from .database import TaskDatabase
 from .model_providers import BaseModelProvider, get_VLM_provider
-from google.adk.runners import Runner
-from google.adk.sessions import BaseSessionService
 logger = logging.getLogger('TaskManager')
 
 class TaskManager:
     """Manages tasks and their associations with IO streams."""
     
-    def __init__(self, io_manager: IOmanager = None, action_runner: Runner = None, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", model_provider: Optional[BaseModelProvider] = None, db: Optional[TaskDatabase] = None, on_detection_event: Optional[Callable[[Task, Optional[NoteEntry]], None]] = None):
+    def __init__(self, io_manager: IOmanager = None, model_provider: Optional[BaseModelProvider] = None, db: Optional[TaskDatabase] = None, on_detection_event: Optional[Callable[[Task, Optional[NoteEntry]], None]] = None):
         """Initialize the task manager.
         
         Args:
             io_manager: Optional IO manager instance for checking stream categories
-            action_runner: Optional Runner for executing actions, shared with video ingestors
-            session_service: Optional session service used by the runner (required for video ingestor sessions)
-            app_name: The app name used by the runner (must match the runner's app_name)
             model_provider: Optional model provider for ML inference. If None, defaults to Gemini25FlashProvider.
             db: Optional TaskDatabase instance for persistent storage. If None, tasks are in-memory only.
             on_detection_event: Optional callback(task, new_note) fired when VLM emits a task update.
@@ -29,9 +24,6 @@ class TaskManager:
         self._tasks: Dict[str, Task] = {}  # task_id -> Task object
         self._io_manager = io_manager
         self._ingestors: Dict[str, VideoStreamIngestor] = {}  # io_id -> ingestor instance
-        self._action_runner = action_runner
-        self._session_service = session_service
-        self._app_name = app_name
         self._task_counter = 0  # Counter for task IDs, starting from 0
         self._db = db
         self._on_detection_event_cb = on_detection_event
@@ -179,10 +171,7 @@ class TaskManager:
             
             self._ingestors[io_id] = VideoStreamIngestor(
                 camera_source, 
-                action_runner=self._action_runner,
                 model_provider=self._model_provider,
-                session_service=self._session_service,
-                app_name=self._app_name,
                 on_task_updated=self._on_task_updated,
                 on_detection_event=self._emit_detection_event,
             )

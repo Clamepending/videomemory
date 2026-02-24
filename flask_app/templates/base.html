@@ -76,7 +76,6 @@
     <div class="menu-bar">
         <h1>VideoMemory</h1>
         <nav class="menu-nav">
-            <a href="/" id="nav-chat">Chat</a>
             <a href="/tasks" id="nav-tasks">Tasks</a>
             <a href="/devices" id="nav-devices">Devices</a>
             <a href="/settings" id="nav-settings">Settings</a>
@@ -90,8 +89,7 @@
         // Set active menu item based on current path
         const currentPath = window.location.pathname;
         const navMap = {
-            '/': 'nav-chat',
-            '/chat': 'nav-chat',
+            '/': 'nav-devices',
             '/tasks': 'nav-tasks',
             '/devices': 'nav-devices',
             '/settings': 'nav-settings'

@@ -133,15 +133,6 @@ class VideoMemoryApiClient:
     def update_setting(self, key: str, value: str) -> Dict[str, Any]:
         return self._request("PUT", f"/api/settings/{quote(key, safe='')}", json_body={"value": value})
 
-    def send_telegram(self, message: str) -> Dict[str, Any]:
-        return self._request("POST", "/api/actions/telegram", json_body={"message": message})
-
-    def send_discord(self, message: str, username: Optional[str] = None) -> Dict[str, Any]:
-        body = {"message": message}
-        if username:
-            body["username"] = username
-        return self._request("POST", "/api/actions/discord", json_body=body)
-
 
 class VideoMemoryMcpServer:
     """MCP request handler exposing VideoMemory tools/resources."""
@@ -316,29 +307,6 @@ class VideoMemoryMcpServer:
                     "additionalProperties": False,
                 },
                 "handler": lambda args: self.api.update_setting(key=args["key"], value=args["value"]),
-            },
-            "send_telegram_notification": {
-                "description": "Send a Telegram notification using VideoMemory's configured bot.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"message": {"type": "string"}},
-                    "required": ["message"],
-                    "additionalProperties": False,
-                },
-                "handler": lambda args: self.api.send_telegram(message=args["message"]),
-            },
-            "send_discord_notification": {
-                "description": "Send a Discord notification using VideoMemory's configured webhook.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "message": {"type": "string"},
-                        "username": {"type": "string"},
-                    },
-                    "required": ["message"],
-                    "additionalProperties": False,
-                },
-                "handler": lambda args: self.api.send_discord(message=args["message"], username=args.get("username")),
             },
         }
 
