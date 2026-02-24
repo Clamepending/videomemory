@@ -20,6 +20,7 @@ from google.genai import types
 import videomemory.agents
 import videomemory.system
 import videomemory.tools
+from videomemory.integrations import OpenClawWakeNotifier
 from videomemory.system.logging_config import setup_logging
 from videomemory.system.model_providers import get_VLM_provider
 from videomemory.system.database import TaskDatabase, get_default_data_dir
@@ -71,13 +72,15 @@ action_router_runner = Runner(
     session_service=session_service
 )
 model_provider = get_VLM_provider()
+openclaw_notifier = OpenClawWakeNotifier.from_env()
 task_manager = videomemory.system.TaskManager(
     io_manager=io_manager,
     action_runner=action_router_runner,
     session_service=session_service,
     app_name=app_name,
     model_provider=model_provider,
-    db=db
+    db=db,
+    on_detection_event=openclaw_notifier.notify_task_update,
 )
 
 # Set managers in tools

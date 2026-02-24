@@ -14,7 +14,7 @@ logger = logging.getLogger('TaskManager')
 class TaskManager:
     """Manages tasks and their associations with IO streams."""
     
-    def __init__(self, io_manager: IOmanager = None, action_runner: Runner = None, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", model_provider: Optional[BaseModelProvider] = None, db: Optional[TaskDatabase] = None):
+    def __init__(self, io_manager: IOmanager = None, action_runner: Runner = None, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", model_provider: Optional[BaseModelProvider] = None, db: Optional[TaskDatabase] = None, on_detection_event: Optional[Callable[[Task, Optional[NoteEntry]], None]] = None):
         """Initialize the task manager.
         
         Args:
@@ -24,6 +24,7 @@ class TaskManager:
             app_name: The app name used by the runner (must match the runner's app_name)
             model_provider: Optional model provider for ML inference. If None, defaults to Gemini25FlashProvider.
             db: Optional TaskDatabase instance for persistent storage. If None, tasks are in-memory only.
+            on_detection_event: Optional callback(task, new_note) fired when VLM emits a task update.
         """
         self._tasks: Dict[str, Task] = {}  # task_id -> Task object
         self._io_manager = io_manager
@@ -33,6 +34,7 @@ class TaskManager:
         self._app_name = app_name
         self._task_counter = 0  # Counter for task IDs, starting from 0
         self._db = db
+        self._on_detection_event_cb = on_detection_event
         
         # Get model provider from environment variable if not provided
         if model_provider is None:
@@ -181,7 +183,8 @@ class TaskManager:
                 model_provider=self._model_provider,
                 session_service=self._session_service,
                 app_name=self._app_name,
-                on_task_updated=self._on_task_updated
+                on_task_updated=self._on_task_updated,
+                on_detection_event=self._emit_detection_event,
             )
         
         # Create task with sequential ID starting from 0
@@ -226,6 +229,20 @@ class TaskManager:
             "io_id": io_id,
             "task_description": task_description,
         }
+
+    def _emit_detection_event(self, task: Task, new_note: Optional[NoteEntry] = None):
+        """Forward task detection updates to an optional integration callback."""
+        if not self._on_detection_event_cb:
+            return
+        try:
+            self._on_detection_event_cb(task, new_note)
+        except Exception as e:
+            logger.error(
+                "Detection event callback failed for task %s: %s",
+                getattr(task, "task_id", None),
+                e,
+                exc_info=True,
+            )
     
     def get_task(self, task_id: str) -> Optional[Dict]:
         """Get task information by task_id, including current notes and status.

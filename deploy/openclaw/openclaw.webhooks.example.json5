@@ -1,0 +1,34 @@
+// Example OpenClaw config fragment for VideoMemory wakeups.
+// Merge into ~/.openclaw/openclaw.json (JSON5 syntax supported by OpenClaw).
+{
+  hooks: {
+    enabled: true,
+    token: "${OPENCLAW_HOOKS_TOKEN}",
+    path: "/hooks",
+    defaultSessionKey: "hook:videomemory",
+    allowRequestSessionKey: false,
+    allowedSessionKeyPrefixes: ["hook:"],
+    mappings: [
+      {
+        match: { path: "videomemory-alert" },
+        action: "agent",
+        wakeMode: "now",
+        sessionKey: "hook:videomemory",
+        name: "VideoMemory Alert",
+        // VideoMemory POSTs structured JSON with task_id/io_id/task_description/note
+        messageTemplate: "VISION ALERT on device {{io_id}} (task {{task_id}}): {{note}}\nTask: {{task_description}}",
+      },
+    ],
+  },
+
+  // OpenClaw MCP syntax varies by release. If your build supports native MCP,
+  // adapt a section like this (verify against your version docs):
+  // mcp: {
+  //   servers: {
+  //     videomemory: {
+  //       transport: "http",
+  //       url: "http://videomemory:8765/mcp",
+  //     },
+  //   },
+  // },
+}

@@ -1,0 +1,48 @@
+services:
+  videomemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: videomemory
+    restart: unless-stopped
+    command: ["bash", "/app/deploy/start-with-mcp.sh"]
+    environment:
+      PORT: "5050"
+      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-videomemory}"
+      VIDEOMEMORY_RTSP_PULL_PORT: "8554"
+      VIDEOMEMORY_MCP_PORT: "8765"
+      # Point VideoMemory wakeups at the safe gateway replica instead of OpenClaw
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_URL: "http://admin-gateway-replica:18789/hooks/videomemory-alert"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${GATEWAY_TOKEN:-change-me}"
+      VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S: "30"
+      VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S: "1"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+    ports:
+      - "5050:5050"   # Frontend + API + Google ADK admin agent via /chat
+      - "8765:8765"   # VideoMemory MCP HTTP endpoint
+      - "1935:1935"   # RTMP push from Android
+      - "8554:8554"   # RTSP pull for VideoMemory ingest
+    volumes:
+      - videomemory-data:/root/.local/share/videomemory
+
+  admin-gateway-replica:
+    build:
+      context: .
+      dockerfile: admin_gateway_replica/Dockerfile
+    container_name: admin-gateway-replica
+    restart: unless-stopped
+    environment:
+      PORT: "18789"
+      GATEWAY_HOOK_PATH: "videomemory-alert"
+      GATEWAY_TOKEN: "${GATEWAY_TOKEN:-change-me}"
+      GATEWAY_FORWARD_TO_VIDEOMEMORY_CHAT: "1"
+      VIDEOMEMORY_BASE_URL: "http://videomemory:5050"
+      # Optional: pin a session id instead of auto-creating one
+      # VIDEOMEMORY_AGENT_SESSION_ID: "chat_fixed"
+    depends_on:
+      - videomemory
+    ports:
+      - "18789:18789"
+
+volumes:
+  videomemory-data:

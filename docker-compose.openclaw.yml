@@ -1,0 +1,44 @@
+services:
+  videomemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: videomemory
+    restart: unless-stopped
+    command: ["bash", "/app/deploy/start-with-mcp.sh"]
+    environment:
+      PORT: "5050"
+      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-videomemory}"
+      VIDEOMEMORY_RTSP_PULL_PORT: "8554"
+      VIDEOMEMORY_MCP_PORT: "8765"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_URL: "http://openclaw:18789/hooks/videomemory-alert"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${OPENCLAW_HOOKS_TOKEN:-}"
+      VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S: "30"
+      VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S: "1"
+      # Set at least one model key before creating tasks (example)
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+    ports:
+      - "5050:5050"
+      - "8765:8765"
+      - "1935:1935"
+      - "8554:8554"
+    volumes:
+      - videomemory-data:/root/.local/share/videomemory
+
+  openclaw:
+    image: ${OPENCLAW_IMAGE:-andreaskasper/openclaw:latest}
+    container_name: openclaw
+    restart: unless-stopped
+    environment:
+      OPENCLAW_HOOKS_TOKEN: "${OPENCLAW_HOOKS_TOKEN:-change-me}"
+    ports:
+      - "18789:18789"
+    volumes:
+      - openclaw-data:/home/openclaw/.openclaw
+      - ./deploy/openclaw:/config-examples:ro
+    depends_on:
+      - videomemory
+
+volumes:
+  videomemory-data:
+  openclaw-data:

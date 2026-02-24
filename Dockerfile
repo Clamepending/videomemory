@@ -18,17 +18,19 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock ./
 COPY videomemory ./videomemory
 COPY flask_app ./flask_app
+COPY admin_gateway_replica ./admin_gateway_replica
 COPY rtmp-server ./rtmp-server
 COPY deploy ./deploy
+COPY tests ./tests
 
 RUN uv sync --frozen --no-dev
 
-ARG MEDIAMTX_VERSION=1.15.3
-RUN curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_amd64.tar.gz" \
+ARG MEDIAMTX_VERSION=1.16.2
+RUN curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/mediamtx_v${MEDIAMTX_VERSION}_linux_amd64.tar.gz" \
     | tar -xz -C /usr/local/bin mediamtx
 
-RUN chmod +x /usr/local/bin/mediamtx /app/deploy/start-cloud.sh
+RUN chmod +x /usr/local/bin/mediamtx /app/deploy/start-cloud.sh /app/deploy/start-with-mcp.sh
 
-EXPOSE 5050 1935 8554
+EXPOSE 5050 8765 1935 8554
 
 CMD ["bash", "/app/deploy/start-cloud.sh"]

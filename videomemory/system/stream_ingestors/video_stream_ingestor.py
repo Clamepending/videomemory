@@ -52,7 +52,7 @@ class VideoIngestorOutput(BaseModel):
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
     
-    def __init__(self, camera_source, action_runner: Runner, model_provider: BaseModelProvider, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None):
+    def __init__(self, camera_source, action_runner: Runner, model_provider: BaseModelProvider, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None, on_detection_event=None):
         """Initialize the video stream ingestor.
         
         Args:
@@ -65,6 +65,7 @@ class VideoStreamIngestor:
                               Default is (640, 480) for lower bandwidth and faster processing.
             model_provider: Model provider instance for ML inference.
             on_task_updated: Optional callback(task, new_note) called when a task is modified by the ingestor.
+            on_detection_event: Optional callback(task, new_note) called for task_updates emitted by VLM inference.
         """
         self.camera_source = camera_source
         self.is_network_stream = isinstance(camera_source, str)
@@ -108,6 +109,7 @@ class VideoStreamIngestor:
         
         # Callback for persisting task changes (set by TaskManager)
         self._on_task_updated = on_task_updated
+        self._on_detection_event = on_detection_event
         
         logger.info(f"Initialized for camera index={self.camera_index}")
  
@@ -485,7 +487,10 @@ class VideoStreamIngestor:
                 newest_note = task.task_note[-1]
             else:
                 newest_note = NoteEntry(content="None", timestamp=time.time())
-            tasks_lines.append(f"<task_newest_note timestamp=\"{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))}\">{newest_note.content}</task_newest_note>")
+            note_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))
+            tasks_lines.append(
+                f"<task_newest_note timestamp=\"{note_time}\">{newest_note.content}</task_newest_note>"
+            )
             
             # # Build note history section
             # # Only include the last 3 task notes to prevent prompt from growing too large
@@ -659,6 +664,11 @@ When task says "notify me on Telegram when I hold up X" and you see X: [{task_nu
                         self._on_task_updated(task, new_note)
                     except Exception as e:
                         logger.error(f"Failed to persist task update: {e}")
+                if self._on_detection_event and (new_note or update.get("task_done")):
+                    try:
+                        self._on_detection_event(task, new_note)
+                    except Exception as e:
+                        logger.error(f"Failed to emit detection event: {e}")
         
         # Tasks that were updated this round (for attaching "action taken" notes)
         updated_tasks = []
