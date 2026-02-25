@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start MediaMTX (RTMP/RTSP relay) and VideoMemory in one command for local testing.
 # Usage: ./start.sh
-# Then open http://localhost:${PORT:-5060} (or https if SSL_ADHOC=1),
+# Then open http://localhost:${PORT:-5050} (or https if SSL_ADHOC=1),
 # go to Devices, click "Create RTMP camera", paste the URL in the Android app.
 
 set -e
@@ -46,7 +46,7 @@ else
 fi
 
 # Run VideoMemory (Flask)
-PORT="${PORT:-5060}"
+PORT="${PORT:-5050}"
 SSL_ADHOC="${SSL_ADHOC:-0}"
 PROTO="http"
 if [[ "$SSL_ADHOC" == "1" ]]; then

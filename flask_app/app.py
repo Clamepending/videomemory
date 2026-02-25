@@ -1437,7 +1437,7 @@ def update_setting(key):
 
 if __name__ == '__main__':
     debug = os.getenv('FLASK_DEBUG', '0') == '1'
-    port = int(os.getenv('PORT', '5060'))
+    port = int(os.getenv('PORT', '5050'))
     host = os.getenv('HOST', '0.0.0.0')
     ssl_adhoc = os.getenv('SSL_ADHOC', '0') == '1'
     ssl_cert = os.getenv('SSL_CERT_FILE', '').strip()

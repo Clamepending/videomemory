@@ -39,6 +39,100 @@ Then launch OpenClaw (or your own admin gateway/agent) separately and connect it
 
 AdminAgent repository: `https://github.com/Clamepending/adminagent.git`
 
+## OpenClaw + VideoMemory demo (detailed)
+
+Use this when you want the full local demo stack: VideoMemory core + MediaMTX + MCP + OpenClaw gateway.
+
+### Prerequisites
+
+- Docker + Docker Compose plugin (`docker compose`)
+- At least one model API key for VideoMemory before creating tasks (recommended: `GOOGLE_API_KEY`)
+- Optional but recommended for OpenClaw agent responses: an LLM key supported by your OpenClaw setup (for example `ANTHROPIC_API_KEY`)
+
+### 1. Create a `.env` file (recommended)
+
+From the repo root, create a `.env` file so both containers share the same webhook token and API keys:
+
+```bash
+cat > .env <<'EOF'
+OPENCLAW_GATEWAY_TOKEN=change-this-token
+GOOGLE_API_KEY=your-google-api-key
+# Optional for OpenClaw agent completions (example)
+# ANTHROPIC_API_KEY=your-anthropic-api-key
+EOF
+```
+
+Notes:
+
+- `OPENCLAW_GATEWAY_TOKEN` must match between VideoMemory and OpenClaw (the compose file wires this automatically from `.env`).
+- If you omit `GOOGLE_API_KEY` here, you can still set it later in the VideoMemory UI (`Settings`) after the stack starts.
+
+### 2. Start the demo stack
+
+```bash
+docker compose -f docker-compose.openclaw.yml up --build
+```
+
+This starts:
+
+- `videomemory` on `http://localhost:5050`
+- VideoMemory MCP HTTP server on `http://localhost:8765/mcp`
+- `openclaw` gateway on `http://localhost:18789`
+- MediaMTX ingest ports (RTMP/RTSP/SRT/WHIP) via the `videomemory` container
+
+### 3. Verify the stack is up
+
+In another terminal:
+
+```bash
+bash deploy/test-openclaw-stack.sh
+```
+
+The smoke test checks:
+
+- VideoMemory health (`/api/health`)
+- MCP health (`/healthz`)
+- MCP initialization
+- RTMP camera creation API path
+
+You can also verify manually:
+
+- VideoMemory UI: `http://localhost:5050`
+- OpenClaw gateway: `http://localhost:18789`
+- VideoMemory OpenAPI spec: `http://localhost:5050/openapi.json`
+
+### 4. Finish setup in VideoMemory (if needed)
+
+If you did not set `GOOGLE_API_KEY` in `.env`:
+
+1. Open `http://localhost:5050`
+2. Go to **Settings**
+3. Set `GOOGLE_API_KEY` (or another supported provider key)
+4. Restart the stack so the key is picked up:
+
+```bash
+docker compose -f docker-compose.openclaw.yml restart videomemory
+```
+
+### 5. Run the demo flow
+
+1. In VideoMemory (`http://localhost:5050`), go to **Devices** and add a camera (local camera, RTMP camera, or network camera).
+2. Create a task describing what to monitor (for example, motion/person detection conditions).
+3. When VideoMemory generates a detection note, it posts a webhook to OpenClaw at `/hooks/videomemory-alert`.
+4. OpenClaw wakes the configured session (`hook:videomemory`) and receives the alert text.
+
+### 6. Stop the demo
+
+```bash
+docker compose -f docker-compose.openclaw.yml down
+```
+
+To also remove persisted volumes (VideoMemory/OpenClaw local data), use:
+
+```bash
+docker compose -f docker-compose.openclaw.yml down -v
+```
+
 ## One-click cloud deployment (Fly.io)
 
 [![Deploy to Fly.io](https://fly.io/button.svg)](https://fly.io/apps/new?repo=https://github.com/Clamepending/videomemory)
