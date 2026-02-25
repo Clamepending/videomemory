@@ -46,6 +46,33 @@
             margin-bottom: 20px;
         }
 
+        .contract-card {
+            background: #1f1f1f;
+            border: 1px solid #3a3a3a;
+            border-radius: 10px;
+            padding: 14px;
+            margin-top: 14px;
+        }
+
+        .contract-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #d0d0d0;
+            margin-bottom: 8px;
+        }
+
+        .contract-list {
+            margin: 0;
+            padding-left: 16px;
+            color: #a8a8a8;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .contract-list code {
+            color: #c7e4ff;
+        }
+
         /* ── Individual setting rows ───────────── */
         .setting-row {
             margin-bottom: 18px;
@@ -397,6 +424,19 @@
             <div class="restart-notice">
                 <span class="icon">&#9888;</span>
                 Webhook settings are applied immediately for new events. Restart is still recommended for consistency.
+            </div>
+
+            <div class="contract-card">
+                <div class="contract-title">Integration Agreement (How data flows)</div>
+                <ul class="contract-list">
+                    <li><strong>Agent -&gt; VideoMemory:</strong> Your agent can call VideoMemory over HTTP (<code>/api/*</code>) or MCP (<code>/mcp</code>).</li>
+                    <li><strong>MCP endpoint:</strong> <code>http://localhost:8765/mcp</code> (default in docker stack).</li>
+                    <li><strong>Core API base:</strong> <code>http://localhost:5050</code> (or your configured PORT).</li>
+                    <li><strong>Typical agent calls:</strong> <code>GET /api/devices</code>, <code>POST /api/tasks</code>, <code>GET /api/task/{id}</code>.</li>
+                    <li><strong>VideoMemory -&gt; Agent:</strong> On detections, VideoMemory POSTs <code>task_update</code> JSON to the configured webhook URL.</li>
+                    <li><strong>Auth:</strong> If token is set, callback includes <code>Authorization: Bearer ...</code>.</li>
+                    <li><strong>Tuning:</strong> Use timeout, dedupe TTL, and min interval fields above to control callback behavior.</li>
+                </ul>
             </div>
         </div>
     </div>

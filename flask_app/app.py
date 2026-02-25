@@ -59,6 +59,47 @@ task_manager = videomemory.system.TaskManager(
 # Set managers in tools
 videomemory.tools.tasks.set_managers(io_manager, task_manager)
 
+# Per-device preview stream FPS state (used by Devices page UI).
+_preview_fps_lock = threading.Lock()
+_preview_fps_state = {}
+
+
+def _record_preview_frame(io_id: str) -> None:
+    import time
+    now = time.monotonic()
+    with _preview_fps_lock:
+        state = _preview_fps_state.get(io_id)
+        if state is None:
+            _preview_fps_state[io_id] = {
+                "window_start": now,
+                "frames": 1,
+                "fps": 0.0,
+                "last_frame_at": now,
+            }
+            return
+
+        state["frames"] += 1
+        state["last_frame_at"] = now
+        elapsed = now - state["window_start"]
+        if elapsed >= 1.0:
+            instant_fps = state["frames"] / max(0.001, elapsed)
+            state["fps"] = (state["fps"] * 0.7 + instant_fps * 0.3) if state["fps"] > 0 else instant_fps
+            state["window_start"] = now
+            state["frames"] = 0
+
+
+def _get_preview_fps(io_id: str) -> float:
+    import time
+    now = time.monotonic()
+    with _preview_fps_lock:
+        state = _preview_fps_state.get(io_id)
+        if not state:
+            return 0.0
+        last_age = now - state.get("last_frame_at", 0.0)
+        if last_age > 3.0:
+            return 0.0
+        return float(state.get("fps", 0.0))
+
 # Create a persistent event loop in a background thread
 # This allows async tasks (like video ingestor) to run continuously
 background_loop = None
@@ -716,6 +757,7 @@ def get_device_preview_stream(io_id):
                                 cap_source = None
 
                 if frame_data is not None:
+                    _record_preview_frame(io_id)
                     yield (
                         b"--" + boundary.encode("ascii") + b"\r\n"
                         b"Content-Type: image/jpeg\r\n"
@@ -739,6 +781,13 @@ def get_device_preview_stream(io_id):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.route('/api/device/<io_id>/preview/fps', methods=['GET'])
+def get_device_preview_fps(io_id):
+    """Return server-measured preview stream FPS for a device."""
+    fps = _get_preview_fps(io_id)
+    return jsonify({"io_id": io_id, "fps": round(fps, 2), "active": fps > 0})
 
 # ── Ingestor Debug API ────────────────────────────────────────
 
