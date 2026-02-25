@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+
+{% block title %}Documentation - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+        .docs-page {
+            width: 920px;
+            max-width: 100%;
+            padding: 30px 20px;
+            height: 100%;
+            overflow-y: auto;
+        }
+
+        .docs-page h2 {
+            font-size: 28px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 10px;
+        }
+
+        .docs-page .page-desc {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+
+        .docs-card {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 18px;
+        }
+
+        .docs-card h3 {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 10px;
+            color: #ececec;
+        }
+
+        .docs-card p,
+        .docs-card li {
+            font-size: 13px;
+            color: #b9b9b9;
+            line-height: 1.6;
+        }
+
+        .docs-card ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .port-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+            font-size: 12px;
+        }
+
+        .port-table th,
+        .port-table td {
+            border: 1px solid #404040;
+            padding: 10px;
+            vertical-align: top;
+            text-align: left;
+        }
+
+        .port-table th {
+            background: #242424;
+            color: #dcdcdc;
+            font-weight: 600;
+        }
+
+        .port-table td code {
+            color: #c7e4ff;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+        }
+
+        .muted {
+            color: #8a8a8a;
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="docs-page">
+        <h2>Documentation</h2>
+        <p class="page-desc">
+            Ports and endpoints exposed by VideoMemory for external agents/gateways.
+            Use this as the integration reference for any agent platform, then see the OpenClaw section at the end.
+        </p>
+
+        <div class="docs-card">
+            <h3>General Agent Access (Container-to-Container)</h3>
+            <p class="muted">
+                Inside Docker Compose, an external agent can reach the VideoMemory service by name
+                <code>videomemory</code>.
+            </p>
+            <table class="port-table">
+                <thead>
+                    <tr>
+                        <th>Destination</th>
+                        <th>Port/Proto</th>
+                        <th>Purpose</th>
+                        <th>Example</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>VideoMemory HTTP API</td>
+                        <td><code>5050/tcp</code></td>
+                        <td>Core API for devices, tasks, and settings.</td>
+                        <td><code>http://videomemory:5050/api/health</code></td>
+                    </tr>
+                    <tr>
+                        <td>VideoMemory MCP</td>
+                        <td><code>8765/tcp</code></td>
+                        <td>MCP endpoint for tool calls (including one-off <code>analyze_feed</code>).</td>
+                        <td><code>http://videomemory:8765/mcp</code></td>
+                    </tr>
+                    <tr>
+                        <td>RTMP ingest</td>
+                        <td><code>1935/tcp</code></td>
+                        <td>Phone/camera push ingest endpoint (MediaMTX).</td>
+                        <td><code>rtmp://videomemory:1935/live/&lt;stream&gt;</code></td>
+                    </tr>
+                    <tr>
+                        <td>RTSP pull</td>
+                        <td><code>8554/tcp</code></td>
+                        <td>VideoMemory worker pull endpoint for stream processing.</td>
+                        <td><code>rtsp://videomemory:8554/live/&lt;stream&gt;</code></td>
+                    </tr>
+                    <tr>
+                        <td>SRT ingest</td>
+                        <td><code>8890/udp</code></td>
+                        <td>Low-latency/resilient ingest option.</td>
+                        <td><code>srt://videomemory:8890</code></td>
+                    </tr>
+                    <tr>
+                        <td>WebRTC/WHIP signaling</td>
+                        <td><code>8889/tcp</code></td>
+                        <td>WebRTC/WHIP ingest signaling endpoint.</td>
+                        <td><code>http://videomemory:8889/&lt;path&gt;/whip</code></td>
+                    </tr>
+                    <tr>
+                        <td>WebRTC ICE</td>
+                        <td><code>8189/udp</code></td>
+                        <td>UDP transport for WebRTC ICE/media.</td>
+                        <td><code>videomemory:8189/udp</code></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="docs-card">
+            <h3>Host Exposed Ports</h3>
+            <p class="muted">
+                These are published to your local machine by compose.
+            </p>
+            <table class="port-table">
+                <thead>
+                    <tr>
+                        <th>Service</th>
+                        <th>Host Port</th>
+                        <th>Use</th>
+                        <th>URL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>VideoMemory UI/API</td>
+                        <td><code>5050</code></td>
+                        <td>Core web UI and API.</td>
+                        <td><code>http://localhost:5050/</code></td>
+                    </tr>
+                    <tr>
+                        <td>VideoMemory MCP</td>
+                        <td><code>8765</code></td>
+                        <td>MCP HTTP server.</td>
+                        <td><code>http://localhost:8765/mcp</code></td>
+                    </tr>
+                    <tr>
+                        <td>External Agent Gateway (optional)</td>
+                        <td><code>18789</code></td>
+                        <td>Port commonly used by an agent gateway in the bundled test stack.</td>
+                        <td><code>http://localhost:18789/</code></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="docs-card">
+            <h3>General Webhook Contract (VideoMemory -> Agent)</h3>
+            <ul>
+                <li>VideoMemory sends task updates to the configured webhook URL.</li>
+                <li>Typical payload includes <code>task_id</code>, <code>io_id</code>, <code>task_description</code>, and <code>note</code>.</li>
+                <li>If token auth is enabled, VideoMemory sends <code>Authorization: Bearer &lt;token&gt;</code>.</li>
+                <li>Configure values from <code>Settings -&gt; External Agent Integration</code>.</li>
+            </ul>
+        </div>
+
+        <div class="docs-card">
+            <h3>OpenClaw-Specific Notes</h3>
+            <ul>
+                <li>In the bundled OpenClaw stack, VideoMemory sends alerts to <code>http://openclaw:18789/hooks/videomemory-alert</code>.</li>
+                <li>OpenClaw UI/Gateway is available on host port <code>18789</code> at <code>http://localhost:18789/</code>.</li>
+                <li>You can test the OpenClaw hook path from host via <code>http://localhost:18789/hooks/videomemory-alert</code>.</li>
+                <li>OpenClaw can call VideoMemory tools over MCP at <code>http://videomemory:8765/mcp</code> (container) or <code>http://localhost:8765/mcp</code> (host).</li>
+            </ul>
+        </div>
+    </div>
+{% endblock %}

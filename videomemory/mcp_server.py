@@ -75,6 +75,9 @@ class VideoMemoryApiClient:
     def list_devices(self) -> Dict[str, Any]:
         return self._request("GET", "/api/devices")
 
+    def analyze_feed(self, io_id: str, prompt: str) -> Dict[str, Any]:
+        return self._request("POST", f"/api/device/{quote(io_id, safe='')}/analyze", json_body={"prompt": prompt})
+
     def create_rtmp_camera(self, device_name: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
         body: Dict[str, Any] = {}
         if device_name:
@@ -156,6 +159,19 @@ class VideoMemoryMcpServer:
                 "description": "List available local and network camera devices grouped by category.",
                 "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
                 "handler": lambda args: self.api.list_devices(),
+            },
+            "analyze_feed": {
+                "description": "Run one-off analysis on the latest frame from a device using a custom prompt (no persistent task required).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "io_id": {"type": "string", "description": "Device id to analyze (camera/network device)."},
+                        "prompt": {"type": "string", "description": "Natural-language instruction for what to analyze in the frame."},
+                    },
+                    "required": ["io_id", "prompt"],
+                    "additionalProperties": False,
+                },
+                "handler": lambda args: self.api.analyze_feed(io_id=args["io_id"], prompt=args["prompt"]),
             },
             "create_rtmp_camera": {
                 "description": "Create a network camera entry and return an RTMP push URL for Android phones. VideoMemory will pull via RTSP automatically.",

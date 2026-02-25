@@ -16,6 +16,9 @@ class FakeApi:
     def create_rtmp_camera(self, device_name=None, name=None):
         return {"status": "success", "rtmp_url": "rtmp://videomemory:1935/live/front", "device": {"io_id": "net0"}}
 
+    def analyze_feed(self, io_id, prompt):
+        return {"status": "success", "io_id": io_id, "prompt": prompt, "analysis": "A person in a black hoodie is near the doorway."}
+
     def add_network_camera(self, url, name=None):
         return {"status": "success", "device": {"io_id": "net1", "url": url, "name": name}}
 
@@ -78,6 +81,18 @@ class McpServerTests(unittest.TestCase):
         result = resp["result"]
         self.assertFalse(result["isError"])
         self.assertEqual(result["structuredContent"]["task_id"], "1")
+
+    def test_tools_call_analyze_feed(self):
+        resp = self._call(
+            "tools/call",
+            {
+                "name": "analyze_feed",
+                "arguments": {"io_id": "net0", "prompt": "Describe the person in frame"},
+            },
+        )
+        result = resp["result"]
+        self.assertFalse(result["isError"])
+        self.assertIn("analysis", result["structuredContent"])
 
     def test_tools_call_api_error_returns_tool_error(self):
         resp = self._call("tools/call", {"name": "get_task", "arguments": {"task_id": "404"}})

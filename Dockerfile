@@ -25,8 +25,19 @@ COPY tests ./tests
 RUN uv sync --frozen --no-dev
 
 ARG MEDIAMTX_VERSION=1.16.2
-RUN curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/mediamtx_v${MEDIAMTX_VERSION}_linux_amd64.tar.gz" \
-    | tar -xz -C /usr/local/bin mediamtx
+ARG TARGETARCH
+RUN set -eux; \
+    arch="${TARGETARCH:-}"; \
+    if [ -z "$arch" ]; then \
+      arch="$(uname -m)"; \
+      case "$arch" in \
+        x86_64|amd64) arch="amd64" ;; \
+        aarch64|arm64) arch="arm64" ;; \
+        *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; \
+      esac; \
+    fi; \
+    curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/mediamtx_v${MEDIAMTX_VERSION}_linux_${arch}.tar.gz" \
+      | tar -xz -C /usr/local/bin mediamtx
 
 RUN chmod +x /usr/local/bin/mediamtx /app/deploy/start-cloud.sh /app/deploy/start-with-mcp.sh
 

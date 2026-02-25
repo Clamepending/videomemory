@@ -27,6 +27,7 @@ import cv2
 import platform
 from typing import Optional
 import logging
+from pydantic import BaseModel, Field
 
 flask_logger = logging.getLogger('FlaskApp')
 
@@ -164,6 +165,11 @@ def devices():
 def settings_page():
     """Render the settings page."""
     return render_template('settings.html')
+
+@app.route('/documentation')
+def documentation_page():
+    """Render the documentation page."""
+    return render_template('documentation.html')
 
 @app.route('/device/<io_id>/debug')
 def device_debug(io_id):
@@ -431,6 +437,13 @@ def _rtmp_url_host() -> str:
 
     return "YOUR_SERVER_IP"
 
+def _ingest_internal_host() -> str:
+    """Host used internally by VideoMemory workers for pull URLs in Docker."""
+    host = os.environ.get("RTMP_INGEST_INTERNAL_HOST", "").strip()
+    if host:
+        return host.split(":")[0]
+    return _rtmp_url_host()
+
 
 def _rtmp_port_diagnostics() -> dict:
     """Inspect RTMP listener state and flag likely local port conflicts."""
@@ -510,20 +523,22 @@ def create_rtmp_camera():
     """Create a network camera with a generated RTMP URL for the Android app to push to."""
     try:
         data = request.get_json(silent=True) or {}
-        host = _rtmp_url_host()
+        public_host = _rtmp_url_host()
+        internal_host = _ingest_internal_host()
         try:
             stream_key, name = _generated_stream_key(data)
         except ValueError as ve:
             return jsonify({"status": "error", "error": str(ve)}), 400
         if name.startswith("Network Camera "):
             name = f"RTMP Camera ({stream_key.split('/')[-1]})"
-        url = f"rtmp://{host}:1935/{stream_key}"
-        camera_info = io_manager.add_network_camera(url, name)
+        public_url = f"rtmp://{public_host}:1935/{stream_key}"
+        ingest_url = f"rtmp://{internal_host}:1935/{stream_key}"
+        camera_info = io_manager.add_network_camera(ingest_url, name)
         stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
         return jsonify({
             "status": "success",
             "device": camera_info,
-            "rtmp_url": url,
+            "rtmp_url": public_url,
             "rtsp_pull_url": stream_info.get("pull_url"),
             "diagnostics": _rtmp_port_diagnostics(),
         })
@@ -537,7 +552,8 @@ def create_srt_camera():
     """Create a network camera with a generated SRT publish URL (low-latency uplink)."""
     try:
         data = request.get_json(silent=True) or {}
-        host = _rtmp_url_host()
+        public_host = _rtmp_url_host()
+        internal_host = _ingest_internal_host()
         try:
             stream_key, name = _generated_stream_key(data)
         except ValueError as ve:
@@ -546,13 +562,14 @@ def create_srt_camera():
             name = f"SRT Camera ({stream_key.split('/')[-1]})"
 
         # MediaMTX/SRT convention: streamid encodes publish:path
-        srt_url = f"srt://{host}:8890?streamid=publish:{stream_key}"
-        camera_info = io_manager.add_network_camera(srt_url, name)
+        public_srt_url = f"srt://{public_host}:8890?streamid=publish:{stream_key}"
+        ingest_srt_url = f"srt://{internal_host}:8890?streamid=publish:{stream_key}"
+        camera_info = io_manager.add_network_camera(ingest_srt_url, name)
         stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
         return jsonify({
             "status": "success",
             "device": camera_info,
-            "srt_url": srt_url,
+            "srt_url": public_srt_url,
             "rtsp_pull_url": stream_info.get("pull_url"),
             "notes": "Use SRT caller mode from the phone/app. VideoMemory will pull via RTSP.",
         })
@@ -566,7 +583,8 @@ def create_whip_camera():
     """Create a network camera for WebRTC/WHIP ingest (very low latency)."""
     try:
         data = request.get_json(silent=True) or {}
-        host = _rtmp_url_host()
+        public_host = _rtmp_url_host()
+        internal_host = _ingest_internal_host()
         scheme = "https" if request.is_secure else "http"
         try:
             stream_key, name = _generated_stream_key(data)
@@ -576,8 +594,8 @@ def create_whip_camera():
             name = f"WHIP Camera ({stream_key.split('/')[-1]})"
 
         # Store a synthetic 'whip://' source so VideoMemory derives RTSP pull cleanly.
-        stored_url = f"whip://{host}:8889/{stream_key}"
-        whip_url = f"{scheme}://{host}:8889/{stream_key}/whip"
+        stored_url = f"whip://{internal_host}:8889/{stream_key}"
+        whip_url = f"{scheme}://{public_host}:8889/{stream_key}/whip"
         camera_info = io_manager.add_network_camera(stored_url, name)
         stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
         return jsonify({
@@ -1000,6 +1018,49 @@ def get_ingestor_tasks(io_id):
     except Exception as e:
         flask_logger.error(f"Error in debug tasks for {io_id}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/device/<io_id>/analyze', methods=['POST'])
+def analyze_device_frame(io_id):
+    """Run one-off VLM analysis on the latest frame for a device.
+
+    Body (JSON):
+        prompt (str, required): Natural-language instruction for the model.
+    """
+    class OneOffFrameAnalysis(BaseModel):
+        analysis: str = Field(..., description="Model output for the requested frame analysis")
+
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'status': 'error', 'error': 'Request body must be JSON'}), 400
+
+        prompt = str(data.get('prompt', '')).strip()
+        if not prompt:
+            return jsonify({'status': 'error', 'error': 'prompt is required'}), 400
+
+        frame_bytes = _get_device_preview_frame_bytes(io_id)
+        if frame_bytes is None:
+            return jsonify({'status': 'error', 'error': 'No frame available for this device'}), 404
+
+        import base64
+        image_base64 = base64.b64encode(frame_bytes).decode('utf-8')
+
+        response = model_provider._sync_generate_content(
+            image_base64=image_base64,
+            prompt=prompt,
+            response_model=OneOffFrameAnalysis,
+        )
+
+        return jsonify({
+            'status': 'success',
+            'io_id': io_id,
+            'prompt': prompt,
+            'analysis': response.analysis,
+        })
+    except Exception as e:
+        flask_logger.error(f"Error in one-off analyze for {io_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
 
 # ── Health & OpenAPI ──────────────────────────────────────────
 

@@ -8,11 +8,12 @@ services:
     command: ["bash", "/app/deploy/start-with-mcp.sh"]
     environment:
       PORT: "5050"
-      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-videomemory}"
+      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-}"
+      RTMP_INGEST_INTERNAL_HOST: "127.0.0.1"
       VIDEOMEMORY_RTSP_PULL_PORT: "8554"
       VIDEOMEMORY_MCP_PORT: "8765"
       VIDEOMEMORY_OPENCLAW_WEBHOOK_URL: "http://openclaw:18789/hooks/videomemory-alert"
-      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${OPENCLAW_HOOKS_TOKEN:-}"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-}"
       VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S: "30"
       VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S: "1"
       # Set at least one model key before creating tasks (example)
@@ -29,15 +30,54 @@ services:
       - videomemory-data:/root/.local/share/videomemory
 
   openclaw:
-    image: ${OPENCLAW_IMAGE:-andreaskasper/openclaw:latest}
+    image: ${OPENCLAW_IMAGE:-alpine/openclaw:latest}
     container_name: openclaw
+    user: "0:0"
     restart: unless-stopped
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        mkdir -p /home/node/.openclaw /home/node/.openclaw/workspace
+        if [ ! -f /home/node/.openclaw/openclaw.json ]; then
+          cat > /home/node/.openclaw/openclaw.json <<EOF
+        {
+          "gateway": {
+            "mode": "local",
+            "bind": "lan",
+            "port": 18789,
+            "auth": { "mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}" }
+          },
+          "hooks": {
+            "enabled": true,
+            "path": "/hooks",
+            "token": "${OPENCLAW_GATEWAY_TOKEN}",
+            "defaultSessionKey": "hook:videomemory",
+            "allowRequestSessionKey": false,
+            "allowedSessionKeyPrefixes": ["hook:"],
+            "mappings": [
+              {
+                "match": { "path": "videomemory-alert" },
+                "action": "agent",
+                "wakeMode": "now",
+                "sessionKey": "hook:videomemory",
+                "name": "VideoMemory Alert",
+                "messageTemplate": "VISION ALERT on device {{io_id}} (task {{task_id}}): {{note}}\\nTask: {{task_description}}"
+              }
+            ]
+          }
+        }
+        EOF
+        fi
+        exec node dist/index.js gateway --bind lan --port 18789 --token "${OPENCLAW_GATEWAY_TOKEN}" --allow-unconfigured --verbose
     environment:
-      OPENCLAW_HOOKS_TOKEN: "${OPENCLAW_HOOKS_TOKEN:-change-me}"
+      HOME: /home/node
+      OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-change-me}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     ports:
       - "18789:18789"
     volumes:
-      - openclaw-data:/home/openclaw/.openclaw
+      - openclaw-data-v2:/home/node/.openclaw
       - ./deploy/openclaw:/config-examples:ro
     depends_on:
       - videomemory
@@ -45,3 +85,4 @@ services:
 volumes:
   videomemory-data:
   openclaw-data:
+  openclaw-data-v2:
