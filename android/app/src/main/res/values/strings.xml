@@ -4,4 +4,9 @@
     <string name="hint_rtmp_url">rtmp://YOUR_IP:1935/live/phone1</string>
     <string name="start">Start stream</string>
     <string name="stop">Stop stream</string>
+    <string name="streaming_notification_title">Streaming active</string>
+    <string name="streaming_notification_text">VideoMemory stream is running in the background.</string>
+    <string name="streaming_notification_text_with_target">Streaming to %1$s</string>
+    <string name="streaming_notification_channel_name">VideoMemory Streaming</string>
+    <string name="streaming_notification_channel_description">Shows status while the camera stream is active.</string>
 </resources>

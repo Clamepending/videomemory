@@ -310,6 +310,69 @@ class VideoMemoryMcpServer:
             },
         }
 
+    @staticmethod
+    def _validate_tool_arguments(schema: Dict[str, Any], arguments: Any) -> Optional[Dict[str, Any]]:
+        """Validate basic JSON-schema-like constraints for tool arguments.
+
+        Supports object type, required keys, additionalProperties=false, and
+        primitive type checks used by this server's tool schemas.
+        Returns an error payload dict when invalid, otherwise None.
+        """
+        if not isinstance(arguments, dict):
+            return {
+                "error": "Invalid arguments: expected an object",
+                "details": {"received_type": type(arguments).__name__},
+            }
+
+        required = schema.get("required", []) or []
+        properties = schema.get("properties", {}) or {}
+        additional_allowed = schema.get("additionalProperties", True)
+
+        missing = [k for k in required if k not in arguments]
+        if missing:
+            return {
+                "error": "Invalid arguments: missing required field(s)",
+                "details": {"missing": missing},
+            }
+
+        if additional_allowed is False:
+            unexpected = [k for k in arguments.keys() if k not in properties]
+            if unexpected:
+                return {
+                    "error": "Invalid arguments: unexpected field(s)",
+                    "details": {"unexpected": unexpected},
+                }
+
+        expected_types = {
+            "string": str,
+            "number": (int, float),
+            "integer": int,
+            "boolean": bool,
+            "object": dict,
+            "array": list,
+        }
+        for key, value in arguments.items():
+            prop = properties.get(key)
+            if not isinstance(prop, dict):
+                continue
+            schema_type = prop.get("type")
+            if not schema_type:
+                continue
+            py_type = expected_types.get(schema_type)
+            if py_type is None:
+                continue
+            if not isinstance(value, py_type):
+                return {
+                    "error": f"Invalid arguments: field '{key}' must be {schema_type}",
+                    "details": {
+                        "field": key,
+                        "expected_type": schema_type,
+                        "received_type": type(value).__name__,
+                    },
+                }
+
+        return None
+
     def handle_message(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Handle a JSON-RPC request or notification."""
         method = msg.get("method")
@@ -356,6 +419,10 @@ class VideoMemoryMcpServer:
                 arguments = params.get("arguments") or {}
                 if name not in self._tools:
                     return self._result(msg_id, self._tool_error(f"Unknown tool: {name}"))
+                schema = self._tools[name]["inputSchema"]
+                validation_error = self._validate_tool_arguments(schema, arguments)
+                if validation_error is not None:
+                    return self._result(msg_id, self._tool_error(validation_error))
                 try:
                     result = self._tools[name]["handler"](arguments)
                     return self._result(msg_id, self._tool_ok(result))

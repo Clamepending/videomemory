@@ -4,10 +4,13 @@
 import asyncio
 import os
 import re
+import socket
+import subprocess
 import sys
 import threading
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Add parent directory to path so we can import videomemory
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -403,7 +406,7 @@ def get_devices():
         return jsonify({'error': str(e)}), 500
 
 def _rtmp_url_host() -> str:
-    """Host for generated RTMP URLs: from request, env, or placeholder."""
+    """Host for generated RTMP URLs: env, request host, LAN IP, or placeholder."""
     host = os.environ.get("RTMP_SERVER_HOST", "").strip()
     if host:
         return host.split(":")[0]
@@ -413,7 +416,68 @@ def _rtmp_url_host() -> str:
             return h.split(":")[0]
     except Exception:
         pass
+
+    # Local dev convenience: if UI is opened on localhost, generate a LAN IP so
+    # phones on the same network can connect without manual placeholder edits.
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        lan_ip = s.getsockname()[0]
+        s.close()
+        if lan_ip and not lan_ip.startswith("127."):
+            return lan_ip
+    except Exception:
+        pass
+
     return "YOUR_SERVER_IP"
+
+
+def _rtmp_port_diagnostics() -> dict:
+    """Inspect RTMP listener state and flag likely local port conflicts."""
+    diagnostics = {
+        "rtmp_port_ok": True,
+        "warning": "",
+        "listeners": [],
+    }
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", "-iTCP:1935", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=False,
+        )
+        lines = [ln for ln in (result.stdout or "").splitlines() if ln.strip()]
+        if len(lines) <= 1:
+            diagnostics["rtmp_port_ok"] = False
+            diagnostics["warning"] = "No process is listening on RTMP port 1935. MediaMTX may not be running."
+            return diagnostics
+
+        listeners = []
+        for ln in lines[1:]:
+            parts = ln.split()
+            if len(parts) < 2:
+                continue
+            listeners.append({"command": parts[0], "pid": parts[1], "raw": ln})
+        diagnostics["listeners"] = listeners
+
+        command_names = {l["command"].lower() for l in listeners}
+        has_mediamtx = any("mediamtx" in cmd for cmd in command_names)
+        non_mediamtx = sorted({l["command"] for l in listeners if "mediamtx" not in l["command"].lower()})
+        if not has_mediamtx:
+            diagnostics["rtmp_port_ok"] = False
+            diagnostics["warning"] = "MediaMTX is not listening on RTMP port 1935."
+        elif non_mediamtx:
+            diagnostics["rtmp_port_ok"] = False
+            diagnostics["warning"] = (
+                "RTMP port 1935 is also used by: "
+                + ", ".join(non_mediamtx)
+                + ". This can cause handshake failures from phones."
+            )
+    except Exception:
+        # Keep diagnostics best-effort; don't block RTMP URL generation.
+        pass
+    return diagnostics
 
 
 def _stream_key_from_name(name: str) -> str:
@@ -461,6 +525,7 @@ def create_rtmp_camera():
             "device": camera_info,
             "rtmp_url": url,
             "rtsp_pull_url": stream_info.get("pull_url"),
+            "diagnostics": _rtmp_port_diagnostics(),
         })
     except Exception as e:
         flask_logger.error(f"Error creating RTMP camera: {e}", exc_info=True)
@@ -539,6 +604,16 @@ def add_network_camera():
 
     if not url:
         return jsonify({'status': 'error', 'error': 'url is required'}), 400
+
+    parsed = urlparse(url)
+    allowed_schemes = {'rtsp', 'rtsps', 'http', 'https', 'rtmp', 'srt', 'whip'}
+    if parsed.scheme.lower() not in allowed_schemes:
+        return jsonify({
+            'status': 'error',
+            'error': "Invalid url: scheme must be one of rtsp, rtsps, http, https, rtmp, srt, whip"
+        }), 400
+    if parsed.scheme.lower() in {'rtsp', 'rtsps', 'http', 'https', 'rtmp', 'whip'} and not parsed.netloc:
+        return jsonify({'status': 'error', 'error': 'Invalid url: missing host'}), 400
 
     try:
         camera_info = io_manager.add_network_camera(url, name)
@@ -669,7 +744,7 @@ def get_device_preview_stream(io_id):
     """Stream device previews as MJPEG for smoother live debugging."""
     import time
 
-    fps = max(1.0, min(15.0, float(os.getenv("VIDEOMEMORY_PREVIEW_STREAM_FPS", "6"))))
+    fps = max(1.0, min(20.0, float(os.getenv("VIDEOMEMORY_PREVIEW_STREAM_FPS", "10"))))
     frame_delay_s = 1.0 / fps
     boundary = "frame"
 
@@ -717,6 +792,7 @@ def get_device_preview_stream(io_id):
         cap_source = None
         try:
             while True:
+                loop_started = time.monotonic()
                 frame_data = None
 
                 latest_frame = task_manager.get_latest_frame_for_device(io_id)
@@ -766,7 +842,10 @@ def get_device_preview_stream(io_id):
                         b"Expires: 0\r\n\r\n" +
                         frame_data + b"\r\n"
                     )
-                time.sleep(frame_delay_s)
+                elapsed = time.monotonic() - loop_started
+                sleep_for = frame_delay_s - elapsed
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
         finally:
             if cap is not None:
                 cap.release()

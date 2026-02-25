@@ -394,6 +394,18 @@
             font-weight: 500;
         }
 
+        .rtmp-warning {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #ff6b6b66;
+            background: #ff6b6b1a;
+            color: #ffb3b3;
+            font-size: 12px;
+            display: none;
+            line-height: 1.4;
+        }
+
         .rtmp-url-row {
             display: flex;
             gap: 10px;
@@ -451,6 +463,7 @@
                     <button class="copy-btn" id="copyRtmpBtn" type="button">Copy</button>
                 </div>
                 <div class="rtmp-url-label" id="rtmpUrlHint" style="margin-top: 8px; color: #888; text-transform: none; display: none;">Replace YOUR_SERVER_IP with this computer's LAN IP (e.g. 192.168.1.42) so your phone can connect.</div>
+                <div class="rtmp-warning" id="rtmpPortWarning"></div>
             </div>
         </div>
         <div class="add-network-form">
@@ -539,6 +552,15 @@
                     box.classList.add('visible');
                     const hint = document.getElementById('rtmpUrlHint');
                     hint.style.display = data.rtmp_url.indexOf('YOUR_SERVER_IP') !== -1 ? 'block' : 'none';
+                    const warn = document.getElementById('rtmpPortWarning');
+                    const diag = data.diagnostics || {};
+                    if (diag.warning) {
+                        warn.textContent = diag.warning;
+                        warn.style.display = 'block';
+                    } else {
+                        warn.textContent = '';
+                        warn.style.display = 'none';
+                    }
                     loadDevices();
                 } else {
                     alert(data.error || 'Failed to create RTMP camera');
@@ -622,9 +644,22 @@
             if (!confirm('Remove this network camera?')) return;
             try {
                 const resp = await fetch(`/api/devices/network/${encodeURIComponent(ioId)}`, { method: 'DELETE' });
-                if (resp.ok) loadDevices();
+                let data = {};
+                try {
+                    data = await resp.json();
+                } catch (_) {
+                    // Keep a fallback message below.
+                }
+
+                if (!resp.ok) {
+                    const msg = data.error || data.message || `Failed to remove camera (${resp.status})`;
+                    alert(msg);
+                }
             } catch (e) {
                 alert('Failed to remove camera: ' + e.message);
+            } finally {
+                // Always refresh so stale cards do not linger in the UI.
+                loadDevices();
             }
         }
 
