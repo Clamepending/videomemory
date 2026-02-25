@@ -32,3 +32,9 @@ android/.idea/
 android/captures/
 android/.externalNativeBuild/
 android/.cxx/
+
+# Experiment artifacts
+videomemory/experiments/*.png
+videomemory/experiments/*.jpg
+videomemory/experiments/*.jpeg
+videomemory/experiments/latency_results.json
