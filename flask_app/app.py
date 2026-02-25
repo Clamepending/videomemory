@@ -1078,4 +1078,21 @@ def update_setting(key):
 
 if __name__ == '__main__':
     debug = os.getenv('FLASK_DEBUG', '0') == '1'
-    app.run(debug=debug, host='0.0.0.0', port=5050, threaded=True)
+    port = int(os.getenv('PORT', '5060'))
+    host = os.getenv('HOST', '0.0.0.0')
+    ssl_adhoc = os.getenv('SSL_ADHOC', '0') == '1'
+    ssl_cert = os.getenv('SSL_CERT_FILE', '').strip()
+    ssl_key = os.getenv('SSL_KEY_FILE', '').strip()
+
+    ssl_context = None
+    if ssl_adhoc:
+        ssl_context = 'adhoc'
+    elif ssl_cert and ssl_key:
+        ssl_context = (ssl_cert, ssl_key)
+
+    proto = 'https' if ssl_context else 'http'
+    bind_host = host if host not in ('0.0.0.0', '::') else 'localhost'
+    print(f"VideoMemory UI: {proto}://{bind_host}:{port}/devices")
+    print(f"VideoMemory API health: {proto}://{bind_host}:{port}/api/health")
+
+    app.run(debug=debug, host=host, port=port, threaded=True, ssl_context=ssl_context)
