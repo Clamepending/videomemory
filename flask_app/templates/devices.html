@@ -460,6 +460,83 @@
 
 {% block extra_scripts %}
     <script>
+        const PREVIEW_SCHEDULER_TICK_MS = 250;
+        const PREVIEW_REFRESH_LOCAL_MS = 500;
+        const PREVIEW_REFRESH_NETWORK_MS = 700;
+        const PREVIEW_FAILURE_BACKOFF_MS = 5000;
+        let previewRefreshInterval = null;
+
+        function revokePreviewObjectUrls(root = document) {
+            const previews = root.querySelectorAll('.device-preview[data-object-url]');
+            previews.forEach(img => {
+                const objectUrl = img.dataset.objectUrl;
+                if (objectUrl) {
+                    URL.revokeObjectURL(objectUrl);
+                    delete img.dataset.objectUrl;
+                }
+            });
+        }
+
+        function stopPreviewRefresh() {
+            if (previewRefreshInterval) {
+                clearInterval(previewRefreshInterval);
+                previewRefreshInterval = null;
+            }
+        }
+
+        function startPreviewRefresh() {
+            stopPreviewRefresh();
+            previewRefreshInterval = setInterval(() => {
+                if (document.hidden) return;
+                refreshAllPreviews();
+            }, PREVIEW_SCHEDULER_TICK_MS);
+        }
+
+        async function refreshPreviewImage(img) {
+            if (!img || !img.dataset.previewUrl || img.dataset.loading === '1') return;
+            const now = Date.now();
+            const nextAttemptAt = Number(img.dataset.nextAttemptAt || 0);
+            if (nextAttemptAt > now) return;
+
+            img.dataset.loading = '1';
+            const baseUrl = img.dataset.previewUrl;
+            const requestUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}t=${now}`;
+            const refreshMs = Number(img.dataset.refreshMs || PREVIEW_REFRESH_LOCAL_MS);
+
+            try {
+                const resp = await fetch(requestUrl, { cache: 'no-store' });
+                if (!resp.ok) throw new Error('preview failed');
+
+                const blob = await resp.blob();
+                const objectUrl = URL.createObjectURL(blob);
+
+                if (!document.body.contains(img)) {
+                    URL.revokeObjectURL(objectUrl);
+                    return;
+                }
+
+                if (img.dataset.objectUrl) {
+                    URL.revokeObjectURL(img.dataset.objectUrl);
+                }
+
+                img.src = objectUrl;
+                img.dataset.objectUrl = objectUrl;
+                img.classList.remove('loading', 'error');
+                img.dataset.nextAttemptAt = String(Date.now() + refreshMs);
+            } catch (_) {
+                img.classList.remove('loading');
+                img.classList.add('error');
+                img.dataset.nextAttemptAt = String(Date.now() + PREVIEW_FAILURE_BACKOFF_MS);
+            } finally {
+                img.dataset.loading = '0';
+            }
+        }
+
+        function refreshAllPreviews() {
+            const previewImages = document.querySelectorAll('#devicesContent .device-preview[data-preview-url]');
+            previewImages.forEach(refreshPreviewImage);
+        }
+
         async function createRtmpCamera() {
             const btn = document.getElementById('createRtmpBtn');
             const box = document.getElementById('rtmpUrlBox');
@@ -622,7 +699,8 @@
                         let previewHtml;
                         if (isCamera) {
                             const previewId = `preview-${device.io_id.replace(/[^a-zA-Z0-9]/g, '-')}`;
-                            previewHtml = `<img class="device-preview loading" id="${previewId}" src="/api/device/${escapeHtml(device.io_id)}/preview?t=${Date.now()}" alt="Camera preview" />`;
+                            const streamUrl = `/api/device/${encodeURIComponent(device.io_id)}/preview/stream`;
+                            previewHtml = `<img class="device-preview" id="${previewId}" src="${streamUrl}" alt="Camera preview" />`;
                         } else {
                             previewHtml = '<div class="device-preview-placeholder">No preview available</div>';
                         }
@@ -651,29 +729,12 @@
                     `;
                 });
                 
+                const previousContent = contentDiv.cloneNode(true);
                 contentDiv.innerHTML = html;
-                
-                const previewImages = contentDiv.querySelectorAll('.device-preview');
-                previewImages.forEach(img => {
-                    const originalSrc = img.getAttribute('src');
-                    img.removeAttribute('src');
-                    fetch(originalSrc, { cache: 'no-store' })
-                        .then(resp => {
-                            if (!resp.ok) throw new Error('preview failed');
-                            return resp.blob();
-                        })
-                        .then(blob => {
-                            img.src = URL.createObjectURL(blob);
-                            img.classList.remove('loading');
-                        })
-                        .catch(() => {
-                            img.classList.remove('loading');
-                            const errorDiv = document.createElement('div');
-                            errorDiv.className = 'device-preview error';
-                            errorDiv.innerHTML = '<div>Device Disconnected<br/><small>Camera not available or in use</small></div>';
-                            img.parentNode.replaceChild(errorDiv, img);
-                        });
-                });
+
+                revokePreviewObjectUrls(previousContent);
+                refreshAllPreviews();
+                startPreviewRefresh();
                 
             } catch (error) {
                 contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
@@ -692,6 +753,11 @@
         // Submit on Enter in the URL field
         document.getElementById('netUrl').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') addNetworkCamera();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            stopPreviewRefresh();
+            revokePreviewObjectUrls();
         });
         
         loadDevices();

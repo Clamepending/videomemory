@@ -580,50 +580,165 @@ def get_device_preview(io_id):
     Tries to use frames from active video ingestors first (faster), falls back to
     opening camera directly if no ingestor is active.
     """
+    frame_data = _get_device_preview_frame_bytes(io_id)
+    if frame_data is None:
+        return Response(response=b'', status=404, mimetype='image/jpeg')
+    return Response(
+        response=frame_data,
+        mimetype='image/jpeg',
+        headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
+    )
+
+
+def _get_device_preview_frame_bytes(io_id: str) -> Optional[bytes]:
+    """Return the latest JPEG preview frame for a camera device."""
     try:
-        # Get device info
         device_info = io_manager.get_stream_info(io_id)
         if device_info is None:
-            return jsonify({'error': 'Device not found'}), 404
-        
+            return None
+
         category = device_info.get('category', '').lower()
-        
         if 'camera' not in category:
-            return Response(response=b'', status=204, mimetype='image/jpeg')
-        
-        # Try to get frame from active video ingestor first (much faster)
+            return None
+
+        # Try active ingestor frame first for lower latency and less camera churn.
         latest_frame = task_manager.get_latest_frame_for_device(io_id)
         if latest_frame is not None and latest_frame.size > 0:
             frame_mean = latest_frame.mean()
             if frame_mean >= 1:
                 _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                return Response(
-                    response=buffer.tobytes(),
-                    mimetype='image/jpeg',
-                    headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
-                )
-        
-        # Fallback: open camera directly (use pull_url for capture; RTMP→RTSP is in io_manager)
+                return buffer.tobytes()
+
         pull_url = device_info.get('pull_url') or device_info.get('url')
         if pull_url:
-            frame_data = _get_network_preview_frame(pull_url)
+            return _get_network_preview_frame(pull_url)
+
+        try:
+            camera_index = int(io_id)
+        except (ValueError, TypeError):
+            return None
+        return _get_camera_preview_frame(camera_index)
+    except Exception as e:
+        flask_logger.debug(f"Error building preview for {io_id}: {e}")
+        return None
+
+
+@app.route('/api/device/<io_id>/preview/stream', methods=['GET'])
+def get_device_preview_stream(io_id):
+    """Stream device previews as MJPEG for smoother live debugging."""
+    import time
+
+    fps = max(1.0, min(15.0, float(os.getenv("VIDEOMEMORY_PREVIEW_STREAM_FPS", "6"))))
+    frame_delay_s = 1.0 / fps
+    boundary = "frame"
+
+    def _open_preview_capture(source):
+        cap = cv2.VideoCapture()
+        if isinstance(source, str) and source.startswith(("rtsp://", "rtsps://", "http://", "https://", "rtmp://", "srt://", "whip://")):
+            if not os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"):
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|"
+                    "max_delay;500000|reorder_queue_size;0"
+                )
+            open_timeout_ms = int(os.environ.get("VIDEOMEMORY_PREVIEW_OPEN_TIMEOUT_MS", "2500"))
+            read_timeout_ms = int(os.environ.get("VIDEOMEMORY_PREVIEW_READ_TIMEOUT_MS", "2500"))
+            if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, float(open_timeout_ms))
+            if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, float(read_timeout_ms))
+            if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            opened = cap.open(source, cv2.CAP_FFMPEG) if hasattr(cv2, "CAP_FFMPEG") else cap.open(source)
         else:
             try:
-                camera_index = int(io_id)
-            except (ValueError, TypeError):
-                return Response(response=b'', status=404, mimetype='image/jpeg')
-            frame_data = _get_camera_preview_frame(camera_index)
-        
-        if frame_data is None:
-            return Response(response=b'', status=404, mimetype='image/jpeg')
-        
-        return Response(
-            response=frame_data,
-            mimetype='image/jpeg',
-            headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
-        )
-    except Exception as e:
-        return Response(response=b'', status=404, mimetype='image/jpeg')
+                camera_index = int(source)
+            except (TypeError, ValueError):
+                cap.release()
+                return None
+            if platform.system() == 'Darwin':
+                opened = cap.open(camera_index, cv2.CAP_AVFOUNDATION)
+            elif platform.system() == 'Linux':
+                opened = cap.open(camera_index, cv2.CAP_V4L2)
+            else:
+                opened = cap.open(camera_index)
+            if opened:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if not opened or not cap.isOpened():
+            cap.release()
+            return None
+        return cap
+
+    def generate():
+        cap = None
+        cap_source = None
+        try:
+            while True:
+                frame_data = None
+
+                latest_frame = task_manager.get_latest_frame_for_device(io_id)
+                if latest_frame is not None and latest_frame.size > 0 and latest_frame.mean() >= 1:
+                    _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    frame_data = buffer.tobytes()
+                else:
+                    device_info = io_manager.get_stream_info(io_id)
+                    if device_info is not None and 'camera' in (device_info.get('category', '').lower()):
+                        pull_url = device_info.get('pull_url') or device_info.get('url')
+                        if pull_url:
+                            desired_source = pull_url
+                        else:
+                            try:
+                                desired_source = int(io_id)
+                            except (TypeError, ValueError):
+                                desired_source = None
+                        if desired_source is None:
+                            time.sleep(frame_delay_s)
+                            continue
+
+                        if cap is None or cap_source != desired_source or not cap.isOpened():
+                            if cap is not None:
+                                cap.release()
+                            cap = _open_preview_capture(desired_source)
+                            cap_source = desired_source if cap is not None else None
+
+                        if cap is not None and cap.isOpened():
+                            ret, frame = cap.read()
+                            if ret and frame is not None and frame.size > 0:
+                                if frame.shape[1] > 640 or frame.shape[0] > 480:
+                                    frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LINEAR)
+                                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                frame_data = buffer.tobytes()
+                            else:
+                                cap.release()
+                                cap = None
+                                cap_source = None
+
+                if frame_data is not None:
+                    yield (
+                        b"--" + boundary.encode("ascii") + b"\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                        b"Pragma: no-cache\r\n"
+                        b"Expires: 0\r\n\r\n" +
+                        frame_data + b"\r\n"
+                    )
+                time.sleep(frame_delay_s)
+        finally:
+            if cap is not None:
+                cap.release()
+
+    return Response(
+        generate(),
+        mimetype=f"multipart/x-mixed-replace; boundary={boundary}",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 # ── Ingestor Debug API ────────────────────────────────────────
 
@@ -1009,6 +1124,7 @@ def openapi_spec():
 # Keys that should be masked when returned to the frontend
 _SENSITIVE_KEYS = {
     'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
 }
 
 # All known setting keys (for the settings page)
@@ -1018,7 +1134,26 @@ _KNOWN_SETTINGS = [
     'OPENROUTER_API_KEY',
     'ANTHROPIC_API_KEY',
     'VIDEO_INGESTOR_MODEL',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S',
+    'VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S',
+    'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
 ]
+
+
+def _reload_openclaw_notifier_from_env() -> None:
+    """Refresh OpenClaw notifier config from current environment settings."""
+    try:
+        updated = OpenClawWakeNotifier.from_env()
+        openclaw_notifier.webhook_url = updated.webhook_url
+        openclaw_notifier.bearer_token = updated.bearer_token
+        openclaw_notifier.timeout_seconds = updated.timeout_seconds
+        openclaw_notifier.dedupe_ttl_seconds = updated.dedupe_ttl_seconds
+        openclaw_notifier.min_interval_seconds = updated.min_interval_seconds
+        openclaw_notifier.enabled = updated.enabled
+    except Exception as e:
+        flask_logger.warning("Failed to reload OpenClaw notifier settings: %s", e)
 
 def _mask_value(key: str, value: str) -> str:
     """Mask sensitive values, showing only the last 4 characters."""
@@ -1065,11 +1200,13 @@ def update_setting(key):
             env_vals = dotenv_values()
             if key in env_vals:
                 os.environ[key] = env_vals[key]
+            _reload_openclaw_notifier_from_env()
             return jsonify({'status': 'cleared', 'key': key})
         
         # Save to DB and update os.environ for immediate effect
         db.set_setting(key, value)
         os.environ[key] = value
+        _reload_openclaw_notifier_from_env()
         
         return jsonify({'status': 'saved', 'key': key})
     except Exception as e:

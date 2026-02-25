@@ -322,6 +322,83 @@
                 Model changes take effect after restarting the application.
             </div>
         </div>
+
+        <!-- ── External Agent Integration ──────────── -->
+        <div class="settings-section">
+            <h3>External Agent Integration</h3>
+            <p class="section-desc">Configure webhook delivery to an external agent/gateway (for example OpenClaw).</p>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_WEBHOOK_URL">
+                <div class="setting-label">
+                    <label>Webhook URL</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_WEBHOOK_URL"></span>
+                </div>
+                <div class="setting-hint">Endpoint for task update events, e.g. http://localhost:18789/hooks/videomemory-alert</div>
+                <div class="setting-input-row">
+                    <input type="text" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_WEBHOOK_URL" placeholder="http://localhost:18789/hooks/videomemory-alert">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_WEBHOOK_URL')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_WEBHOOK_URL"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN">
+                <div class="setting-label">
+                    <label>Webhook Bearer Token</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN"></span>
+                </div>
+                <div class="setting-hint">Optional bearer token sent as Authorization header.</div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN" placeholder="your-shared-token">
+                    <button type="button" class="toggle-vis" id="toggle-VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN" onclick="toggleVisibility('VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S">
+                <div class="setting-label">
+                    <label>Webhook Timeout (seconds)</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S"></span>
+                </div>
+                <div class="setting-hint">HTTP timeout for webhook calls. Default is 3.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S" placeholder="3" min="1" step="0.5">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S">
+                <div class="setting-label">
+                    <label>Dedupe TTL (seconds)</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S"></span>
+                </div>
+                <div class="setting-hint">Suppress duplicate webhook events within this window. Default is 30.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S" placeholder="30" min="0" step="1">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S">
+                <div class="setting-label">
+                    <label>Min Send Interval (seconds)</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S"></span>
+                </div>
+                <div class="setting-hint">Minimum gap between webhook deliveries. Default is 0.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S" placeholder="0" min="0" step="0.1">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S"></div>
+            </div>
+
+            <div class="restart-notice">
+                <span class="icon">&#9888;</span>
+                Webhook settings are applied immediately for new events. Restart is still recommended for consistency.
+            </div>
+        </div>
     </div>
 {% endblock %}
 
