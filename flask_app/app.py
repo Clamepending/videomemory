@@ -747,6 +747,8 @@ def get_device_preview_stream(io_id):
     fps = max(1.0, min(20.0, float(os.getenv("VIDEOMEMORY_PREVIEW_STREAM_FPS", "10"))))
     frame_delay_s = 1.0 / fps
     boundary = "frame"
+    max_grabs = max(1, int(os.getenv("VIDEOMEMORY_PREVIEW_MAX_GRABS", "8")))
+    drain_ms = max(0.0, float(os.getenv("VIDEOMEMORY_PREVIEW_DRAIN_MS", "80")))
 
     def _open_preview_capture(source):
         cap = cv2.VideoCapture()
@@ -787,6 +789,33 @@ def get_device_preview_stream(io_id):
             return None
         return cap
 
+    def _read_latest_frame(cap):
+        """Read the newest available frame, dropping buffered stale frames first."""
+        if cap is None or not cap.isOpened():
+            return None
+
+        import time
+        deadline = time.monotonic() + (drain_ms / 1000.0)
+        grabs = 0
+        grabbed_any = False
+
+        # Drain backlog quickly so preview stays near-live instead of lagging.
+        while grabs < max_grabs and time.monotonic() < deadline:
+            ok = cap.grab()
+            if not ok:
+                break
+            grabbed_any = True
+            grabs += 1
+
+        if grabbed_any:
+            ret, frame = cap.retrieve()
+        else:
+            ret, frame = cap.read()
+
+        if not ret or frame is None or frame.size == 0:
+            return None
+        return frame
+
     def generate():
         cap = None
         cap_source = None
@@ -821,8 +850,8 @@ def get_device_preview_stream(io_id):
                             cap_source = desired_source if cap is not None else None
 
                         if cap is not None and cap.isOpened():
-                            ret, frame = cap.read()
-                            if ret and frame is not None and frame.size > 0:
+                            frame = _read_latest_frame(cap)
+                            if frame is not None:
                                 if frame.shape[1] > 640 or frame.shape[0] > 480:
                                     frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LINEAR)
                                 _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -866,7 +895,11 @@ def get_device_preview_stream(io_id):
 def get_device_preview_fps(io_id):
     """Return server-measured preview stream FPS for a device."""
     fps = _get_preview_fps(io_id)
-    return jsonify({"io_id": io_id, "fps": round(fps, 2), "active": fps > 0})
+    response = jsonify({"io_id": io_id, "fps": round(fps, 2), "active": fps > 0})
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 # ── Ingestor Debug API ────────────────────────────────────────
 
