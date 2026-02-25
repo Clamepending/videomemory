@@ -93,7 +93,12 @@ class DeviceDetector:
         
         # Fallback: manual detection
         if self.is_mac:
-            return self._detect_cameras_macos_fallback()
+            cameras = self._detect_cameras_macos_fallback()
+            if cameras:
+                return cameras
+            # Final fallback for macOS when AVFoundation bindings are unavailable:
+            # probe OpenCV indices directly with the AVFoundation backend.
+            return self._detect_cameras_generic()
         else:
             return self._detect_cameras_generic()
     
@@ -123,9 +128,9 @@ class DeviceDetector:
                             except Exception:
                                 pass
         except ImportError:
-            pass
-        except Exception:
-            pass
+            logger.debug("AVFoundation Python bindings unavailable; using OpenCV index scan fallback")
+        except Exception as e:
+            logger.debug(f"AVFoundation camera enumeration failed: {e}")
         
         return cameras
     
@@ -148,7 +153,10 @@ class DeviceDetector:
         for idx in range(10):
             cap = None
             try:
-                cap = cv2.VideoCapture(idx)
+                if self.is_mac:
+                    cap = cv2.VideoCapture(idx, cv2.CAP_AVFOUNDATION)
+                else:
+                    cap = cv2.VideoCapture(idx)
                 if cap.isOpened():
                     cameras.append((idx, f"Camera {idx}"))
             except Exception:
