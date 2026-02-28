@@ -1,0 +1,59 @@
+services:
+  cloud-videomemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cloud-videomemory
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "videomemory.cloud_event_server"]
+    environment:
+      VIDEOMEMORY_CLOUD_PORT: "8785"
+      VIDEOMEMORY_CLOUD_TOKEN: "${VIDEOMEMORY_CLOUD_TOKEN:-}"
+    ports:
+      - "8785:8785" # Cloud VideoMemory Server HTTP + MCP (/mcp)
+
+  openclaw:
+    image: ${OPENCLAW_IMAGE:-alpine/openclaw:latest}
+    container_name: openclaw
+    user: "0:0"
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        mkdir -p /home/node/.openclaw /home/node/.openclaw/workspace
+        if [ ! -f /home/node/.openclaw/openclaw.json ]; then
+          cat > /home/node/.openclaw/openclaw.json <<EOF
+        {
+          "gateway": {
+            "mode": "local",
+            "bind": "lan",
+            "port": 18789,
+            "auth": { "mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}" }
+          },
+          "hooks": {
+            "enabled": true,
+            "path": "/hooks",
+            "token": "${OPENCLAW_GATEWAY_TOKEN}",
+            "defaultSessionKey": "hook:videomemory",
+            "allowRequestSessionKey": false,
+            "allowedSessionKeyPrefixes": ["hook:"]
+          }
+        }
+        EOF
+        fi
+        exec node dist/index.js gateway --bind lan --port 18789 --token "${OPENCLAW_GATEWAY_TOKEN}" --allow-unconfigured --verbose
+    environment:
+      HOME: /home/node
+      OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-change-me}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    ports:
+      - "18789:18789"
+    volumes:
+      - openclaw-data-v2:/home/node/.openclaw
+      - ./deploy/openclaw:/config-examples:ro
+    depends_on:
+      - cloud-videomemory
+
+volumes:
+  openclaw-data-v2:

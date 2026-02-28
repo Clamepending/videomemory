@@ -14,6 +14,15 @@ This launches MediaMTX and VideoMemory together for local development. Open http
 
 VideoMemory is the **core ingest/task service**. Run your conversational/admin agent separately and integrate it using the VideoMemory HTTP API, webhook callbacks, and MCP server.
 
+Two supported runtime modes:
+
+- **Event Mode (primary):** run `VideoMemory` on the local app/device/edge box (ingest + analysis), and run `OpenClaw`/MCP in the cloud for orchestration. Best for centralized cloud control across many apps/devices.
+- **Streaming Mode (fallback):** run `VideoMemory` in the cloud and stream devices to it via RTMP/SRT/WHIP. Best for self-hosters/DIY users and simple all-in-one deployments.
+
+Architecture details:
+
+- [docs/edge-cloud-architecture.md](docs/edge-cloud-architecture.md)
+
 Integration contract:
 
 - [docs/agent-integration-contract.md](docs/agent-integration-contract.md)
@@ -28,6 +37,9 @@ Then launch OpenClaw (or your own admin gateway/agent) separately and connect it
 
 ### Testing flow options
 
+- **Full end-to-end suite (recommended):**
+  - `bash deploy/test-e2e-suite.sh`
+  - Optional flags: `--skip-unit`, `--skip-docker`, `--skip-phone-demo`, `--no-build`, `--keep-stacks`
 - **Core only (bring your own external service):**
   - `docker compose -f docker-compose.core.yml up --build`
 - **Core + OpenClaw:**
@@ -38,6 +50,125 @@ Then launch OpenClaw (or your own admin gateway/agent) separately and connect it
   - `bash deploy/test-adminagent-stack.sh`
 
 AdminAgent repository: `https://github.com/Clamepending/adminagent.git`
+
+### Edge mode command return path (cloud -> edge)
+
+VideoMemory already supports `edge -> cloud` triggers via webhook. For `cloud -> edge` requests when VideoMemory is behind NAT/private LAN, configure the optional edge-initiated command poller (disabled by default):
+
+- `VIDEOMEMORY_OPENCLAW_COMMAND_PULL_URL` (enable switch)
+- `VIDEOMEMORY_OPENCLAW_COMMAND_RESULT_URL` (optional)
+- `VIDEOMEMORY_OPENCLAW_COMMAND_TOKEN` (optional bearer token)
+- `VIDEOMEMORY_OPENCLAW_EDGE_ID` (optional edge identity)
+
+The poller fetches commands from the cloud, executes them against the local VideoMemory HTTP API, and posts results back. See `docs/agent-integration-contract.md` for the command envelope.
+
+## Event Mode (End-to-End)
+
+Terminology:
+
+- **Edge VideoMemory Server**: VideoMemory running on-device / on a local host doing ingestion loops and visualizing sensors.
+- **Cloud VideoMemory Server**: lightweight cloud control plane (queue + trigger intake + MCP for OpenClaw).
+
+Transport between edge and cloud:
+
+- **Streaming Mode**: raw video streams (RTMP/SRT/WHIP)
+- **Event Mode**: triggers + command polling + command results
+
+### Cloud stack (OpenClaw + Cloud VideoMemory Server)
+
+Start the server-side stack:
+
+```bash
+docker compose -f docker-compose.eventmode.yml up --build
+```
+
+This starts:
+
+- Cloud VideoMemory Server on `http://localhost:8785`
+- Cloud VideoMemory MCP endpoint on `http://localhost:8785/mcp`
+- OpenClaw gateway on `http://localhost:18789`
+- Minimal Event Mode dashboard UI on `http://localhost:8785/`
+
+Optional smoke test for the cloud control plane:
+
+```bash
+bash deploy/test-eventmode-cloud.sh
+```
+
+Optional MCP smoke test (OpenClaw-compatible command enqueue path):
+
+```bash
+bash deploy/test-eventmode-mcp.sh
+```
+
+### Phone demo (Android app -> Cloud UI)
+
+Use this for a quick demo of Event Mode transport before wiring full edge ingestion on mobile:
+
+1. Start the cloud stack: `docker compose -f docker-compose.eventmode.yml up --build`
+2. Open the dashboard on your computer: `http://localhost:8785/`
+3. Build/install the Android app (`android/app/build/outputs/apk/debug/app-debug.apk`) and launch it
+4. Switch the app to **Event Mode**
+5. Enter your computer's LAN endpoint:
+   - `http://YOUR_PC_IP:8785/api/event/triggers`
+6. Tap **Start**
+
+The app will keep local camera preview active and send periodic trigger/heartbeat events to the Cloud VideoMemory Server. The dashboard should show:
+
+- a new `edge_id` under **Edges**
+- incoming records under **Recent Triggers (Edge -> Cloud)**
+
+Secured local demo (optional):
+
+- Start cloud stack with a token, for example:
+  - `VIDEOMEMORY_CLOUD_TOKEN=demo-token docker compose -f docker-compose.eventmode.yml up --build`
+- In the Android app Event Mode screen, fill **Optional cloud token (Bearer)** with `demo-token`
+- Export `VIDEOMEMORY_CLOUD_TOKEN=demo-token` before running `deploy/test-eventmode-cloud.sh` or `deploy/test-eventmode-mcp.sh`
+
+### Demo queued commands from the cloud UI
+
+From the dashboard (`http://localhost:8785/`), use **Queue Command (Manual Demo)** with the phone's `edge_id`.
+
+Mobile demo actions currently supported by the Android app in Event Mode:
+
+- `ping` (returns `{ "pong": true }`)
+- `show_toast` with args JSON like `{ "message": "hello from cloud" }`
+- `emit_test_event` (phone emits an immediate test trigger)
+- `list_devices` (returns a demo mobile preview device list)
+- `list_tasks` (returns local edge task list from the phone)
+- `get_task` with args JSON like `{ "task_id": "1" }`
+- `create_task` with args JSON like `{ "io_id": "phone-camera-0", "task_description": "Watch the driveway" }`
+- `update_task` / `edit_task` with args JSON like `{ "task_id": "1", "new_description": "Watch for package deliveries" }`
+- `stop_task` with args JSON like `{ "task_id": "1" }`
+- `delete_task` with args JSON like `{ "task_id": "1" }`
+
+You should then see:
+
+- command fetch/processing in the phone's **Event Mode Log**
+- task updates in the phone's **Edge Server State (Demo)** panel
+- rows appear in the cloud dashboard **Recent Results (Edge -> Cloud)**
+- `task_update` events appear in **Recent Triggers (Edge -> Cloud)** when cloud commands change tasks
+
+### Edge VideoMemory Server setup (Event Mode)
+
+Run VideoMemory on the edge/local machine (the one doing ingest/analysis), and set:
+
+```bash
+export VIDEOMEMORY_DEPLOYMENT_MODE=event
+export VIDEOMEMORY_OPENCLAW_EDGE_ID=edge-lab-1
+export VIDEOMEMORY_OPENCLAW_WEBHOOK_URL=http://YOUR_CLOUD_HOST:8785/api/event/triggers
+export VIDEOMEMORY_OPENCLAW_COMMAND_PULL_URL=http://YOUR_CLOUD_HOST:8785/api/event/commands/pull
+export VIDEOMEMORY_OPENCLAW_COMMAND_RESULT_URL=http://YOUR_CLOUD_HOST:8785/api/event/commands/result
+export VIDEOMEMORY_OPENCLAW_COMMAND_TOKEN=change-me
+uv run flask_app/app.py
+```
+
+In Event Mode, the **Edge VideoMemory Server UI** remains the main local visualization for ingestors:
+
+- `http://EDGE_HOST:5050/devices`
+- `http://EDGE_HOST:5050/device/<io_id>/debug`
+
+This preserves the monolithic-style sensor/ingestor visibility while moving orchestration to the cloud.
 
 ## OpenClaw + VideoMemory demo (detailed)
 
@@ -70,7 +201,7 @@ Notes:
 ### 2. Start the demo stack
 
 ```bash
-docker compose -f docker-compose.openclaw.yml up --build
+docker-compose -f docker-compose.openclaw.yml up --build
 ```
 
 This starts:
@@ -86,6 +217,12 @@ In another terminal:
 
 ```bash
 bash deploy/test-openclaw-stack.sh
+```
+
+For end-to-end phone + DM preflight (includes adapter forwarding and prints a phone RTMP URL):
+
+```bash
+LAPTOP_HOST=<your-laptop-lan-ip> bash deploy/test-openclaw-phone-demo.sh
 ```
 
 The smoke test checks:
@@ -108,11 +245,7 @@ If you did not set `GOOGLE_API_KEY` in `.env`:
 1. Open `http://localhost:5050`
 2. Go to **Settings**
 3. Set `GOOGLE_API_KEY` (or another supported provider key)
-4. Restart the stack so the key is picked up:
-
-```bash
-docker compose -f docker-compose.openclaw.yml restart videomemory
-```
+4. Changes apply immediately; no restart is required.
 
 ### 5. Run the demo flow
 
@@ -138,6 +271,8 @@ docker compose -f docker-compose.openclaw.yml down -v
 [![Deploy to Fly.io](https://fly.io/button.svg)](https://fly.io/apps/new?repo=https://github.com/Clamepending/videomemory)
 
 This deploys VideoMemory and MediaMTX together so phones can stream via RTMP and VideoMemory can pull via RTSP in the same Fly app.
+
+This is **Streaming Mode** (cloud-ingest fallback mode, kept intentionally in case you want to revert from edge processing).
 
 After deployment:
 

@@ -1,14 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">VideoMemory Stream</string>
-    <string name="stream_screen_subtitle">Stream your phone camera to VideoMemory with one tap.</string>
+    <string name="stream_screen_subtitle">Switch between Streaming Mode and Event Mode for VideoMemory.</string>
+    <string name="mode_streaming">Streaming Mode</string>
+    <string name="mode_event">Event Mode</string>
+    <string name="mode_help_streaming">Phone sends raw RTMP video to a Cloud VideoMemory Server.</string>
+    <string name="mode_help_event">Phone keeps local camera preview and sends trigger/events to a Cloud VideoMemory Server queue UI.</string>
     <string name="rtmp_destination">RTMP destination</string>
+    <string name="event_destination">Event endpoint</string>
     <string name="hint_rtmp_url">rtmp://YOUR_IP:1935/live/phone1</string>
+    <string name="hint_event_url">http://YOUR_PC_IP:8785/api/event/triggers</string>
+    <string name="hint_event_token">Optional cloud token (Bearer)</string>
     <string name="default_rtmp_url">rtmp://192.168.1.100:1935/live/phone1</string>
+    <string name="default_event_url">http://192.168.1.100:8785/api/event/triggers</string>
     <string name="start">Start</string>
     <string name="stop">Stop</string>
+    <string name="emit_test_event">Emit Test Event</string>
+    <string name="event_log">Event Mode Log</string>
+    <string name="event_log_placeholder">Waiting for local event-mode activity…</string>
+    <string name="edge_state">Edge Server State (Demo)</string>
+    <string name="edge_state_placeholder">Edge server demo not running.</string>
     <string name="status_idle">Idle</string>
     <string name="status_streaming">Streaming</string>
+    <string name="status_event_active">Event Mode Active</string>
     <string name="camera_preview">Camera preview</string>
     <string name="streaming_notification_title">Streaming active</string>
     <string name="streaming_notification_text">VideoMemory stream is running in the background.</string>

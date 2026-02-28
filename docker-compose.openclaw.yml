@@ -12,8 +12,8 @@ services:
       RTMP_INGEST_INTERNAL_HOST: "127.0.0.1"
       VIDEOMEMORY_RTSP_PULL_PORT: "8554"
       VIDEOMEMORY_MCP_PORT: "8765"
-      VIDEOMEMORY_OPENCLAW_WEBHOOK_URL: "http://openclaw:18789/hooks/videomemory-alert"
-      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-}"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_URL: "http://openclaw-adapter:8091/videomemory-alert"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${OPENCLAW_HOOKS_TOKEN:-videomemory-hook-token}"
       VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S: "30"
       VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S: "1"
       # Set at least one model key before creating tasks (example)
@@ -39,19 +39,35 @@ services:
       - -lc
       - |
         mkdir -p /home/node/.openclaw /home/node/.openclaw/workspace
-        if [ ! -f /home/node/.openclaw/openclaw.json ]; then
-          cat > /home/node/.openclaw/openclaw.json <<EOF
+        cat > /home/node/.openclaw/openclaw.json <<EOF
         {
+          "tools": {
+            "profile": "full",
+            "exec": {
+              "host": "gateway",
+              "security": "full",
+              "ask": "off",
+              "pathPrepend": ["/home/node/.openclaw/workspace/bin"]
+            }
+          },
           "gateway": {
             "mode": "local",
             "bind": "lan",
             "port": 18789,
-            "auth": { "mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}" }
+            "auth": { "mode": "token", "token": "default-token" },
+            "controlUi": {
+              "allowedOrigins": [
+                "http://127.0.0.1:18789",
+                "http://localhost:18789"
+              ],
+              "allowInsecureAuth": true,
+              "dangerouslyDisableDeviceAuth": true
+            }
           },
           "hooks": {
             "enabled": true,
             "path": "/hooks",
-            "token": "${OPENCLAW_GATEWAY_TOKEN}",
+            "token": "${OPENCLAW_HOOKS_TOKEN}",
             "defaultSessionKey": "hook:videomemory",
             "allowRequestSessionKey": false,
             "allowedSessionKeyPrefixes": ["hook:"],
@@ -68,19 +84,119 @@ services:
           }
         }
         EOF
+        mkdir -p /home/node/.openclaw/workspace/bin
+        cat > /home/node/.openclaw/workspace/bin/vm_health <<'EOF'
+        #!/bin/sh
+        exec curl -fsS http://videomemory:5050/api/health
+        EOF
+        cat > /home/node/.openclaw/workspace/bin/vm_devices <<'EOF'
+        #!/bin/sh
+        exec curl -fsS http://videomemory:5050/api/devices
+        EOF
+        cat > /home/node/.openclaw/workspace/bin/vm_tasks <<'EOF'
+        #!/bin/sh
+        if [ -n "$${1:-}" ]; then
+          exec curl -fsS "http://videomemory:5050/api/tasks?io_id=$$1"
         fi
-        exec node dist/index.js gateway --bind lan --port 18789 --token "${OPENCLAW_GATEWAY_TOKEN}" --allow-unconfigured --verbose
+        exec curl -fsS http://videomemory:5050/api/tasks
+        EOF
+        cat > /home/node/.openclaw/workspace/bin/vm_task_create <<'EOF'
+        #!/bin/sh
+        if [ $$# -lt 2 ]; then
+          echo "usage: vm_task_create <io_id> <task_description...>" >&2
+          exit 2
+        fi
+        io_id="$$1"
+        shift
+        desc="$$*"
+        payload=$$(printf '{"io_id":"%s","task_description":"%s"}' "$$io_id" "$$(printf '%s' "$$desc" | sed 's/"/\\"/g')")
+        exec curl -fsS -X POST http://videomemory:5050/api/tasks -H 'Content-Type: application/json' -d "$$payload"
+        EOF
+        cat > /home/node/.openclaw/workspace/bin/vm_task_update <<'EOF'
+        #!/bin/sh
+        if [ $$# -lt 2 ]; then
+          echo "usage: vm_task_update <task_id> <new_description...>" >&2
+          exit 2
+        fi
+        task_id="$$1"
+        shift
+        desc="$$*"
+        payload=$$(printf '{"new_description":"%s"}' "$$(printf '%s' "$$desc" | sed 's/"/\\"/g')")
+        exec curl -fsS -X PUT "http://videomemory:5050/api/task/$$task_id" -H 'Content-Type: application/json' -d "$$payload"
+        EOF
+        cat > /home/node/.openclaw/workspace/bin/vm_task_stop <<'EOF'
+        #!/bin/sh
+        if [ $$# -ne 1 ]; then
+          echo "usage: vm_task_stop <task_id>" >&2
+          exit 2
+        fi
+        exec curl -fsS -X POST "http://videomemory:5050/api/task/$$1/stop" -H 'Content-Type: application/json' -d '{}'
+        EOF
+        cat > /home/node/.openclaw/workspace/bin/vm_task_delete <<'EOF'
+        #!/bin/sh
+        if [ $$# -ne 1 ]; then
+          echo "usage: vm_task_delete <task_id>" >&2
+          exit 2
+        fi
+        exec curl -fsS -X DELETE "http://videomemory:5050/api/task/$$1"
+        EOF
+        cat > /home/node/.openclaw/workspace/bin/vm_caption_frame <<'EOF'
+        #!/bin/sh
+        if [ $$# -lt 2 ]; then
+          echo "usage: vm_caption_frame <io_id> <prompt...>" >&2
+          exit 2
+        fi
+        io_id="$$1"
+        shift
+        prompt="$$*"
+        payload=$$(printf '{"prompt":"%s","io_id":"%s"}' "$$(printf '%s' "$$prompt" | sed 's/"/\\"/g')" "$$(printf '%s' "$$io_id" | sed 's/"/\\"/g')")
+        exec curl -sS -X POST "http://videomemory:5050/api/caption_frame" -H 'Content-Type: application/json' -d "$$payload"
+        EOF
+        chmod +x /home/node/.openclaw/workspace/bin/vm_*
+        cat > /home/node/.openclaw/workspace/VIDEOMEMORY.md <<'EOF'
+        # VideoMemory control shortcuts
+
+        Use these commands from OpenClaw exec:
+        - vm_health
+        - vm_devices
+        - vm_tasks [io_id]
+        - vm_task_create <io_id> <task_description...>
+        - vm_task_update <task_id> <new_description...>
+        - vm_task_stop <task_id>
+        - vm_task_delete <task_id>
+        - vm_caption_frame <io_id> <prompt...>
+        EOF
+        export OPENCLAW_CONFIG_PATH=/home/node/.openclaw/openclaw.json
+        export OPENCLAW_GATEWAY_TOKEN=default-token
+        exec node dist/index.js gateway --bind lan --port 18789 --token default-token --allow-unconfigured --verbose
     environment:
       HOME: /home/node
-      OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-change-me}"
+      OPENCLAW_GATEWAY_TOKEN: "default-token"
+      OPENCLAW_HOOKS_TOKEN: "${OPENCLAW_HOOKS_TOKEN:-videomemory-hook-token}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     ports:
-      - "18789:18789"
+      - "28789:18789"
     volumes:
       - openclaw-data-v2:/home/node/.openclaw
       - ./deploy/openclaw:/config-examples:ro
     depends_on:
       - videomemory
+      - openclaw-adapter
+
+  openclaw-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openclaw-adapter
+    restart: unless-stopped
+    command: ["uv", "run", "python", "-m", "videomemory.openclaw_compat_adapter"]
+    environment:
+      OPENCLAW_COMPAT_PORT: "8091"
+      OPENCLAW_COMPAT_TARGETS: "${OPENCLAW_COMPAT_TARGETS:-http://openclaw:18789/hooks/videomemory-alert,http://openclaw:18789/webhooks/videomemory-alert}"
+      OPENCLAW_COMPAT_TARGET_TOKEN: "${OPENCLAW_HOOKS_TOKEN:-videomemory-hook-token}"
+    ports:
+      - "8091:8091"
 
 volumes:
   videomemory-data:

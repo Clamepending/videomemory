@@ -32,6 +32,9 @@ android/.idea/
 android/captures/
 android/.externalNativeBuild/
 android/.cxx/
+android/key.properties
+android/*.jks
+android/*.keystore
 
 # Experiment artifacts
 videomemory/experiments/*.png

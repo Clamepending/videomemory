@@ -4,6 +4,13 @@ VideoMemory is a video monitoring system. You create **tasks** for camera input 
 
 This document describes how to run the VideoMemory **core service** and interact with it via HTTP/MCP from an external agent or gateway.
 
+Recommended deployment mode:
+
+- **Event Mode (primary):** run `VideoMemory` on the local app/device/edge host (local ingest + analysis), and run `OpenClaw`/MCP in the cloud for orchestration.
+- **Streaming Mode (fallback):** deploy `VideoMemory` in the cloud and have devices stream to it directly (RTMP/SRT/WHIP).
+
+Architecture reference: `docs/edge-cloud-architecture.md`
+
 ## Quick Start
 
 If the server is not already running, start it:
@@ -18,6 +25,7 @@ For local integration testing, choose one stack:
 
 - Core only: `docker compose -f docker-compose.core.yml up --build`
 - Core + OpenClaw: `docker compose -f docker-compose.openclaw.yml up --build`
+- Event Mode cloud side (Cloud VideoMemory Server + OpenClaw): `docker compose -f docker-compose.eventmode.yml up --build`
 - Core + AdminAgent (sibling repo): `docker compose -f docker-compose.adminagent.yml up --build`
 
 ## OpenAPI Spec
@@ -141,7 +149,12 @@ Permanently removes a task and all its notes. Only use when you want to erase a 
 
 ### External agent integration
 
-Run your conversational/admin agent separately and have it call VideoMemory APIs.
+Run your conversational/admin agent separately.
+
+- In cloud/fallback mode, the agent can call VideoMemory APIs directly.
+- In `Streaming Mode`, the agent can call VideoMemory APIs directly.
+- In `Event Mode`, use VideoMemory trigger webhooks for wake-ups and a cloud-friendly command return path (edge-initiated poll/websocket) for cloud->edge requests.
+- VideoMemory now includes an optional edge-initiated command poller controlled by `VIDEOMEMORY_OPENCLAW_COMMAND_PULL_URL` and related `VIDEOMEMORY_OPENCLAW_COMMAND_*` settings.
 
 - HTTP contract and examples: `docs/agent-integration-contract.md`
 - OpenAPI schema: `GET /openapi.json`
@@ -187,7 +200,7 @@ PUT /api/settings/GOOGLE_API_KEY
 {"value": "AIzaSy...your-key-here"}
 ```
 
-After setting a key, restart the service for it to take effect (or if running locally, restart the server).
+After setting a key, changes apply immediately to the running service.
 
 #### Check current settings
 
@@ -215,6 +228,13 @@ Returns all settings with their status. Sensitive values are masked — check th
 | `OPENAI_API_KEY` | OpenAI models (alternative) |
 | `OPENROUTER_API_KEY` | OpenRouter models (alternative) |
 | `ANTHROPIC_API_KEY` | Anthropic models (alternative) |
+| `VIDEOMEMORY_DEPLOYMENT_MODE` | Runtime mode: `streaming` (cloud ingest) or `event` (edge ingest + trigger/poll command plane) |
+| `VIDEOMEMORY_OPENCLAW_WEBHOOK_URL` | Trigger endpoint URL (Event Mode: point to Cloud VideoMemory Server `/api/event/triggers`) |
+| `VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN` | Trigger bearer token (optional) |
+| `VIDEOMEMORY_OPENCLAW_COMMAND_PULL_URL` | Event Mode edge poll endpoint (Cloud VideoMemory Server `/api/event/commands/pull`) |
+| `VIDEOMEMORY_OPENCLAW_COMMAND_RESULT_URL` | Event Mode command result callback URL (`/api/event/commands/result`) |
+| `VIDEOMEMORY_OPENCLAW_COMMAND_TOKEN` | Event Mode command queue bearer token (optional; can reuse webhook token) |
+| `VIDEOMEMORY_OPENCLAW_EDGE_ID` | Edge identity used to route Event Mode commands |
 | `VIDEO_INGESTOR_MODEL` | Which model to use for video analysis (default: `gemini-2.5-flash`) |
 
 #### Onboarding: setting keys on behalf of the user

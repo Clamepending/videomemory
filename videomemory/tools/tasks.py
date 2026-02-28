@@ -6,6 +6,27 @@ import os
 import re
 from typing import Optional
 
+from videomemory.system.model_providers.factory import MODEL_PROVIDER_MAP
+
+_MODEL_REQUIRED_KEY = {
+    "gemini-2.5-flash": "GOOGLE_API_KEY",
+    "gemini-2.5-flash-lite": "GOOGLE_API_KEY",
+    "gpt-4.1-nano": "OPENAI_API_KEY",
+    "gpt-4o-mini": "OPENAI_API_KEY",
+    "claude-sonnet-4-6": "ANTHROPIC_API_KEY",
+    "claude-3-5-sonnet-latest": "ANTHROPIC_API_KEY",
+    "molmo-2-8b": "OPENROUTER_API_KEY",
+    "qwen-2-vl-7b": "OPENROUTER_API_KEY",
+    "phi-4-multimodal": "OPENROUTER_API_KEY",
+}
+
+_VLM_KEYS = (
+    "GOOGLE_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY",
+)
+
 
 class ToolContext:
     """Context object that holds system managers for tool functions."""
@@ -166,6 +187,28 @@ def add_task(io_id: str, task_description: str) -> dict:
         return {
             "status": "error",
             "message": "IO manager not available in context",
+        }
+
+    if not any(os.getenv(key, "").strip() for key in _VLM_KEYS):
+        return {
+            "status": "error",
+            "message": (
+                "No VLM key is set. Configure one of GOOGLE_API_KEY, OPENAI_API_KEY, "
+                "OPENROUTER_API_KEY, or ANTHROPIC_API_KEY before creating tasks."
+            ),
+        }
+
+    requested_model = os.getenv("VIDEO_INGESTOR_MODEL", "gemini-2.5-flash").strip().lower() or "gemini-2.5-flash"
+    if requested_model not in MODEL_PROVIDER_MAP:
+        requested_model = "gemini-2.5-flash"
+    required_key = _MODEL_REQUIRED_KEY.get(requested_model)
+    if required_key and not os.getenv(required_key, "").strip():
+        return {
+            "status": "error",
+            "message": (
+                f"Model '{requested_model}' requires {required_key}. "
+                f"Set it in /api/settings/{required_key} before creating tasks."
+            ),
         }
     
     try:
@@ -408,4 +451,3 @@ def edit_task(task_id: str, new_description: str) -> dict:
             "status": "error",
             "message": f"Failed to edit task: {str(e)}",
         }
-

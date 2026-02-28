@@ -42,6 +42,21 @@ class CaptionFrameApiTests(unittest.TestCase):
         self.assertEqual(data.get("status"), "success")
         self.assertEqual(data.get("io_id"), "net0")
         self.assertEqual(data.get("analysis"), "A person in frame")
+        self.assertTrue(data.get("frame_sha256"))
+        self.assertEqual(data.get("frame_bytes"), len(b"jpeg-bytes"))
+        self.assertTrue(data.get("model_provider"))
+
+    @patch.object(flask_app_module, "_get_device_preview_frame_bytes", return_value=b"jpeg-bytes")
+    @patch.object(flask_app_module.model_provider, "_sync_generate_content", return_value=SimpleNamespace(analysis="   "))
+    def test_caption_frame_empty_analysis_returns_502(self, _mock_generate, _mock_preview):
+        resp = self.client.post("/api/caption_frame", json={"io_id": "net0", "prompt": "describe scene"})
+        self.assertEqual(resp.status_code, 502)
+        data = resp.get_json()
+        self.assertEqual(data.get("status"), "error")
+        self.assertEqual(data.get("error"), "Model returned empty analysis")
+        self.assertEqual(data.get("io_id"), "net0")
+        self.assertTrue(data.get("frame_sha256"))
+        self.assertTrue(data.get("model_provider"))
 
     @patch.object(flask_app_module, "_get_device_preview_frame_bytes", return_value=b"jpeg-bytes")
     @patch.object(flask_app_module.model_provider, "_sync_generate_content", side_effect=RuntimeError("provider failed"))

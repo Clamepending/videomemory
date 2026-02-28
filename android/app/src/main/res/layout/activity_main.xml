@@ -50,7 +50,55 @@
             android:orientation="vertical"
             android:padding="16dp">
 
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/modeToggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:singleSelection="true"
+                app:selectionRequired="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnModeStreaming"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:checkable="true"
+                    android:checked="true"
+                    android:text="@string/mode_streaming"
+                    android:textAllCaps="false"
+                    android:textColor="@color/toggle_button_text"
+                    app:backgroundTint="@color/toggle_button_background_tint"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/toggle_button_stroke" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnModeEvent"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:checkable="true"
+                    android:text="@string/mode_event"
+                    android:textAllCaps="false"
+                    android:textColor="@color/toggle_button_text"
+                    app:backgroundTint="@color/toggle_button_background_tint"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/toggle_button_stroke" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+
             <TextView
+                android:id="@+id/modeHelpText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="10dp"
+                android:text="@string/mode_help_streaming"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/destinationLabel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/rtmp_destination"
@@ -59,6 +107,7 @@
                 android:textStyle="bold" />
 
             <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/urlInputLayout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
@@ -84,6 +133,34 @@
                     android:textColorHint="@color/text_secondary" />
             </com.google.android.material.textfield.TextInputLayout>
 
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tokenInputLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/hint_event_token"
+                android:visibility="gone"
+                app:boxBackgroundColor="@color/input_background"
+                app:boxBackgroundMode="filled"
+                app:boxCornerRadiusBottomEnd="14dp"
+                app:boxCornerRadiusBottomStart="14dp"
+                app:boxCornerRadiusTopEnd="14dp"
+                app:boxCornerRadiusTopStart="14dp"
+                app:boxStrokeColor="@color/card_stroke"
+                app:hintTextColor="@color/text_secondary">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/tokenInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:importantForAutofill="no"
+                    android:inputType="textPassword"
+                    android:maxLines="1"
+                    android:minHeight="56dp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary" />
+            </com.google.android.material.textfield.TextInputLayout>
+
             <TextView
                 android:id="@+id/statusText"
                 android:layout_width="wrap_content"
@@ -99,37 +176,79 @@
                 android:textSize="12sp"
                 android:textStyle="bold" />
 
-            <LinearLayout
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStart"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="14dp"
+                android:text="@string/start"
+                android:textAllCaps="false"
+                android:textColor="@android:color/white"
+                app:backgroundTint="@color/button_primary"
+                app:cornerRadius="14dp"
+                app:iconPadding="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnEmitTestEvent"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginTop="10dp"
+                android:text="@string/emit_test_event"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary"
+                android:visibility="gone"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/button_outline" />
+
+            <TextView
+                android:id="@+id/eventLogLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/event_log"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/eventLogText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:orientation="horizontal">
+                android:layout_marginTop="6dp"
+                android:background="@color/input_background"
+                android:padding="10dp"
+                android:text="@string/event_log_placeholder"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:typeface="monospace"
+                android:visibility="gone" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnStart"
-                    style="@style/Widget.MaterialComponents.Button"
-                    android:layout_width="0dp"
-                    android:layout_height="48dp"
-                    android:layout_weight="1"
-                    android:text="@string/start"
-                    android:textAllCaps="false"
-                    app:backgroundTint="@color/button_primary"
-                    app:cornerRadius="14dp"
-                    app:iconPadding="8dp" />
+            <TextView
+                android:id="@+id/edgeStateLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/edge_state"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnStop"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="48dp"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:enabled="false"
-                    android:text="@string/stop"
-                    android:textAllCaps="false"
-                    app:cornerRadius="14dp"
-                    app:strokeColor="@color/button_outline" />
-            </LinearLayout>
+            <TextView
+                android:id="@+id/edgeStateText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@color/input_background"
+                android:padding="10dp"
+                android:text="@string/edge_state_placeholder"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:typeface="monospace"
+                android:visibility="gone" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
