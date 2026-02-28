@@ -2,6 +2,7 @@
 """Flask app for VideoMemory core APIs and UI."""
 
 import asyncio
+import ipaddress
 import os
 import re
 import socket
@@ -397,7 +398,7 @@ def get_devices():
                 'source': device.get('source', 'local'),
             }
             if device.get('url'):
-                entry['url'] = device['url']
+                entry['url'] = _public_ingest_url(device['url'])
             by_category[category].append(entry)
         
         import logging
@@ -416,24 +417,46 @@ def _rtmp_url_host() -> str:
     host = os.environ.get("RTMP_SERVER_HOST", "").strip()
     if host:
         return host.split(":")[0]
+
+    def _is_private_or_loopback(hostname: str) -> bool:
+        try:
+            ip = ipaddress.ip_address(hostname)
+            return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
+        except ValueError:
+            return hostname in {"localhost"} or hostname.startswith("127.")
+
+    def _clean_host(raw: str) -> str:
+        return (raw or "").strip().split(",")[0].strip().split(":")[0].strip("[]")
+
+    def _is_container_runtime() -> bool:
+        return os.path.exists("/.dockerenv")
+
     try:
-        h = request.host
-        if h and h != "localhost" and not h.startswith("127."):
-            return h.split(":")[0]
+        forwarded = _clean_host(request.headers.get("X-Forwarded-Host", ""))
+        if forwarded and not _is_private_or_loopback(forwarded):
+            return forwarded
+    except Exception:
+        pass
+
+    try:
+        h = _clean_host(request.host)
+        if h and not _is_private_or_loopback(h):
+            return h
     except Exception:
         pass
 
     # Local dev convenience: if UI is opened on localhost, generate a LAN IP so
     # phones on the same network can connect without manual placeholder edits.
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        lan_ip = s.getsockname()[0]
-        s.close()
-        if lan_ip and not lan_ip.startswith("127."):
-            return lan_ip
-    except Exception:
-        pass
+    if not _is_container_runtime():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+            s.close()
+            if lan_ip and not lan_ip.startswith("127."):
+                return lan_ip
+        except Exception:
+            pass
 
     return "YOUR_SERVER_IP"
 
@@ -443,6 +466,24 @@ def _ingest_internal_host() -> str:
     if host:
         return host.split(":")[0]
     return _rtmp_url_host()
+
+
+def _public_ingest_url(url: str) -> str:
+    """Rewrite known ingest URLs from internal host to public host for API responses."""
+    if not isinstance(url, str) or not url:
+        return url
+    parsed = urlparse(url)
+    if parsed.scheme not in {"rtmp", "srt", "whip"} or not parsed.hostname:
+        return url
+    internal_host = _ingest_internal_host()
+    public_host = _rtmp_url_host()
+    if parsed.hostname != internal_host or not public_host:
+        return url
+    netloc = parsed.netloc
+    host_port = parsed.hostname if not parsed.port else f"{parsed.hostname}:{parsed.port}"
+    replacement = public_host if not parsed.port else f"{public_host}:{parsed.port}"
+    netloc = netloc.replace(host_port, replacement, 1)
+    return parsed._replace(netloc=netloc).geturl()
 
 
 def _rtmp_port_diagnostics() -> dict:
@@ -535,9 +576,12 @@ def create_rtmp_camera():
         ingest_url = f"rtmp://{internal_host}:1935/{stream_key}"
         camera_info = io_manager.add_network_camera(ingest_url, name)
         stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
+        device_out = dict(camera_info)
+        if device_out.get("url"):
+            device_out["url"] = _public_ingest_url(device_out["url"])
         return jsonify({
             "status": "success",
-            "device": camera_info,
+            "device": device_out,
             "rtmp_url": public_url,
             "rtsp_pull_url": stream_info.get("pull_url"),
             "diagnostics": _rtmp_port_diagnostics(),
@@ -566,9 +610,12 @@ def create_srt_camera():
         ingest_srt_url = f"srt://{internal_host}:8890?streamid=publish:{stream_key}"
         camera_info = io_manager.add_network_camera(ingest_srt_url, name)
         stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
+        device_out = dict(camera_info)
+        if device_out.get("url"):
+            device_out["url"] = _public_ingest_url(device_out["url"])
         return jsonify({
             "status": "success",
-            "device": camera_info,
+            "device": device_out,
             "srt_url": public_srt_url,
             "rtsp_pull_url": stream_info.get("pull_url"),
             "notes": "Use SRT caller mode from the phone/app. VideoMemory will pull via RTSP.",
@@ -598,9 +645,12 @@ def create_whip_camera():
         whip_url = f"{scheme}://{public_host}:8889/{stream_key}/whip"
         camera_info = io_manager.add_network_camera(stored_url, name)
         stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
+        device_out = dict(camera_info)
+        if device_out.get("url"):
+            device_out["url"] = _public_ingest_url(device_out["url"])
         return jsonify({
             "status": "success",
-            "device": camera_info,
+            "device": device_out,
             "whip_url": whip_url,
             "rtsp_pull_url": stream_info.get("pull_url"),
             "notes": "Use a WHIP-capable WebRTC publisher. For internet deployment, set proper ICE/public host config in MediaMTX.",
@@ -1020,32 +1070,45 @@ def get_ingestor_tasks(io_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/device/<io_id>/analyze', methods=['POST'])
-def analyze_device_frame(io_id):
-    """Run one-off VLM analysis on the latest frame for a device.
+@app.route('/api/caption_frame', methods=['POST'])
+def caption_frame():
+    """Run one-off VLM caption/query on the latest frame for a specific device.
 
     Body (JSON):
         prompt (str, required): Natural-language instruction for the model.
+        io_id (str, required): Device id.
     """
     class OneOffFrameAnalysis(BaseModel):
         analysis: str = Field(..., description="Model output for the requested frame analysis")
 
     try:
-        data = request.json
-        if not data:
-            return jsonify({'status': 'error', 'error': 'Request body must be JSON'}), 400
-
+        data = request.get_json(silent=True) or {}
         prompt = str(data.get('prompt', '')).strip()
+        io_id = str(data.get('io_id', '')).strip()
+
         if not prompt:
             return jsonify({'status': 'error', 'error': 'prompt is required'}), 400
+        if not io_id:
+            return jsonify({'status': 'error', 'error': 'io_id is required'}), 400
 
+        device_info = io_manager.get_stream_info(io_id) or {}
         frame_bytes = _get_device_preview_frame_bytes(io_id)
         if frame_bytes is None:
-            return jsonify({'status': 'error', 'error': 'No frame available for this device'}), 404
+            return jsonify({
+                'status': 'error',
+                'error': 'No frame available for this device',
+                'io_id': io_id,
+                'device': {
+                    'name': device_info.get('name', ''),
+                    'source': device_info.get('source', ''),
+                    'url': _public_ingest_url(device_info.get('url', '')) if device_info.get('url') else '',
+                    'pull_url': device_info.get('pull_url', ''),
+                },
+                'hint': 'Ensure the camera is actively publishing and the stream codec is supported (H.264 + AAC).',
+            }), 404
 
         import base64
         image_base64 = base64.b64encode(frame_bytes).decode('utf-8')
-
         response = model_provider._sync_generate_content(
             image_base64=image_base64,
             prompt=prompt,
@@ -1059,7 +1122,7 @@ def analyze_device_frame(io_id):
             'analysis': response.analysis,
         })
     except Exception as e:
-        flask_logger.error(f"Error in one-off analyze for {io_id}: {e}", exc_info=True)
+        flask_logger.error("Error in /api/caption_frame: %s", e, exc_info=True)
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 # ── Health & OpenAPI ──────────────────────────────────────────
@@ -1150,6 +1213,32 @@ def openapi_spec():
                                 },
                             }}},
                         }
+                    },
+                }
+            },
+            "/api/caption_frame": {
+                "post": {
+                    "operationId": "caption_frame",
+                    "summary": "Caption/query the latest frame for a device",
+                    "description": (
+                        "Runs a one-off vision-language query on the latest available frame "
+                        "for the specified device."
+                    ),
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "required": ["prompt", "io_id"],
+                            "properties": {
+                                "prompt": {"type": "string", "description": "Natural-language instruction for the model"},
+                                "io_id": {"type": "string", "description": "Device identifier from GET /api/devices"},
+                            },
+                        }}},
+                    },
+                    "responses": {
+                        "200": {"description": "Caption/query result returned"},
+                        "400": {"description": "Validation error"},
+                        "404": {"description": "No frame available for the specified device"},
                     },
                 }
             },
@@ -1363,6 +1452,22 @@ _KNOWN_SETTINGS = [
     'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
 ]
 
+_MODEL_RUNTIME_KEYS = {
+    'GOOGLE_API_KEY',
+    'OPENAI_API_KEY',
+    'OPENROUTER_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'VIDEO_INGESTOR_MODEL',
+}
+
+_OPENCLAW_RUNTIME_KEYS = {
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S',
+    'VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S',
+    'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
+}
+
 
 def _reload_openclaw_notifier_from_env() -> None:
     """Refresh OpenClaw notifier config from current environment settings."""
@@ -1376,6 +1481,22 @@ def _reload_openclaw_notifier_from_env() -> None:
         openclaw_notifier.enabled = updated.enabled
     except Exception as e:
         flask_logger.warning("Failed to reload OpenClaw notifier settings: %s", e)
+
+
+def _apply_runtime_setting_change(changed_key: str) -> None:
+    """Apply in-process runtime reloads needed for a changed setting key."""
+    if changed_key in _OPENCLAW_RUNTIME_KEYS:
+        _reload_openclaw_notifier_from_env()
+
+    if changed_key in _MODEL_RUNTIME_KEYS:
+        model_name = os.getenv('VIDEO_INGESTOR_MODEL', '').strip() or None
+        reload_result = task_manager.reload_model_provider(model_name=model_name)
+        flask_logger.info(
+            "Applied model runtime settings update for %s using %s (ingestors=%d)",
+            changed_key,
+            reload_result.get('provider'),
+            reload_result.get('updated_ingestors', 0),
+        )
 
 def _mask_value(key: str, value: str) -> str:
     """Mask sensitive values, showing only the last 4 characters."""
@@ -1422,13 +1543,13 @@ def update_setting(key):
             env_vals = dotenv_values()
             if key in env_vals:
                 os.environ[key] = env_vals[key]
-            _reload_openclaw_notifier_from_env()
+            _apply_runtime_setting_change(key)
             return jsonify({'status': 'cleared', 'key': key})
         
         # Save to DB and update os.environ for immediate effect
         db.set_setting(key, value)
         os.environ[key] = value
-        _reload_openclaw_notifier_from_env()
+        _apply_runtime_setting_change(key)
         
         return jsonify({'status': 'saved', 'key': key})
     except Exception as e:

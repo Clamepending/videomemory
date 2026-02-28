@@ -450,3 +450,30 @@ class TaskManager:
             "task_id": task_id,
             "io_id": io_id,
         }
+
+    def reload_model_provider(self, model_name: Optional[str] = None) -> Dict[str, Any]:
+        """Rebuild and hot-swap the active model provider.
+
+        This applies new model/key settings immediately for new and running ingestors.
+        """
+        provider = get_VLM_provider(model_name=model_name)
+        self._model_provider = provider
+
+        updated_ingestors = 0
+        for ingestor in self._ingestors.values():
+            try:
+                ingestor.set_model_provider(provider)
+                updated_ingestors += 1
+            except Exception as e:
+                logger.error("Failed to hot-swap provider for ingestor: %s", e, exc_info=True)
+
+        provider_name = type(provider).__name__
+        logger.info(
+            "Hot-reloaded model provider: %s (updated %d active ingestor(s))",
+            provider_name,
+            updated_ingestors,
+        )
+        return {
+            "provider": provider_name,
+            "updated_ingestors": updated_ingestors,
+        }

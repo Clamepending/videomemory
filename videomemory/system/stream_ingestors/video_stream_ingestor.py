@@ -88,6 +88,15 @@ class VideoStreamIngestor:
         self._on_detection_event = on_detection_event
         
         logger.info(f"Initialized for camera index={self.camera_index}")
+
+    def set_model_provider(self, model_provider: BaseModelProvider) -> None:
+        """Swap the model provider used for future inference calls."""
+        self._model_provider = model_provider
+        if hasattr(self._model_provider, '_client') and self._model_provider._client is None:
+            logger.warning(
+                "Model provider %s is not initialized after hot-reload; inference calls may fail.",
+                type(self._model_provider).__name__,
+            )
  
     async def start(self):
         """Start the video stream ingestor and all processing loops."""

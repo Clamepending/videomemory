@@ -315,7 +315,7 @@
 
             <div class="restart-notice">
                 <span class="icon">&#9888;</span>
-                API key changes take effect after restarting the application.
+                API key changes apply immediately to running and new tasks.
             </div>
         </div>
 
@@ -334,10 +334,13 @@
                     <select class="setting-input" id="input-VIDEO_INGESTOR_MODEL">
                         <option value="">-- Use default (gemini-2.5-flash) --</option>
                         <option value="gemini-2.5-flash">Gemini 2.5 Flash (Google)</option>
-                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Google)</option>
+                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Google)</option>
                         <option value="gpt-4o-mini">GPT-4o Mini (OpenAI)</option>
                         <option value="gpt-4.1-nano">GPT-4.1 Nano (OpenAI)</option>
-                        <option value="qwen-2.5-vl-7b-instruct">Qwen 2.5 VL 7B (OpenRouter/Local)</option>
+                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Anthropic)</option>
+                        <option value="qwen-2-vl-7b">Qwen 2 VL 7B (OpenRouter)</option>
+                        <option value="phi-4-multimodal">Phi-4 Multimodal (OpenRouter)</option>
+                        <option value="molmo-2-8b">Molmo 2 8B (OpenRouter)</option>
                     </select>
                     <button class="btn btn-save" onclick="saveSetting('VIDEO_INGESTOR_MODEL')">Save</button>
                 </div>
@@ -346,7 +349,7 @@
 
             <div class="restart-notice">
                 <span class="icon">&#9888;</span>
-                Model changes take effect after restarting the application.
+                Model changes apply immediately to running and new tasks.
             </div>
         </div>
 
@@ -423,7 +426,7 @@
 
             <div class="restart-notice">
                 <span class="icon">&#9888;</span>
-                Webhook settings are applied immediately for new events. Restart is still recommended for consistency.
+                Webhook settings apply immediately.
             </div>
 
             <div class="contract-card">
