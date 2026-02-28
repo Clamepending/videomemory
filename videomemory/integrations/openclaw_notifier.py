@@ -7,7 +7,8 @@ import logging
 import os
 import threading
 import time
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -30,6 +31,7 @@ class OpenClawWakeNotifier:
         dedupe_ttl_seconds: float = 30.0,
         min_interval_seconds: float = 0.0,
         enabled: Optional[bool] = None,
+        event_recorder: Optional[Callable[[Dict[str, Any]], None]] = None,
     ):
         if webhook_url is _UNSET:
             webhook_url = os.getenv("VIDEOMEMORY_OPENCLAW_WEBHOOK_URL", "")
@@ -52,18 +54,30 @@ class OpenClawWakeNotifier:
         self._lock = threading.Lock()
         self._recent_event_times: Dict[str, float] = {}
         self._last_sent_at: float = 0.0
+        self._event_recorder = event_recorder
 
     @classmethod
-    def from_env(cls) -> "OpenClawWakeNotifier":
+    def from_env(cls, event_recorder: Optional[Callable[[Dict[str, Any]], None]] = None) -> "OpenClawWakeNotifier":
         """Build from environment variables."""
-        return cls()
+        return cls(event_recorder=event_recorder)
 
     def is_enabled(self) -> bool:
         return self.enabled and bool(self.webhook_url)
 
     def notify_task_update(self, task, note=None) -> bool:
         """Send a wake-up stimulus for a detection event."""
+        started = time.perf_counter()
         if not self.is_enabled():
+            self._record_debug_event(
+                status="disabled",
+                payload={
+                    "task_id": getattr(task, "task_id", None),
+                    "io_id": getattr(task, "io_id", None),
+                    "task_description": getattr(task, "task_desc", None),
+                },
+                duration_ms=self._duration_ms(started),
+                result_summary="Webhook disabled or URL not configured",
+            )
             return False
 
         note_content = ""
@@ -90,8 +104,15 @@ class OpenClawWakeNotifier:
             "sent_at": time.time(),
         }
         event_key = self._event_key(payload)
-        if not self._should_send(event_key):
+        should_send, skip_reason = self._should_send(event_key)
+        if not should_send:
             logger.debug("Skipping duplicate/throttled OpenClaw event for task_id=%s", payload.get("task_id"))
+            self._record_debug_event(
+                status="skipped",
+                payload=payload,
+                duration_ms=self._duration_ms(started),
+                result_summary=f"Suppressed by {skip_reason}",
+            )
             return False
 
         headers = {"Content-Type": "application/json"}
@@ -112,15 +133,35 @@ class OpenClawWakeNotifier:
                     payload.get("task_id"),
                     (resp.text or "")[:300],
                 )
+                self._record_debug_event(
+                    status="http_error",
+                    payload=payload,
+                    duration_ms=self._duration_ms(started),
+                    result_error=(resp.text or "")[:300] or f"HTTP {resp.status_code}",
+                    response_status=resp.status_code,
+                )
                 return False
             logger.info(
                 "OpenClaw wake sent for task_id=%s io_id=%s",
                 payload.get("task_id"),
                 payload.get("io_id"),
             )
+            self._record_debug_event(
+                status="ok",
+                payload=payload,
+                duration_ms=self._duration_ms(started),
+                result_summary=f"Webhook delivered (HTTP {resp.status_code})",
+                response_status=resp.status_code,
+            )
             return True
         except Exception as e:
             logger.warning("OpenClaw webhook send failed: %s", e)
+            self._record_debug_event(
+                status="send_error",
+                payload=payload,
+                duration_ms=self._duration_ms(started),
+                error=str(e),
+            )
             return False
 
     def _event_key(self, payload: Dict) -> str:
@@ -135,7 +176,7 @@ class OpenClawWakeNotifier:
             separators=(",", ":"),
         )
 
-    def _should_send(self, event_key: str) -> bool:
+    def _should_send(self, event_key: str) -> tuple[bool, str]:
         now = time.time()
         with self._lock:
             # Expire old dedupe entries.
@@ -145,11 +186,67 @@ class OpenClawWakeNotifier:
                     k: t for k, t in self._recent_event_times.items() if t >= cutoff
                 }
                 if event_key in self._recent_event_times:
-                    return False
+                    return False, "dedupe_ttl"
 
             if self.min_interval_seconds > 0 and (now - self._last_sent_at) < self.min_interval_seconds:
-                return False
+                return False, "min_interval"
 
             self._recent_event_times[event_key] = now
             self._last_sent_at = now
-            return True
+            return True, ""
+
+    def _duration_ms(self, started: float) -> float:
+        return round((time.perf_counter() - started) * 1000.0, 2)
+
+    def _remote_addr(self) -> str:
+        if not self.webhook_url:
+            return ""
+        try:
+            parsed = urlparse(self.webhook_url)
+            return parsed.netloc or parsed.path
+        except Exception:
+            return self.webhook_url
+
+    def _record_debug_event(
+        self,
+        *,
+        status: str,
+        payload: Dict[str, Any],
+        duration_ms: float,
+        error: str = "",
+        result_error: str = "",
+        result_summary: str = "",
+        response_status: Optional[int] = None,
+    ) -> None:
+        if not self._event_recorder:
+            return
+        try:
+            event: Dict[str, Any] = {
+                "ts": time.time(),
+                "event_source": "webhook",
+                "transport": "http",
+                "method": "webhook/task_update",
+                "status": status,
+                "duration_ms": duration_ms,
+                "remote_addr": self._remote_addr(),
+                "params": {
+                    "task_id": payload.get("task_id"),
+                    "io_id": payload.get("io_id"),
+                    "task_done": payload.get("task_done"),
+                    "task_status": payload.get("task_status"),
+                    "task_description": payload.get("task_description"),
+                },
+            }
+            if payload.get("note"):
+                event["params"]["note"] = payload.get("note")
+            if error:
+                event["error"] = error
+            if result_error:
+                event["result_error"] = result_error
+            if result_summary:
+                event["result_summary"] = result_summary
+            if response_status is not None:
+                event["response_status"] = response_status
+            self._event_recorder(event)
+        except Exception:
+            logger.debug("Failed to record webhook debug event", exc_info=True)

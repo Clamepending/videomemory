@@ -2,6 +2,7 @@
 """Flask app for VideoMemory core APIs and UI."""
 
 import asyncio
+import collections
 import hashlib
 import ipaddress
 import os
@@ -27,12 +28,39 @@ from videomemory.system.model_providers import get_VLM_provider
 from videomemory.system.database import TaskDatabase, get_default_data_dir
 import cv2
 import platform
-from typing import Optional
+from typing import Any, Dict, List, Optional
 import logging
 import requests
 from pydantic import BaseModel, Field
 
 flask_logger = logging.getLogger('FlaskApp')
+
+
+class UiEventLog:
+    """Thread-safe in-memory ring buffer for Events tab telemetry."""
+
+    def __init__(self, max_events: int = 500):
+        self._events = collections.deque(maxlen=max(10, int(max_events)))
+        self._lock = threading.Lock()
+        self._seq = 0
+
+    def append(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            self._seq += 1
+            entry = {"seq": self._seq, **event}
+            self._events.append(entry)
+            return entry
+
+    def list(self, limit: int = 200) -> List[Dict[str, Any]]:
+        count = max(1, min(int(limit), 1000))
+        with self._lock:
+            return list(self._events)[-count:]
+
+    def clear(self) -> int:
+        with self._lock:
+            removed = len(self._events)
+            self._events.clear()
+            return removed
 
 # Load environment variables
 load_dotenv()
@@ -55,7 +83,10 @@ db.load_settings_to_env()
 # ── System components ─────────────────────────────────────────
 io_manager = videomemory.system.IOmanager(db=db)
 model_provider = get_VLM_provider()
-openclaw_notifier = OpenClawWakeNotifier.from_env()
+ui_event_log = UiEventLog(
+    max_events=int(os.getenv("VIDEOMEMORY_UI_EVENT_BUFFER_SIZE", "500"))
+)
+openclaw_notifier = OpenClawWakeNotifier.from_env(event_recorder=ui_event_log.append)
 task_manager = videomemory.system.TaskManager(
     io_manager=io_manager,
     model_provider=model_provider,
@@ -176,7 +207,7 @@ def documentation_page():
 
 @app.route('/events')
 def events_page():
-    """Render the MCP events page."""
+    """Render the integration events page."""
     return render_template('events.html')
 
 @app.route('/device/<io_id>/debug')
@@ -1170,9 +1201,36 @@ def _mcp_http_base_url() -> str:
     return f"http://{host}:{port}"
 
 
+def _normalize_events_for_ui(events: List[Dict[str, Any]], source: str) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    seq_prefix = "M" if source == "mcp" else "W"
+    for item in events or []:
+        if not isinstance(item, dict):
+            normalized.append({
+                "event_source": source,
+                "method": f"{source}/unknown",
+                "status": "ok",
+                "result_summary": str(item),
+            })
+            continue
+        event = dict(item)
+        event.setdefault("event_source", source)
+        if event.get("seq") is not None:
+            event["seq"] = f"{seq_prefix}{event['seq']}"
+        normalized.append(event)
+    return normalized
+
+
+def _event_ts(ev: Dict[str, Any]) -> float:
+    try:
+        return float(ev.get("ts") or 0.0)
+    except Exception:
+        return 0.0
+
+
 @app.route('/api/mcp/events', methods=['GET'])
 def get_mcp_events():
-    """Get recent MCP calls for UI debugging."""
+    """Get recent MCP and webhook events for UI debugging."""
     try:
         limit_raw = request.args.get('limit', '200').strip()
         try:
@@ -1180,34 +1238,71 @@ def get_mcp_events():
         except ValueError:
             return jsonify({'status': 'error', 'error': 'limit must be an integer'}), 400
 
-        resp = requests.get(
-            f"{_mcp_http_base_url()}/events",
-            params={'limit': limit},
-            timeout=2.5,
-        )
-        payload = resp.json() if resp.text else {}
-        if resp.status_code >= 400:
-            message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
-            return jsonify({'status': 'error', 'error': message}), 502
-        return jsonify(payload if isinstance(payload, dict) else {'status': 'ok', 'events': []})
-    except requests.RequestException as e:
-        return jsonify({'status': 'error', 'error': f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'}), 502
+        mcp_events: List[Dict[str, Any]] = []
+        mcp_warning = ""
+        try:
+            resp = requests.get(
+                f"{_mcp_http_base_url()}/events",
+                params={'limit': limit},
+                timeout=2.5,
+            )
+            payload = resp.json() if resp.text else {}
+            if resp.status_code >= 400:
+                message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
+                mcp_warning = f"MCP events unavailable: {message}"
+            elif isinstance(payload, dict):
+                raw_events = payload.get("events", [])
+                if isinstance(raw_events, list):
+                    mcp_events = raw_events
+            else:
+                mcp_warning = "MCP events endpoint returned an invalid payload"
+        except requests.RequestException as e:
+            mcp_warning = f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'
+
+        webhook_events = ui_event_log.list(limit=limit)
+        merged_events = _normalize_events_for_ui(mcp_events, "mcp") + _normalize_events_for_ui(webhook_events, "webhook")
+        merged_events.sort(key=_event_ts)
+        merged_events = merged_events[-limit:]
+
+        result = {'status': 'ok', 'count': len(merged_events), 'events': merged_events}
+        if mcp_warning:
+            result['warning'] = mcp_warning
+        return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
 @app.route('/api/mcp/events', methods=['DELETE'])
 def clear_mcp_events():
-    """Clear MCP event buffer."""
+    """Clear MCP and webhook event buffers."""
     try:
-        resp = requests.delete(f"{_mcp_http_base_url()}/events", timeout=2.5)
-        payload = resp.json() if resp.text else {}
-        if resp.status_code >= 400:
-            message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
-            return jsonify({'status': 'error', 'error': message}), 502
-        return jsonify(payload if isinstance(payload, dict) else {'status': 'ok'})
-    except requests.RequestException as e:
-        return jsonify({'status': 'error', 'error': f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'}), 502
+        removed_webhook = ui_event_log.clear()
+        removed_mcp = 0
+        warning = ""
+
+        try:
+            resp = requests.delete(f"{_mcp_http_base_url()}/events", timeout=2.5)
+            payload = resp.json() if resp.text else {}
+            if resp.status_code >= 400:
+                message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
+                warning = f"MCP clear failed: {message}"
+            elif isinstance(payload, dict):
+                try:
+                    removed_mcp = int(payload.get("removed", payload.get("count", 0)) or 0)
+                except (TypeError, ValueError):
+                    removed_mcp = 0
+        except requests.RequestException as e:
+            warning = f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'
+
+        result = {
+            'status': 'ok',
+            'removed': removed_webhook + removed_mcp,
+            'removed_mcp': removed_mcp,
+            'removed_webhook': removed_webhook,
+        }
+        if warning:
+            result['warning'] = warning
+        return jsonify(result)
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
