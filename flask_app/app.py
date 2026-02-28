@@ -2,6 +2,7 @@
 """Flask app for VideoMemory core APIs and UI."""
 
 import asyncio
+import hashlib
 import ipaddress
 import os
 import re
@@ -1115,17 +1116,42 @@ def caption_frame():
 
         import base64
         image_base64 = base64.b64encode(frame_bytes).decode('utf-8')
-        response = model_provider._sync_generate_content(
+        frame_sha256 = hashlib.sha256(frame_bytes).hexdigest()
+        active_provider = getattr(task_manager, "_model_provider", None) or model_provider
+        provider_name = type(active_provider).__name__
+        flask_logger.info(
+            "caption_frame request io_id=%s prompt_chars=%d frame_bytes=%d frame_sha256=%s provider=%s",
+            io_id,
+            len(prompt),
+            len(frame_bytes),
+            frame_sha256[:12],
+            provider_name,
+        )
+
+        response = active_provider._sync_generate_content(
             image_base64=image_base64,
             prompt=prompt,
             response_model=OneOffFrameAnalysis,
         )
+        analysis = str(getattr(response, 'analysis', '')).strip()
+        if not analysis:
+            return jsonify({
+                'status': 'error',
+                'error': 'Model returned empty analysis',
+                'io_id': io_id,
+                'model_provider': provider_name,
+                'frame_sha256': frame_sha256,
+                'frame_bytes': len(frame_bytes),
+            }), 502
 
         return jsonify({
             'status': 'success',
             'io_id': io_id,
             'prompt': prompt,
-            'analysis': response.analysis,
+            'analysis': analysis,
+            'model_provider': provider_name,
+            'frame_sha256': frame_sha256,
+            'frame_bytes': len(frame_bytes),
         })
     except Exception as e:
         flask_logger.error("Error in /api/caption_frame: %s", e, exc_info=True)
