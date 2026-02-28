@@ -1,0 +1,51 @@
+services:
+  videomemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: videomemory
+    restart: unless-stopped
+    command: ["bash", "/app/deploy/start-with-mcp.sh"]
+    environment:
+      PORT: "5050"
+      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-videomemory}"
+      VIDEOMEMORY_RTSP_PULL_PORT: "8554"
+      VIDEOMEMORY_MCP_PORT: "8765"
+      # Point VideoMemory webhook notifications to the external AdminAgent service.
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_URL: "http://adminagent:18789/hooks/videomemory-alert"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${GATEWAY_TOKEN:-change-me}"
+      VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S: "30"
+      VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S: "1"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+    ports:
+      - "5050:5050"      # Frontend + core HTTP API
+      - "8765:8765"      # VideoMemory MCP HTTP endpoint
+      - "1935:1935"      # RTMP push from Android
+      - "8554:8554"      # RTSP pull for VideoMemory ingest
+      - "8890:8890"      # SRT ingest (low latency)
+      - "8889:8889"      # WebRTC/WHIP signaling endpoint (MediaMTX)
+      - "8189:8189/udp"  # WebRTC ICE/UDP (MediaMTX default)
+    volumes:
+      - videomemory-data:/root/.local/share/videomemory
+
+  adminagent:
+    build:
+      context: ../adminagent
+      dockerfile: Dockerfile
+    container_name: adminagent
+    restart: unless-stopped
+    environment:
+      PORT: "18789"
+      GATEWAY_HOOK_PATH: "videomemory-alert"
+      GATEWAY_TOKEN: "${GATEWAY_TOKEN:-change-me}"
+      ADMINAGENT_MCP_SERVERS_JSON: '[{"id":"videomemory","transport":"http","url":"http://videomemory:8765/mcp"}]'
+      ADMINAGENT_FORWARD_ENABLED: "0"
+      ADMINAGENT_FORWARD_URL: ""
+      ADMINAGENT_FORWARD_TOKEN: ""
+    depends_on:
+      - videomemory
+    ports:
+      - "18789:18789"
+
+volumes:
+  videomemory-data:

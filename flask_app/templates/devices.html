@@ -140,14 +140,41 @@
             font-size: 14px;
         }
         
-        .device-preview {
+        .device-preview-frame {
             width: 100%;
-            height: 200px;
-            object-fit: cover;
+            height: 220px;
             border-radius: 8px;
             margin-bottom: 12px;
+            background: #111;
+            border: 1px solid #404040;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .device-preview {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            background: #000;
+        }
+
+        .device-preview-meta {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 8px;
+        }
+
+        .device-fps {
+            font-size: 11px;
+            color: #9aa0a6;
             background: #1a1a1a;
             border: 1px solid #404040;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
         }
         
         .device-preview.error {
@@ -172,13 +199,11 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            height: 200px;
+            height: 100%;
             color: #666;
             font-size: 12px;
-            background: #1a1a1a;
-            border-radius: 8px;
-            margin-bottom: 12px;
-            border: 1px solid #404040;
+            background: #111;
+            width: 100%;
         }
         
         .no-devices {
@@ -378,6 +403,18 @@
             font-weight: 500;
         }
 
+        .rtmp-warning {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #ff6b6b66;
+            background: #ff6b6b1a;
+            color: #ffb3b3;
+            font-size: 12px;
+            display: none;
+            line-height: 1.4;
+        }
+
         .rtmp-url-row {
             display: flex;
             gap: 10px;
@@ -435,6 +472,7 @@
                     <button class="copy-btn" id="copyRtmpBtn" type="button">Copy</button>
                 </div>
                 <div class="rtmp-url-label" id="rtmpUrlHint" style="margin-top: 8px; color: #888; text-transform: none; display: none;">Replace YOUR_SERVER_IP with this computer's LAN IP (e.g. 192.168.1.42) so your phone can connect.</div>
+                <div class="rtmp-warning" id="rtmpPortWarning"></div>
             </div>
         </div>
         <div class="add-network-form">
@@ -460,6 +498,48 @@
 
 {% block extra_scripts %}
     <script>
+        let fpsUpdateInterval = null;
+
+        function revokePreviewObjectUrls(root = document) {
+            const previews = root.querySelectorAll('.device-preview[data-object-url]');
+            previews.forEach(img => {
+                const objectUrl = img.dataset.objectUrl;
+                if (objectUrl) {
+                    URL.revokeObjectURL(objectUrl);
+                    delete img.dataset.objectUrl;
+                }
+            });
+        }
+
+        function stopFpsTracking() {
+            if (fpsUpdateInterval) {
+                clearInterval(fpsUpdateInterval);
+                fpsUpdateInterval = null;
+            }
+        }
+
+        function startFpsTracking() {
+            stopFpsTracking();
+            fpsUpdateInterval = setInterval(() => {
+                if (document.hidden) return;
+                const labels = document.querySelectorAll('#devicesContent .device-fps[data-io-id]');
+                labels.forEach(async (label) => {
+                    const ioId = label.dataset.ioId;
+                    if (!ioId) return;
+                    try {
+                        const cacheBust = Date.now();
+                        const resp = await fetch(`/api/device/${encodeURIComponent(ioId)}/preview/fps?t=${cacheBust}`, { cache: 'no-store' });
+                        if (!resp.ok) return;
+                        const data = await resp.json();
+                        const fpsValue = Number(data.fps || 0);
+                        label.textContent = `${fpsValue.toFixed(1)} fps`;
+                    } catch (_) {
+                        // Keep previous value on transient failures.
+                    }
+                });
+            }, 1000);
+        }
+
         async function createRtmpCamera() {
             const btn = document.getElementById('createRtmpBtn');
             const box = document.getElementById('rtmpUrlBox');
@@ -482,6 +562,15 @@
                     box.classList.add('visible');
                     const hint = document.getElementById('rtmpUrlHint');
                     hint.style.display = data.rtmp_url.indexOf('YOUR_SERVER_IP') !== -1 ? 'block' : 'none';
+                    const warn = document.getElementById('rtmpPortWarning');
+                    const diag = data.diagnostics || {};
+                    if (diag.warning) {
+                        warn.textContent = diag.warning;
+                        warn.style.display = 'block';
+                    } else {
+                        warn.textContent = '';
+                        warn.style.display = 'none';
+                    }
                     loadDevices();
                 } else {
                     alert(data.error || 'Failed to create RTMP camera');
@@ -565,9 +654,22 @@
             if (!confirm('Remove this network camera?')) return;
             try {
                 const resp = await fetch(`/api/devices/network/${encodeURIComponent(ioId)}`, { method: 'DELETE' });
-                if (resp.ok) loadDevices();
+                let data = {};
+                try {
+                    data = await resp.json();
+                } catch (_) {
+                    // Keep a fallback message below.
+                }
+
+                if (!resp.ok) {
+                    const msg = data.error || data.message || `Failed to remove camera (${resp.status})`;
+                    alert(msg);
+                }
             } catch (e) {
                 alert('Failed to remove camera: ' + e.message);
+            } finally {
+                // Always refresh so stale cards do not linger in the UI.
+                loadDevices();
             }
         }
 
@@ -621,10 +723,18 @@
 
                         let previewHtml;
                         if (isCamera) {
-                            const previewId = `preview-${device.io_id.replace(/[^a-zA-Z0-9]/g, '-')}`;
-                            previewHtml = `<img class="device-preview loading" id="${previewId}" src="/api/device/${escapeHtml(device.io_id)}/preview?t=${Date.now()}" alt="Camera preview" />`;
+                            const safeIoId = device.io_id.replace(/[^a-zA-Z0-9]/g, '-');
+                            const previewId = `preview-${safeIoId}`;
+                            const fpsId = `fps-${safeIoId}`;
+                            const streamUrl = `/api/device/${encodeURIComponent(device.io_id)}/preview/stream`;
+                            previewHtml = `
+                                <div class="device-preview-frame">
+                                    <img class="device-preview" id="${previewId}" data-fps-id="${fpsId}" src="${streamUrl}" alt="Camera preview" />
+                                </div>
+                                <div class="device-preview-meta"><span class="device-fps" id="${fpsId}" data-io-id="${escapeHtml(device.io_id)}">-- fps</span></div>
+                            `;
                         } else {
-                            previewHtml = '<div class="device-preview-placeholder">No preview available</div>';
+                            previewHtml = '<div class="device-preview-frame"><div class="device-preview-placeholder">No preview available</div></div>';
                         }
 
                         const removeHtml = isNetwork
@@ -651,29 +761,11 @@
                     `;
                 });
                 
+                const previousContent = contentDiv.cloneNode(true);
                 contentDiv.innerHTML = html;
-                
-                const previewImages = contentDiv.querySelectorAll('.device-preview');
-                previewImages.forEach(img => {
-                    const originalSrc = img.getAttribute('src');
-                    img.removeAttribute('src');
-                    fetch(originalSrc, { cache: 'no-store' })
-                        .then(resp => {
-                            if (!resp.ok) throw new Error('preview failed');
-                            return resp.blob();
-                        })
-                        .then(blob => {
-                            img.src = URL.createObjectURL(blob);
-                            img.classList.remove('loading');
-                        })
-                        .catch(() => {
-                            img.classList.remove('loading');
-                            const errorDiv = document.createElement('div');
-                            errorDiv.className = 'device-preview error';
-                            errorDiv.innerHTML = '<div>Device Disconnected<br/><small>Camera not available or in use</small></div>';
-                            img.parentNode.replaceChild(errorDiv, img);
-                        });
-                });
+
+                revokePreviewObjectUrls(previousContent);
+                startFpsTracking();
                 
             } catch (error) {
                 contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
@@ -692,6 +784,11 @@
         // Submit on Enter in the URL field
         document.getElementById('netUrl').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') addNetworkCamera();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            stopFpsTracking();
+            revokePreviewObjectUrls();
         });
         
         loadDevices();

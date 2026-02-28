@@ -9,11 +9,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Dict, Optional, Any, List, Tuple
-from asyncio import Queue as AsyncQueue
 from collections import deque
-from google.adk.runners import Runner
-from google.adk.sessions import BaseSessionService
-from google.genai import types as genai_types
 import cv2
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
@@ -37,42 +33,31 @@ class TaskUpdate(BaseModel):
     task_done: bool = Field(..., description="Whether the task is completed")
 
 
-class SystemAction(BaseModel):
-    """Model for system action output."""
-    model_config = ConfigDict(extra="forbid")
-    take_action: str = Field(..., description="Description of the action to take")
-
-
 class VideoIngestorOutput(BaseModel):
     """Model for the complete output structure."""
     model_config = ConfigDict(extra="forbid")
     task_updates: List[TaskUpdate] = Field(default_factory=list, description="List of task updates")
-    system_actions: List[SystemAction] = Field(default_factory=list, description="List of system actions to take")
 
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
     
-    def __init__(self, camera_source, action_runner: Runner, model_provider: BaseModelProvider, session_service: Optional[BaseSessionService] = None, app_name: str = "videomemory_app", target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None):
+    def __init__(self, camera_source, model_provider: BaseModelProvider, target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None, on_detection_event=None):
         """Initialize the video stream ingestor.
         
         Args:
             camera_source: Either an int (local OpenCV camera index) or a str
                           (network stream URL, e.g. rtsp://... or http://...).
-            action_runner: The runner for executing actions (see google adk: https://google.github.io/adk-docs/runtime/#key-components-of-the-runtime)
-            session_service: The session service used by the runner (required to create sessions)
-            app_name: The app name used by the runner (must match the runner's app_name)
             target_resolution: Target resolution (width, height) to resize frames to for VLM processing.
                               Default is (640, 480) for lower bandwidth and faster processing.
             model_provider: Model provider instance for ML inference.
             on_task_updated: Optional callback(task, new_note) called when a task is modified by the ingestor.
+            on_detection_event: Optional callback(task, new_note) called for task_updates emitted by VLM inference.
         """
         self.camera_source = camera_source
         self.is_network_stream = isinstance(camera_source, str)
         # Keep camera_index for backward compat in logging/session naming
         self.camera_index = camera_source
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
-        # Queue items: (action_description: str, tasks_to_attach_note: List[Task])
-        self._action_queue: AsyncQueue = AsyncQueue()
         self._running = False
         self._tasks: list[asyncio.Task] = []
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
@@ -98,18 +83,20 @@ class VideoStreamIngestor:
         if hasattr(self._model_provider, '_client') and self._model_provider._client is None:
             logger.warning(f"Model provider {type(self._model_provider).__name__} failed to initialize. Multimodal LLM calls will fail.")
         
-        # Initialize action router runner for executing actions
-        # Use provided action runner or create a new one
-        self._action_runner = action_runner
-        self._session_service = session_service
-        self._action_user_id = f"video_ingestor_{self.camera_index}" # google adk each session requires a user ID but this is just a session foringesting a stream
-        self._action_app_name = app_name  # Must match the runner's app_name
-        self.session_id = f"video_ingestor_session_{self.camera_index}"
-        
         # Callback for persisting task changes (set by TaskManager)
         self._on_task_updated = on_task_updated
+        self._on_detection_event = on_detection_event
         
         logger.info(f"Initialized for camera index={self.camera_index}")
+
+    def set_model_provider(self, model_provider: BaseModelProvider) -> None:
+        """Swap the model provider used for future inference calls."""
+        self._model_provider = model_provider
+        if hasattr(self._model_provider, '_client') and self._model_provider._client is None:
+            logger.warning(
+                "Model provider %s is not initialized after hot-reload; inference calls may fail.",
+                type(self._model_provider).__name__,
+            )
  
     async def start(self):
         """Start the video stream ingestor and all processing loops."""
@@ -119,27 +106,6 @@ class VideoStreamIngestor:
             logger.info(f"Already running for camera index={self.camera_index}")
             return
         
-        # Create session for action runner if session_service is available
-        if self._session_service:
-            logger.debug(f"[DEBUG] VideoStreamIngestor.start: About to create session {self.session_id}")
-            try:
-                await self._session_service.create_session(
-                    app_name=self._action_app_name,
-                    user_id=self._action_user_id,
-                    session_id=self.session_id
-                )
-                logger.info(f"Created session {self.session_id} for camera index={self.camera_index}")
-            except Exception as e:
-                # Check if it's a network error
-                import httpx
-                if isinstance(e, (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
-                    logger.error(f"[ERROR] VideoStreamIngestor.start: Network error creating session {self.session_id}: {type(e).__name__}: {e}", exc_info=True)
-                else:
-                    # Session might already exist, which is fine
-                    logger.debug(f"Session creation for {self.session_id}: {e}")
-        else:
-            logger.warning(f"No session_service provided. Session {self.session_id} may not exist.")
-        
         self._running = True
         logger.info(f"Starting ingestor for camera index={self.camera_index}")
         
@@ -148,7 +114,6 @@ class VideoStreamIngestor:
         self._tasks = [
             asyncio.create_task(self._capture_loop(), name=f"capture_{self.camera_index}"),
             asyncio.create_task(self._process_input(), name=f"process_{self.camera_index}"),
-            asyncio.create_task(self._action_loop(), name=f"action_{self.camera_index}"),
         ]
         
         logger.info(f"Started {len(self._tasks)} processing loops for camera index={self.camera_index}")
@@ -409,45 +374,6 @@ class VideoStreamIngestor:
             logger.error(f"Error in processing loop for camera index={self.camera_index}: {e}", exc_info=True)
             self._running = False
     
-    async def _action_loop(self):
-        """Execute actions based on task conditions."""
-        try:
-            logger.info(f"Started action loop for camera index={self.camera_index}")
-            
-            while self._running:
-                try:
-                    # Use timeout to allow checking _running flag periodically
-                    item = await asyncio.wait_for(
-                        self._action_queue.get(),
-                        timeout=0.5
-                    )
-                    logger.debug(f"Action loop: got item from queue for camera index={self.camera_index}")
-                    if item is not None:
-                        action_str, tasks_for_note = item
-                        success, detail = await self._execute_action(action_str)
-                        # Record action in task notes for debugging/visibility
-                        note_content = f"Action taken: {detail}" if detail else ("Action taken: success." if success else "Action taken: failed.")
-                        for task in tasks_for_note:
-                            new_note = NoteEntry(content=note_content)
-                            task.task_note.append(new_note)
-                            if self._on_task_updated:
-                                try:
-                                    self._on_task_updated(task, new_note)
-                                except Exception as e:
-                                    logger.error(f"Failed to persist action note for task {getattr(task, 'task_id', None)}: {e}")
-                    
-                except asyncio.TimeoutError:
-                    # Timeout allows us to check _running flag
-                    continue
-                except Exception as e:
-                    logger.error(f"Error executing action for camera index={self.camera_index}: {e}", exc_info=True)
-                    continue
-                    
-        except asyncio.CancelledError:
-            logger.info(f"Action loop cancelled for camera index={self.camera_index}")
-        except Exception as e:
-            logger.error(f"Error in action loop for camera index={self.camera_index}: {e}", exc_info=True)
-    
     def _is_frame_duplicate(self, frame: Any) -> bool:
         """Check if a frame is effectively identical to the last processed frame.
         
@@ -485,7 +411,10 @@ class VideoStreamIngestor:
                 newest_note = task.task_note[-1]
             else:
                 newest_note = NoteEntry(content="None", timestamp=time.time())
-            tasks_lines.append(f"<task_newest_note timestamp=\"{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))}\">{newest_note.content}</task_newest_note>")
+            note_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))
+            tasks_lines.append(
+                f"<task_newest_note timestamp=\"{note_time}\">{newest_note.content}</task_newest_note>"
+            )
             
             # # Build note history section
             # # Only include the last 3 task notes to prevent prompt from growing too large
@@ -542,7 +471,7 @@ class VideoStreamIngestor:
         # Build instructions
         instructions = """<instructions>
 
-You are a video ingestor. Output two JSON lists: task_updates and system_actions.
+You are a video ingestor. Output one JSON object containing task_updates.
 
 TASK_UPDATES: Add a task update IF AND ONLY IF there is something NEW or DIFFERENT in the imagefrom the most recent note for the task. Check the <task_newest_note> section - if the image matches the newest note for a task exactly, do NOT include that task in your updates (return empty list [] for no updates).
 
@@ -557,33 +486,29 @@ Include updates for:
 - Changes in status, counts, positions, or states (including transitions to/from zero)
 - Progress that advances task tracking
 
-SYSTEM_ACTIONS: Only include if a task requires an action and conditions are met. When the task asks to "notify me", "text me", "send Telegram/Discord" or similar when a condition is detected, output a system_action with a clear description, e.g. "send telegram notification: <what was detected>" or "send discord notification: <message>".
-
 Output format (JSON only, nothing else):
-[{task_number: <number>, task_note: <description>, task_done: <true/false>}, ...], [{take_action: <description>}, ...]
+{"task_updates": [{task_number: <number>, task_note: <description>, task_done: <true/false>}, ...]}
 
 Examples:
-When you observe a clap for "Count claps" task: [{task_number: 0, task_note: "Clap detected. Total count: 1 clap.", task_done: false}], []
+When you observe a clap for "Count claps" task: {"task_updates": [{task_number: 0, task_note: "Clap detected. Total count: 1 clap.", task_done: false}]}
 
-When you observe 4 more claps (building on previous count): [{task_number: 0, task_note: "4 more claps detected. Total count: 5 claps.", task_done: false}], []
+When you observe 4 more claps (building on previous count): {"task_updates": [{task_number: 0, task_note: "4 more claps detected. Total count: 5 claps.", task_done: false}]}
 
-When you observe people for "Keep track of number of people": [{task_number: 1, task_note: "Currently 2 people visible in frame.", task_done: false}], []
+When you observe people for "Keep track of number of people": {"task_updates": [{task_number: 1, task_note: "Currently 2 people visible in frame.", task_done: false}]}
 
-When only 1 person is visible: [{task_number: 1, task_note: "1 person is visible in frame.", task_done: false}], []
+When only 1 person is visible: {"task_updates": [{task_number: 1, task_note: "1 person is visible in frame.", task_done: false}]}
 
-When the person leaves the frame: [{task_number: 1, task_note: "Person left frame. Now 0 people visible.", task_done: false}], []
+When the person leaves the frame: {"task_updates": [{task_number: 1, task_note: "Person left frame. Now 0 people visible.", task_done: false}]}
 
-When tracking counts and the count changes to zero (e.g., most recent note says "1 item" but image shows 0): [{task_number: 0, task_note: "No items visible. Count is now 0.", task_done: false}], []
+When tracking counts and the count changes to zero (e.g., most recent note says "1 item" but image shows 0): {"task_updates": [{task_number: 0, task_note: "No items visible. Count is now 0.", task_done: false}]}
 
-When tracking counts and the count changes from zero to non-zero (e.g., most recent note says "0 items" but image shows 2): [{task_number: 0, task_note: "2 items are now visible.", task_done: false}], []
+When tracking counts and the count changes from zero to non-zero (e.g., most recent note says "0 items" but image shows 2): {"task_updates": [{task_number: 0, task_note: "2 items are now visible.", task_done: false}]}
 
-When there is no new information and the task notes perfectly match the image (or same as newest note): [], []
+When there is no new information and the task notes perfectly match the image (or same as newest note): {"task_updates": []}
 
-For multiple task updates: [{task_number: 0, task_note: "Clap count: 5", task_done: false}, {task_number: 1, task_note: "2 people visible", task_done: false}], []
+For multiple task updates: {"task_updates": [{task_number: 0, task_note: "Clap count: 5", task_done: false}, {task_number: 1, task_note: "2 people visible", task_done: false}]}
 
-When task is complete: [{task_number: 0, task_note: "Task completed - 10 claps counted", task_done: true}], [{take_action: "send notification that clap counting task is complete"}]
-
-When task says "notify me on Telegram when I hold up X" and you see X: [{task_number: 0, task_note: "Person is holding up the requested object.", task_done: false}], [{take_action: "send telegram notification: Condition met - person is holding up the requested object."}]
+When task is complete: {"task_updates": [{task_number: 0, task_note: "Task completed - 10 claps counted", task_done: true}]}
 </instructions>"""
         
         # return "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines) + "\n\n" + instructions
@@ -659,55 +584,12 @@ When task says "notify me on Telegram when I hold up X" and you see X: [{task_nu
                         self._on_task_updated(task, new_note)
                     except Exception as e:
                         logger.error(f"Failed to persist task update: {e}")
+                if self._on_detection_event and (new_note or update.get("task_done")):
+                    try:
+                        self._on_detection_event(task, new_note)
+                    except Exception as e:
+                        logger.error(f"Failed to emit detection event: {e}")
         
-        # Tasks that were updated this round (for attaching "action taken" notes)
-        updated_tasks = []
-        for update in ml_results.get("task_updates", []):
-            task = next((t for t in self._tasks_list if t.task_number == update.get("task_number")), None)
-            if task and task not in updated_tasks:
-                updated_tasks.append(task)
-        tasks_for_note = updated_tasks if updated_tasks else list(self._tasks_list)
-
-        # Queue actions with task context so we can append "action taken" notes
-        for action in ml_results.get("system_actions", []):
-            if action.get("take_action"):
-                await self._action_queue.put((action["take_action"], tasks_for_note))
-    
-    async def _execute_action(self, action: str) -> Tuple[bool, str]:
-        """
-        Execute an action using the action_router runner (Telegram, Discord, etc.).
-
-        Args:
-            action: Natural-language description of the action (e.g. "send telegram notification: person held up something")
-
-        Returns:
-            (success, detail_message) for recording in task notes.
-        """
-        if not self._action_runner:
-            logger.error("Action runner not available. Cannot execute action.")
-            return False, "Action runner not available."
-
-        try:
-            # Send the raw action description so the action_router agent routes to the right tool
-            content = genai_types.Content(role='user', parts=[genai_types.Part(text=action)])
-            result_text = ""
-            async for event in self._action_runner.run_async(
-                user_id=self._action_user_id,
-                session_id=self.session_id,
-                new_message=content
-            ):
-                if event.is_final_response():
-                    if event.content and event.content.parts:
-                        result_text = event.content.parts[0].text or ""
-                    break
-            logger.info(f"Action result: {result_text}")
-            # Heuristic: treat as failure if response mentions error or not set
-            success = "error" not in result_text.lower() and "not set" not in result_text.lower()
-            return success, result_text[:500] if result_text else ("Done." if success else "No response.")
-        except Exception as e:
-            logger.error(f"Error executing action: {e}", exc_info=True)
-            return False, f"Failed: {str(e)[:200]}"
-    
     def add_task(self, task: Task):
         """Add a task to the video stream ingestor.
         
@@ -833,22 +715,10 @@ When task says "notify me on Telegram when I hold up X" and you see X: [{task_nu
             except asyncio.TimeoutError:
                 logger.warning(f"Tasks didn't complete within timeout for camera index={self.camera_index}")
         
-        # 4. Drain queues (prevents memory leaks)
-        # Drain action queue (items are (action_str, tasks) tuples)
-        remaining = []
-        while not self._action_queue.empty():
-            try:
-                remaining.append(self._action_queue.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-
-        if remaining:
-            logger.info(f"Discarding {len(remaining)} queued actions for camera index={self.camera_index}")
-        
-        # 5. Clear task list
+        # 4. Clear task list
         self._tasks = []
-        
-        # 6. Release camera if still open
+
+        # 5. Release camera if still open
         if self._camera:
             self._camera.release()
             self._camera = None
@@ -912,11 +782,8 @@ async def main():
     """Main function to run the video stream ingestor."""
     model_provider = get_VLM_provider()
     ingestor = VideoStreamIngestor(
-        camera_index=0,
-        action_runner=None,
+        camera_source=0,
         model_provider=model_provider,
-        session_service=None,
-        app_name="videomemory_app"
     )
     
     task = Task(
@@ -951,10 +818,7 @@ async def main():
                 
                 for update in output.get("task_updates", []):
                     print(f"  Task {update.get('task_number')}: {update.get('task_note')}")
-                
-                for action in output.get("system_actions", []):
-                    print(f"  Action: {action.get('take_action')}")
-                
+
                 last_output_count = len(current_history)
             
             await asyncio.sleep(2.0)  # Check every 2 seconds

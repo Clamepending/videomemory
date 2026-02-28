@@ -1,33 +1,36 @@
 #!/usr/bin/env python3
-"""Simple Flask app for chat interface with admin agent."""
+"""Flask app for VideoMemory core APIs and UI."""
 
 import asyncio
+import hashlib
+import ipaddress
 import os
 import re
+import socket
+import subprocess
 import sys
 import threading
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Add parent directory to path so we can import videomemory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify, Response, redirect
 from dotenv import load_dotenv
-from google.adk.sessions import DatabaseSessionService
-from google.adk.runners import Runner
-from google.genai import types
-import videomemory.agents
 import videomemory.system
 import videomemory.tools
+from videomemory.integrations import OpenClawWakeNotifier
 from videomemory.system.logging_config import setup_logging
 from videomemory.system.model_providers import get_VLM_provider
 from videomemory.system.database import TaskDatabase, get_default_data_dir
 import cv2
 import platform
-import requests as http_requests
 from typing import Optional
 import logging
+import requests
+from pydantic import BaseModel, Field
 
 flask_logger = logging.getLogger('FlaskApp')
 
@@ -43,48 +46,66 @@ app = Flask(__name__)
 data_dir = get_default_data_dir()
 data_dir.mkdir(parents=True, exist_ok=True)
 
-sessions_db_url = f"sqlite+aiosqlite:///{data_dir / 'sessions.db'}"
 db = TaskDatabase(str(data_dir / 'videomemory.db'))
 
 # Load saved settings into os.environ BEFORE initializing providers
 # This allows DB-stored API keys and config to override .env values
 db.load_settings_to_env()
-# Notifications go to TELEGRAM_CHAT_ID if set, else to the chat where you last messaged the bot (from DB)
-videomemory.tools.actions.set_telegram_notification_chat_id_resolver(
-    lambda: db.get_setting("TELEGRAM_NOTIFICATION_CHAT_ID")
-)
 
 # ── System components ─────────────────────────────────────────
 io_manager = videomemory.system.IOmanager(db=db)
-app_name = "videomemory_app"
-session_service = DatabaseSessionService(db_url=sessions_db_url)
-runner = Runner(
-    agent=videomemory.agents.admin_agent,
-    app_name=app_name,
-    session_service=session_service
-)
-# Dedicated runner for video-ingestor actions (Telegram, Discord, etc.). Uses action_router
-# agent so "send telegram notification: ..." is executed directly without going through admin agent.
-action_router_runner = Runner(
-    agent=videomemory.agents.action_router_agent,
-    app_name=app_name,
-    session_service=session_service
-)
 model_provider = get_VLM_provider()
+openclaw_notifier = OpenClawWakeNotifier.from_env()
 task_manager = videomemory.system.TaskManager(
     io_manager=io_manager,
-    action_runner=action_router_runner,
-    session_service=session_service,
-    app_name=app_name,
     model_provider=model_provider,
-    db=db
+    db=db,
+    on_detection_event=openclaw_notifier.notify_task_update,
 )
 
 # Set managers in tools
 videomemory.tools.tasks.set_managers(io_manager, task_manager)
 
-# Shared user id for admin chat sessions
-USER_ID = "user_1"
+# Per-device preview stream FPS state (used by Devices page UI).
+_preview_fps_lock = threading.Lock()
+_preview_fps_state = {}
+
+
+def _record_preview_frame(io_id: str) -> None:
+    import time
+    now = time.monotonic()
+    with _preview_fps_lock:
+        state = _preview_fps_state.get(io_id)
+        if state is None:
+            _preview_fps_state[io_id] = {
+                "window_start": now,
+                "frames": 1,
+                "fps": 0.0,
+                "last_frame_at": now,
+            }
+            return
+
+        state["frames"] += 1
+        state["last_frame_at"] = now
+        elapsed = now - state["window_start"]
+        if elapsed >= 1.0:
+            instant_fps = state["frames"] / max(0.001, elapsed)
+            state["fps"] = (state["fps"] * 0.7 + instant_fps * 0.3) if state["fps"] > 0 else instant_fps
+            state["window_start"] = now
+            state["frames"] = 0
+
+
+def _get_preview_fps(io_id: str) -> float:
+    import time
+    now = time.monotonic()
+    with _preview_fps_lock:
+        state = _preview_fps_state.get(io_id)
+        if not state:
+            return 0.0
+        last_age = now - state.get("last_frame_at", 0.0)
+        if last_age > 3.0:
+            return 0.0
+        return float(state.get("fps", 0.0))
 
 # Create a persistent event loop in a background thread
 # This allows async tasks (like video ingestor) to run continuously
@@ -121,19 +142,12 @@ background_loop = get_background_loop()
 import videomemory.system.stream_ingestors.video_stream_ingestor as vsi_module
 vsi_module._flask_background_loop = background_loop
 
-# ── Helper: run async in background loop ─────────────────────
-
-def run_async(coro, timeout=60):
-    """Run an async coroutine in the background event loop and return the result."""
-    future = asyncio.run_coroutine_threadsafe(coro, background_loop)
-    return future.result(timeout=timeout)
-
 # ── Page routes ───────────────────────────────────────────────
 
 @app.route('/')
 def index():
-    """Render the chat interface."""
-    return render_template('index.html')
+    """Redirect to the device-focused UI."""
+    return redirect('/devices')
 
 @app.route('/tasks')
 def tasks():
@@ -154,6 +168,16 @@ def devices():
 def settings_page():
     """Render the settings page."""
     return render_template('settings.html')
+
+@app.route('/documentation')
+def documentation_page():
+    """Render the documentation page."""
+    return render_template('documentation.html')
+
+@app.route('/events')
+def events_page():
+    """Render the MCP events page."""
+    return render_template('events.html')
 
 @app.route('/device/<io_id>/debug')
 def device_debug(io_id):
@@ -278,96 +302,6 @@ def stop_task_endpoint(task_id):
         flask_logger.error(f"Failed to stop task {task_id}: {e}", exc_info=True)
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
-# ── Session API ───────────────────────────────────────────────
-
-@app.route('/api/sessions', methods=['GET'])
-def list_sessions():
-    """List all admin chat sessions (metadata only)."""
-    try:
-        sessions = db.list_session_metadata()
-        return jsonify({'sessions': sessions})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/sessions/new', methods=['POST'])
-def create_session():
-    """Create a new admin chat session."""
-    try:
-        session_id = f"chat_{uuid.uuid4().hex[:12]}"
-        
-        async def _create():
-            await session_service.create_session(
-                app_name=app_name,
-                user_id=USER_ID,
-                session_id=session_id
-            )
-        
-        run_async(_create())
-        db.save_session_metadata(session_id, title='')
-        
-        return jsonify({'session_id': session_id})
-    except Exception as e:
-        flask_logger.error(f"Failed to create session: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/sessions/<session_id>/messages', methods=['GET'])
-def get_session_messages(session_id):
-    """Get all messages for a session."""
-    try:
-        async def _get():
-            session = await session_service.get_session(
-                app_name=app_name,
-                user_id=USER_ID,
-                session_id=session_id
-            )
-            return session
-        
-        session = run_async(_get())
-        if session is None:
-            return jsonify({'error': 'Session not found'}), 404
-        
-        messages = []
-        for event in session.events:
-            if not event.content or not event.content.parts:
-                continue
-            # Extract text parts only
-            text_parts = []
-            for part in event.content.parts:
-                if hasattr(part, 'text') and part.text:
-                    text_parts.append(part.text)
-            if not text_parts:
-                continue
-            
-            messages.append({
-                'role': 'user' if event.author == 'user' else 'agent',
-                'text': ' '.join(text_parts),
-                'timestamp': event.timestamp if hasattr(event, 'timestamp') else None
-            })
-        
-        return jsonify({'messages': messages})
-    except Exception as e:
-        flask_logger.error(f"Failed to get messages for session {session_id}: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/sessions/<session_id>', methods=['DELETE'])
-def delete_session(session_id):
-    """Delete a chat session."""
-    try:
-        async def _delete():
-            await session_service.delete_session(
-                app_name=app_name,
-                user_id=USER_ID,
-                session_id=session_id
-            )
-        
-        run_async(_delete())
-        db.delete_session_metadata(session_id)
-        
-        return jsonify({'status': 'ok'})
-    except Exception as e:
-        flask_logger.error(f"Failed to delete session {session_id}: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
 # ── Device API ────────────────────────────────────────────────
 
 def _get_camera_preview_frame(camera_index: int) -> Optional[bytes]:
@@ -471,7 +405,7 @@ def get_devices():
                 'source': device.get('source', 'local'),
             }
             if device.get('url'):
-                entry['url'] = device['url']
+                entry['url'] = _public_ingest_url(device['url'])
             by_category[category].append(entry)
         
         import logging
@@ -486,17 +420,125 @@ def get_devices():
         return jsonify({'error': str(e)}), 500
 
 def _rtmp_url_host() -> str:
-    """Host for generated RTMP URLs: from request, env, or placeholder."""
+    """Host for generated RTMP URLs: env, request host, LAN IP, or placeholder."""
     host = os.environ.get("RTMP_SERVER_HOST", "").strip()
     if host:
         return host.split(":")[0]
+
+    def _is_private_or_loopback(hostname: str) -> bool:
+        try:
+            ip = ipaddress.ip_address(hostname)
+            return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
+        except ValueError:
+            return hostname in {"localhost"} or hostname.startswith("127.")
+
+    def _clean_host(raw: str) -> str:
+        return (raw or "").strip().split(",")[0].strip().split(":")[0].strip("[]")
+
+    def _is_container_runtime() -> bool:
+        return os.path.exists("/.dockerenv")
+
     try:
-        h = request.host
-        if h and h != "localhost" and not h.startswith("127."):
-            return h.split(":")[0]
+        forwarded = _clean_host(request.headers.get("X-Forwarded-Host", ""))
+        if forwarded and not _is_private_or_loopback(forwarded):
+            return forwarded
     except Exception:
         pass
+
+    try:
+        h = _clean_host(request.host)
+        if h and not _is_private_or_loopback(h):
+            return h
+    except Exception:
+        pass
+
+    # Local dev convenience: if UI is opened on localhost, generate a LAN IP so
+    # phones on the same network can connect without manual placeholder edits.
+    if not _is_container_runtime():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+            s.close()
+            if lan_ip and not lan_ip.startswith("127."):
+                return lan_ip
+        except Exception:
+            pass
+
     return "YOUR_SERVER_IP"
+
+def _ingest_internal_host() -> str:
+    """Host used internally by VideoMemory workers for pull URLs in Docker."""
+    host = os.environ.get("RTMP_INGEST_INTERNAL_HOST", "").strip()
+    if host:
+        return host.split(":")[0]
+    return _rtmp_url_host()
+
+
+def _public_ingest_url(url: str) -> str:
+    """Rewrite known ingest URLs from internal host to public host for API responses."""
+    if not isinstance(url, str) or not url:
+        return url
+    parsed = urlparse(url)
+    if parsed.scheme not in {"rtmp", "srt", "whip"} or not parsed.hostname:
+        return url
+    internal_host = _ingest_internal_host()
+    public_host = _rtmp_url_host()
+    if parsed.hostname != internal_host or not public_host:
+        return url
+    netloc = parsed.netloc
+    host_port = parsed.hostname if not parsed.port else f"{parsed.hostname}:{parsed.port}"
+    replacement = public_host if not parsed.port else f"{public_host}:{parsed.port}"
+    netloc = netloc.replace(host_port, replacement, 1)
+    return parsed._replace(netloc=netloc).geturl()
+
+
+def _rtmp_port_diagnostics() -> dict:
+    """Inspect RTMP listener state and flag likely local port conflicts."""
+    diagnostics = {
+        "rtmp_port_ok": True,
+        "warning": "",
+        "listeners": [],
+    }
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", "-iTCP:1935", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=False,
+        )
+        lines = [ln for ln in (result.stdout or "").splitlines() if ln.strip()]
+        if len(lines) <= 1:
+            diagnostics["rtmp_port_ok"] = False
+            diagnostics["warning"] = "No process is listening on RTMP port 1935. MediaMTX may not be running."
+            return diagnostics
+
+        listeners = []
+        for ln in lines[1:]:
+            parts = ln.split()
+            if len(parts) < 2:
+                continue
+            listeners.append({"command": parts[0], "pid": parts[1], "raw": ln})
+        diagnostics["listeners"] = listeners
+
+        command_names = {l["command"].lower() for l in listeners}
+        has_mediamtx = any("mediamtx" in cmd for cmd in command_names)
+        non_mediamtx = sorted({l["command"] for l in listeners if "mediamtx" not in l["command"].lower()})
+        if not has_mediamtx:
+            diagnostics["rtmp_port_ok"] = False
+            diagnostics["warning"] = "MediaMTX is not listening on RTMP port 1935."
+        elif non_mediamtx:
+            diagnostics["rtmp_port_ok"] = False
+            diagnostics["warning"] = (
+                "RTMP port 1935 is also used by: "
+                + ", ".join(non_mediamtx)
+                + ". This can cause handshake failures from phones."
+            )
+    except Exception:
+        # Keep diagnostics best-effort; don't block RTMP URL generation.
+        pass
+    return diagnostics
 
 
 def _stream_key_from_name(name: str) -> str:
@@ -505,41 +547,123 @@ def _stream_key_from_name(name: str) -> str:
     return slug[:48] if slug else ""
 
 
+def _generated_stream_key(data: dict) -> tuple[str, str]:
+    """Return (stream_key, display_name) from request payload."""
+    requested_device_name = (data.get('device_name') or '').strip()
+    requested_name = (data.get('name') or '').strip()
+    provided_name = requested_device_name or requested_name
+    if requested_device_name and " " in requested_device_name:
+        raise ValueError("device_name cannot contain spaces")
+    if requested_device_name and not re.match(r"^[A-Za-z0-9_-]+$", requested_device_name):
+        raise ValueError("device_name can only contain letters, numbers, underscore, or dash")
+    stream_name = _stream_key_from_name(provided_name)
+    if stream_name:
+        stream_key = f"live/{stream_name}"
+        display_name = provided_name
+    else:
+        stream_key = f"live/phone_{uuid.uuid4().hex[:8]}"
+        display_name = f"Network Camera ({stream_key.split('/')[-1]})"
+    return stream_key, display_name
+
+
 @app.route('/api/devices/network/rtmp', methods=['POST'])
 def create_rtmp_camera():
     """Create a network camera with a generated RTMP URL for the Android app to push to."""
     try:
         data = request.get_json(silent=True) or {}
-        requested_device_name = (data.get('device_name') or '').strip()
-        requested_name = (data.get('name') or '').strip()
-        provided_name = requested_device_name or requested_name
-        host = _rtmp_url_host()
-        if requested_device_name and " " in requested_device_name:
-            return jsonify({
-                "status": "error",
-                "error": "device_name cannot contain spaces",
-            }), 400
-        if requested_device_name and not re.match(r"^[A-Za-z0-9_-]+$", requested_device_name):
-            return jsonify({
-                "status": "error",
-                "error": "device_name can only contain letters, numbers, underscore, or dash",
-            }), 400
-        stream_name = _stream_key_from_name(provided_name)
-        if stream_name:
-            stream_key = f"live/{stream_name}"
-            name = provided_name
-        else:
-            stream_key = f"live/phone_{uuid.uuid4().hex[:8]}"
+        public_host = _rtmp_url_host()
+        internal_host = _ingest_internal_host()
+        try:
+            stream_key, name = _generated_stream_key(data)
+        except ValueError as ve:
+            return jsonify({"status": "error", "error": str(ve)}), 400
+        if name.startswith("Network Camera "):
             name = f"RTMP Camera ({stream_key.split('/')[-1]})"
-        url = f"rtmp://{host}:1935/{stream_key}"
-        camera_info = io_manager.add_network_camera(url, name)
+        public_url = f"rtmp://{public_host}:1935/{stream_key}"
+        ingest_url = f"rtmp://{internal_host}:1935/{stream_key}"
+        camera_info = io_manager.add_network_camera(ingest_url, name)
+        stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
+        device_out = dict(camera_info)
+        if device_out.get("url"):
+            device_out["url"] = _public_ingest_url(device_out["url"])
         return jsonify({
             "status": "success",
-            "device": camera_info,
-            "rtmp_url": url,
+            "device": device_out,
+            "rtmp_url": public_url,
+            "rtsp_pull_url": stream_info.get("pull_url"),
+            "diagnostics": _rtmp_port_diagnostics(),
         })
     except Exception as e:
         flask_logger.error(f"Error creating RTMP camera: {e}", exc_info=True)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+@app.route('/api/devices/network/srt', methods=['POST'])
+def create_srt_camera():
+    """Create a network camera with a generated SRT publish URL (low-latency uplink)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        public_host = _rtmp_url_host()
+        internal_host = _ingest_internal_host()
+        try:
+            stream_key, name = _generated_stream_key(data)
+        except ValueError as ve:
+            return jsonify({"status": "error", "error": str(ve)}), 400
+        if name.startswith("Network Camera "):
+            name = f"SRT Camera ({stream_key.split('/')[-1]})"
+
+        # MediaMTX/SRT convention: streamid encodes publish:path
+        public_srt_url = f"srt://{public_host}:8890?streamid=publish:{stream_key}"
+        ingest_srt_url = f"srt://{internal_host}:8890?streamid=publish:{stream_key}"
+        camera_info = io_manager.add_network_camera(ingest_srt_url, name)
+        stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
+        device_out = dict(camera_info)
+        if device_out.get("url"):
+            device_out["url"] = _public_ingest_url(device_out["url"])
+        return jsonify({
+            "status": "success",
+            "device": device_out,
+            "srt_url": public_srt_url,
+            "rtsp_pull_url": stream_info.get("pull_url"),
+            "notes": "Use SRT caller mode from the phone/app. VideoMemory will pull via RTSP.",
+        })
+    except Exception as e:
+        flask_logger.error(f"Error creating SRT camera: {e}", exc_info=True)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+@app.route('/api/devices/network/whip', methods=['POST'])
+def create_whip_camera():
+    """Create a network camera for WebRTC/WHIP ingest (very low latency)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        public_host = _rtmp_url_host()
+        internal_host = _ingest_internal_host()
+        scheme = "https" if request.is_secure else "http"
+        try:
+            stream_key, name = _generated_stream_key(data)
+        except ValueError as ve:
+            return jsonify({"status": "error", "error": str(ve)}), 400
+        if name.startswith("Network Camera "):
+            name = f"WHIP Camera ({stream_key.split('/')[-1]})"
+
+        # Store a synthetic 'whip://' source so VideoMemory derives RTSP pull cleanly.
+        stored_url = f"whip://{internal_host}:8889/{stream_key}"
+        whip_url = f"{scheme}://{public_host}:8889/{stream_key}/whip"
+        camera_info = io_manager.add_network_camera(stored_url, name)
+        stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
+        device_out = dict(camera_info)
+        if device_out.get("url"):
+            device_out["url"] = _public_ingest_url(device_out["url"])
+        return jsonify({
+            "status": "success",
+            "device": device_out,
+            "whip_url": whip_url,
+            "rtsp_pull_url": stream_info.get("pull_url"),
+            "notes": "Use a WHIP-capable WebRTC publisher. For internet deployment, set proper ICE/public host config in MediaMTX.",
+        })
+    except Exception as e:
+        flask_logger.error(f"Error creating WHIP camera: {e}", exc_info=True)
         return jsonify({"status": "error", "error": str(e)}), 500
 
 
@@ -555,6 +679,16 @@ def add_network_camera():
 
     if not url:
         return jsonify({'status': 'error', 'error': 'url is required'}), 400
+
+    parsed = urlparse(url)
+    allowed_schemes = {'rtsp', 'rtsps', 'http', 'https', 'rtmp', 'srt', 'whip'}
+    if parsed.scheme.lower() not in allowed_schemes:
+        return jsonify({
+            'status': 'error',
+            'error': "Invalid url: scheme must be one of rtsp, rtsps, http, https, rtmp, srt, whip"
+        }), 400
+    if parsed.scheme.lower() in {'rtsp', 'rtsps', 'http', 'https', 'rtmp', 'whip'} and not parsed.netloc:
+        return jsonify({'status': 'error', 'error': 'Invalid url: missing host'}), 400
 
     try:
         camera_info = io_manager.add_network_camera(url, name)
@@ -637,50 +771,210 @@ def get_device_preview(io_id):
     Tries to use frames from active video ingestors first (faster), falls back to
     opening camera directly if no ingestor is active.
     """
+    frame_data = _get_device_preview_frame_bytes(io_id)
+    if frame_data is None:
+        return Response(response=b'', status=404, mimetype='image/jpeg')
+    return Response(
+        response=frame_data,
+        mimetype='image/jpeg',
+        headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
+    )
+
+
+def _get_device_preview_frame_bytes(io_id: str) -> Optional[bytes]:
+    """Return the latest JPEG preview frame for a camera device."""
     try:
-        # Get device info
         device_info = io_manager.get_stream_info(io_id)
         if device_info is None:
-            return jsonify({'error': 'Device not found'}), 404
-        
+            return None
+
         category = device_info.get('category', '').lower()
-        
         if 'camera' not in category:
-            return Response(response=b'', status=204, mimetype='image/jpeg')
-        
-        # Try to get frame from active video ingestor first (much faster)
+            return None
+
+        # Try active ingestor frame first for lower latency and less camera churn.
         latest_frame = task_manager.get_latest_frame_for_device(io_id)
         if latest_frame is not None and latest_frame.size > 0:
             frame_mean = latest_frame.mean()
             if frame_mean >= 1:
                 _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                return Response(
-                    response=buffer.tobytes(),
-                    mimetype='image/jpeg',
-                    headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
-                )
-        
-        # Fallback: open camera directly (use pull_url for capture; RTMP→RTSP is in io_manager)
+                return buffer.tobytes()
+
         pull_url = device_info.get('pull_url') or device_info.get('url')
         if pull_url:
-            frame_data = _get_network_preview_frame(pull_url)
+            return _get_network_preview_frame(pull_url)
+
+        try:
+            camera_index = int(io_id)
+        except (ValueError, TypeError):
+            return None
+        return _get_camera_preview_frame(camera_index)
+    except Exception as e:
+        flask_logger.debug(f"Error building preview for {io_id}: {e}")
+        return None
+
+
+@app.route('/api/device/<io_id>/preview/stream', methods=['GET'])
+def get_device_preview_stream(io_id):
+    """Stream device previews as MJPEG for smoother live debugging."""
+    import time
+
+    fps = max(1.0, min(20.0, float(os.getenv("VIDEOMEMORY_PREVIEW_STREAM_FPS", "10"))))
+    frame_delay_s = 1.0 / fps
+    boundary = "frame"
+    max_grabs = max(1, int(os.getenv("VIDEOMEMORY_PREVIEW_MAX_GRABS", "8")))
+    drain_ms = max(0.0, float(os.getenv("VIDEOMEMORY_PREVIEW_DRAIN_MS", "80")))
+
+    def _open_preview_capture(source):
+        cap = cv2.VideoCapture()
+        if isinstance(source, str) and source.startswith(("rtsp://", "rtsps://", "http://", "https://", "rtmp://", "srt://", "whip://")):
+            if not os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"):
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|"
+                    "max_delay;500000|reorder_queue_size;0"
+                )
+            open_timeout_ms = int(os.environ.get("VIDEOMEMORY_PREVIEW_OPEN_TIMEOUT_MS", "2500"))
+            read_timeout_ms = int(os.environ.get("VIDEOMEMORY_PREVIEW_READ_TIMEOUT_MS", "2500"))
+            if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, float(open_timeout_ms))
+            if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, float(read_timeout_ms))
+            if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            opened = cap.open(source, cv2.CAP_FFMPEG) if hasattr(cv2, "CAP_FFMPEG") else cap.open(source)
         else:
             try:
-                camera_index = int(io_id)
-            except (ValueError, TypeError):
-                return Response(response=b'', status=404, mimetype='image/jpeg')
-            frame_data = _get_camera_preview_frame(camera_index)
-        
-        if frame_data is None:
-            return Response(response=b'', status=404, mimetype='image/jpeg')
-        
-        return Response(
-            response=frame_data,
-            mimetype='image/jpeg',
-            headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
-        )
-    except Exception as e:
-        return Response(response=b'', status=404, mimetype='image/jpeg')
+                camera_index = int(source)
+            except (TypeError, ValueError):
+                cap.release()
+                return None
+            if platform.system() == 'Darwin':
+                opened = cap.open(camera_index, cv2.CAP_AVFOUNDATION)
+            elif platform.system() == 'Linux':
+                opened = cap.open(camera_index, cv2.CAP_V4L2)
+            else:
+                opened = cap.open(camera_index)
+            if opened:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if not opened or not cap.isOpened():
+            cap.release()
+            return None
+        return cap
+
+    def _read_latest_frame(cap):
+        """Read the newest available frame, dropping buffered stale frames first."""
+        if cap is None or not cap.isOpened():
+            return None
+
+        import time
+        deadline = time.monotonic() + (drain_ms / 1000.0)
+        grabs = 0
+        grabbed_any = False
+
+        # Drain backlog quickly so preview stays near-live instead of lagging.
+        while grabs < max_grabs and time.monotonic() < deadline:
+            ok = cap.grab()
+            if not ok:
+                break
+            grabbed_any = True
+            grabs += 1
+
+        if grabbed_any:
+            ret, frame = cap.retrieve()
+        else:
+            ret, frame = cap.read()
+
+        if not ret or frame is None or frame.size == 0:
+            return None
+        return frame
+
+    def generate():
+        cap = None
+        cap_source = None
+        try:
+            while True:
+                loop_started = time.monotonic()
+                frame_data = None
+
+                latest_frame = task_manager.get_latest_frame_for_device(io_id)
+                if latest_frame is not None and latest_frame.size > 0 and latest_frame.mean() >= 1:
+                    _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    frame_data = buffer.tobytes()
+                else:
+                    device_info = io_manager.get_stream_info(io_id)
+                    if device_info is not None and 'camera' in (device_info.get('category', '').lower()):
+                        pull_url = device_info.get('pull_url') or device_info.get('url')
+                        if pull_url:
+                            desired_source = pull_url
+                        else:
+                            try:
+                                desired_source = int(io_id)
+                            except (TypeError, ValueError):
+                                desired_source = None
+                        if desired_source is None:
+                            time.sleep(frame_delay_s)
+                            continue
+
+                        if cap is None or cap_source != desired_source or not cap.isOpened():
+                            if cap is not None:
+                                cap.release()
+                            cap = _open_preview_capture(desired_source)
+                            cap_source = desired_source if cap is not None else None
+
+                        if cap is not None and cap.isOpened():
+                            frame = _read_latest_frame(cap)
+                            if frame is not None:
+                                if frame.shape[1] > 640 or frame.shape[0] > 480:
+                                    frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LINEAR)
+                                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                frame_data = buffer.tobytes()
+                            else:
+                                cap.release()
+                                cap = None
+                                cap_source = None
+
+                if frame_data is not None:
+                    _record_preview_frame(io_id)
+                    yield (
+                        b"--" + boundary.encode("ascii") + b"\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                        b"Pragma: no-cache\r\n"
+                        b"Expires: 0\r\n\r\n" +
+                        frame_data + b"\r\n"
+                    )
+                elapsed = time.monotonic() - loop_started
+                sleep_for = frame_delay_s - elapsed
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
+        finally:
+            if cap is not None:
+                cap.release()
+
+    return Response(
+        generate(),
+        mimetype=f"multipart/x-mixed-replace; boundary={boundary}",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.route('/api/device/<io_id>/preview/fps', methods=['GET'])
+def get_device_preview_fps(io_id):
+    """Return server-measured preview stream FPS for a device."""
+    fps = _get_preview_fps(io_id)
+    response = jsonify({"io_id": io_id, "fps": round(fps, 2), "active": fps > 0})
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 # ── Ingestor Debug API ────────────────────────────────────────
 
@@ -782,47 +1076,138 @@ def get_ingestor_tasks(io_id):
         flask_logger.error(f"Error in debug tasks for {io_id}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-# ── Action API ─────────────────────────────────────────────────
 
-from videomemory.tools.actions import send_discord_notification, send_telegram_notification
+@app.route('/api/caption_frame', methods=['POST'])
+def caption_frame():
+    """Run one-off VLM caption/query on the latest frame for a specific device.
 
-@app.route('/api/actions/discord', methods=['POST'])
-def action_send_discord():
-    """Send a Discord notification via webhook.
-    
     Body (JSON):
-        message (str, required): Message content to send.
-        username (str, optional): Override the webhook's bot name.
+        prompt (str, required): Natural-language instruction for the model.
+        io_id (str, required): Device id.
     """
+    class OneOffFrameAnalysis(BaseModel):
+        analysis: str = Field(..., description="Model output for the requested frame analysis")
+
     try:
-        data = request.json or {}
-        message = data.get('message', '').strip()
-        if not message:
-            return jsonify({'status': 'error', 'error': 'message is required'}), 400
-        
-        result = send_discord_notification(
-            message=message,
-            username=data.get('username'),
+        data = request.get_json(silent=True) or {}
+        prompt = str(data.get('prompt', '')).strip()
+        io_id = str(data.get('io_id', '')).strip()
+
+        if not prompt:
+            return jsonify({'status': 'error', 'error': 'prompt is required'}), 400
+        if not io_id:
+            return jsonify({'status': 'error', 'error': 'io_id is required'}), 400
+
+        device_info = io_manager.get_stream_info(io_id) or {}
+        frame_bytes = _get_device_preview_frame_bytes(io_id)
+        if frame_bytes is None:
+            return jsonify({
+                'status': 'error',
+                'error': 'No frame available for this device',
+                'io_id': io_id,
+                'device': {
+                    'name': device_info.get('name', ''),
+                    'source': device_info.get('source', ''),
+                    'url': _public_ingest_url(device_info.get('url', '')) if device_info.get('url') else '',
+                    'pull_url': device_info.get('pull_url', ''),
+                },
+                'hint': 'Ensure the camera is actively publishing and the stream codec is supported (H.264 + AAC).',
+            }), 404
+
+        import base64
+        image_base64 = base64.b64encode(frame_bytes).decode('utf-8')
+        frame_sha256 = hashlib.sha256(frame_bytes).hexdigest()
+        active_provider = getattr(task_manager, "_model_provider", None) or model_provider
+        provider_name = type(active_provider).__name__
+        flask_logger.info(
+            "caption_frame request io_id=%s prompt_chars=%d frame_bytes=%d frame_sha256=%s provider=%s",
+            io_id,
+            len(prompt),
+            len(frame_bytes),
+            frame_sha256[:12],
+            provider_name,
         )
-        return jsonify(result)
+
+        response = active_provider._sync_generate_content(
+            image_base64=image_base64,
+            prompt=prompt,
+            response_model=OneOffFrameAnalysis,
+        )
+        analysis = str(getattr(response, 'analysis', '')).strip()
+        if not analysis:
+            return jsonify({
+                'status': 'error',
+                'error': 'Model returned empty analysis',
+                'io_id': io_id,
+                'model_provider': provider_name,
+                'frame_sha256': frame_sha256,
+                'frame_bytes': len(frame_bytes),
+            }), 502
+
+        return jsonify({
+            'status': 'success',
+            'io_id': io_id,
+            'prompt': prompt,
+            'analysis': analysis,
+            'model_provider': provider_name,
+            'frame_sha256': frame_sha256,
+            'frame_bytes': len(frame_bytes),
+        })
+    except Exception as e:
+        flask_logger.error("Error in /api/caption_frame: %s", e, exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+def _mcp_http_base_url() -> str:
+    """Resolve MCP HTTP base URL used by the UI events proxy."""
+    configured = os.getenv("VIDEOMEMORY_MCP_BASE_URL", "").strip()
+    if configured:
+        return configured.rstrip("/")
+    host = os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"
+    if host in ("0.0.0.0", "::"):
+        host = "127.0.0.1"
+    port = os.getenv("VIDEOMEMORY_MCP_PORT", "8765").strip() or "8765"
+    return f"http://{host}:{port}"
+
+
+@app.route('/api/mcp/events', methods=['GET'])
+def get_mcp_events():
+    """Get recent MCP calls for UI debugging."""
+    try:
+        limit_raw = request.args.get('limit', '200').strip()
+        try:
+            limit = max(1, min(int(limit_raw), 1000))
+        except ValueError:
+            return jsonify({'status': 'error', 'error': 'limit must be an integer'}), 400
+
+        resp = requests.get(
+            f"{_mcp_http_base_url()}/events",
+            params={'limit': limit},
+            timeout=2.5,
+        )
+        payload = resp.json() if resp.text else {}
+        if resp.status_code >= 400:
+            message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
+            return jsonify({'status': 'error', 'error': message}), 502
+        return jsonify(payload if isinstance(payload, dict) else {'status': 'ok', 'events': []})
+    except requests.RequestException as e:
+        return jsonify({'status': 'error', 'error': f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'}), 502
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
-@app.route('/api/actions/telegram', methods=['POST'])
-def action_send_telegram():
-    """Send a Telegram notification via Bot API.
-    
-    Body (JSON):
-        message (str, required): Message content to send.
-    """
+
+@app.route('/api/mcp/events', methods=['DELETE'])
+def clear_mcp_events():
+    """Clear MCP event buffer."""
     try:
-        data = request.json or {}
-        message = data.get('message', '').strip()
-        if not message:
-            return jsonify({'status': 'error', 'error': 'message is required'}), 400
-        
-        result = send_telegram_notification(message=message)
-        return jsonify(result)
+        resp = requests.delete(f"{_mcp_http_base_url()}/events", timeout=2.5)
+        payload = resp.json() if resp.text else {}
+        if resp.status_code >= 400:
+            message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
+            return jsonify({'status': 'error', 'error': message}), 502
+        return jsonify(payload if isinstance(payload, dict) else {'status': 'ok'})
+    except requests.RequestException as e:
+        return jsonify({'status': 'error', 'error': f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'}), 502
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
@@ -859,8 +1244,8 @@ def openapi_spec():
             "description": (
                 "VideoMemory is a video monitoring system that lets you create tasks for "
                 "camera input devices. The system analyses video streams using vision-language "
-                "models and can trigger actions when conditions are detected. This API exposes "
-                "the admin agent's tool calls so an external agent can act as a stand-in."
+                "models and records task updates when conditions are detected. This API exposes "
+                "the core ingestion and task-management capabilities for external agents."
             ),
         },
         "servers": [{"url": "http://localhost:5050", "description": "Local dev server"}],
@@ -914,6 +1299,32 @@ def openapi_spec():
                                 },
                             }}},
                         }
+                    },
+                }
+            },
+            "/api/caption_frame": {
+                "post": {
+                    "operationId": "caption_frame",
+                    "summary": "Caption/query the latest frame for a device",
+                    "description": (
+                        "Runs a one-off vision-language query on the latest available frame "
+                        "for the specified device."
+                    ),
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "required": ["prompt", "io_id"],
+                            "properties": {
+                                "prompt": {"type": "string", "description": "Natural-language instruction for the model"},
+                                "io_id": {"type": "string", "description": "Device identifier from GET /api/devices"},
+                            },
+                        }}},
+                    },
+                    "responses": {
+                        "200": {"description": "Caption/query result returned"},
+                        "400": {"description": "Validation error"},
+                        "404": {"description": "No frame available for the specified device"},
                     },
                 }
             },
@@ -1087,43 +1498,6 @@ def openapi_spec():
                     },
                 }
             },
-            "/api/actions/discord": {
-                "post": {
-                    "operationId": "send_discord_notification",
-                    "summary": "Send a Discord notification",
-                    "description": "Sends a message to Discord via the configured webhook (DISCORD_WEBHOOK_URL setting).",
-                    "requestBody": {
-                        "required": True,
-                        "content": {"application/json": {"schema": {
-                            "type": "object",
-                            "required": ["message"],
-                            "properties": {
-                                "message": {"type": "string", "description": "Message content"},
-                                "username": {"type": "string", "description": "Override bot display name"},
-                            },
-                        }}},
-                    },
-                    "responses": {"200": {"description": "Notification sent"}},
-                }
-            },
-            "/api/actions/telegram": {
-                "post": {
-                    "operationId": "send_telegram_notification",
-                    "summary": "Send a Telegram notification",
-                    "description": "Sends a message to Telegram via the Bot API (requires TELEGRAM_BOT_TOKEN; optional TELEGRAM_CHAT_ID in env for one-way notifications).",
-                    "requestBody": {
-                        "required": True,
-                        "content": {"application/json": {"schema": {
-                            "type": "object",
-                            "required": ["message"],
-                            "properties": {
-                                "message": {"type": "string", "description": "Message content"},
-                            },
-                        }}},
-                    },
-                    "responses": {"200": {"description": "Notification sent"}},
-                }
-            },
         },
         "components": {
             "schemas": {
@@ -1147,19 +1521,68 @@ def openapi_spec():
 # Keys that should be masked when returned to the frontend
 _SENSITIVE_KEYS = {
     'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY',
-    'TELEGRAM_BOT_TOKEN',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
 }
 
 # All known setting keys (for the settings page)
 _KNOWN_SETTINGS = [
-    'DISCORD_WEBHOOK_URL',
-    'TELEGRAM_BOT_TOKEN',
     'GOOGLE_API_KEY',
     'OPENAI_API_KEY',
     'OPENROUTER_API_KEY',
     'ANTHROPIC_API_KEY',
     'VIDEO_INGESTOR_MODEL',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S',
+    'VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S',
+    'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
 ]
+
+_MODEL_RUNTIME_KEYS = {
+    'GOOGLE_API_KEY',
+    'OPENAI_API_KEY',
+    'OPENROUTER_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'VIDEO_INGESTOR_MODEL',
+}
+
+_OPENCLAW_RUNTIME_KEYS = {
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S',
+    'VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S',
+    'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
+}
+
+
+def _reload_openclaw_notifier_from_env() -> None:
+    """Refresh OpenClaw notifier config from current environment settings."""
+    try:
+        updated = OpenClawWakeNotifier.from_env()
+        openclaw_notifier.webhook_url = updated.webhook_url
+        openclaw_notifier.bearer_token = updated.bearer_token
+        openclaw_notifier.timeout_seconds = updated.timeout_seconds
+        openclaw_notifier.dedupe_ttl_seconds = updated.dedupe_ttl_seconds
+        openclaw_notifier.min_interval_seconds = updated.min_interval_seconds
+        openclaw_notifier.enabled = updated.enabled
+    except Exception as e:
+        flask_logger.warning("Failed to reload OpenClaw notifier settings: %s", e)
+
+
+def _apply_runtime_setting_change(changed_key: str) -> None:
+    """Apply in-process runtime reloads needed for a changed setting key."""
+    if changed_key in _OPENCLAW_RUNTIME_KEYS:
+        _reload_openclaw_notifier_from_env()
+
+    if changed_key in _MODEL_RUNTIME_KEYS:
+        model_name = os.getenv('VIDEO_INGESTOR_MODEL', '').strip() or None
+        reload_result = task_manager.reload_model_provider(model_name=model_name)
+        flask_logger.info(
+            "Applied model runtime settings update for %s using %s (ingestors=%d)",
+            changed_key,
+            reload_result.get('provider'),
+            reload_result.get('updated_ingestors', 0),
+        )
 
 def _mask_value(key: str, value: str) -> str:
     """Mask sensitive values, showing only the last 4 characters."""
@@ -1206,283 +1629,36 @@ def update_setting(key):
             env_vals = dotenv_values()
             if key in env_vals:
                 os.environ[key] = env_vals[key]
+            _apply_runtime_setting_change(key)
             return jsonify({'status': 'cleared', 'key': key})
         
         # Save to DB and update os.environ for immediate effect
         db.set_setting(key, value)
         os.environ[key] = value
-        
-        # Auto-start Telegram polling if the token was just set and isn't running yet
-        if key == 'TELEGRAM_BOT_TOKEN':
-            _ensure_telegram_polling()
+        _apply_runtime_setting_change(key)
         
         return jsonify({'status': 'saved', 'key': key})
     except Exception as e:
         flask_logger.error(f"Failed to update setting {key}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/settings/test/discord', methods=['POST'])
-def test_discord_webhook():
-    """Send a test message to the configured Discord webhook."""
-    try:
-        webhook_url = os.getenv('DISCORD_WEBHOOK_URL', '')
-        if not webhook_url:
-            return jsonify({'status': 'error', 'message': 'Discord webhook URL is not configured'}), 400
-        
-        test_payload = {
-            'content': 'Test notification from VideoMemory — your webhook is working!',
-            'username': 'VideoMemory'
-        }
-        
-        resp = http_requests.post(webhook_url, json=test_payload, timeout=10)
-        
-        if resp.status_code == 204:
-            return jsonify({'status': 'success', 'message': 'Test message sent successfully!'})
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Discord returned status {resp.status_code}'
-            }), 400
-    except http_requests.exceptions.Timeout:
-        return jsonify({'status': 'error', 'message': 'Request timed out'}), 504
-    except Exception as e:
-        flask_logger.error(f"Discord test failed: {e}", exc_info=True)
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-# ── Telegram bot info (for "Open in Telegram" link) ─────────────
-
-@app.route('/api/telegram/bot-info', methods=['GET'])
-def telegram_bot_info():
-    """Return the bot's t.me link if TELEGRAM_BOT_TOKEN is set. Uses Telegram getMe to resolve username."""
-    try:
-        bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
-        if not bot_token:
-            return jsonify({'ok': False})
-        resp = http_requests.get(
-            f'https://api.telegram.org/bot{bot_token}/getMe',
-            timeout=5,
-        )
-        if not resp.ok:
-            return jsonify({'ok': False})
-        data = resp.json()
-        if not data.get('ok'):
-            return jsonify({'ok': False})
-        username = (data.get('result') or {}).get('username')
-        if not username:
-            return jsonify({'ok': False})
-        return jsonify({
-            'ok': True,
-            'url': f'https://t.me/{username}',
-            'username': username,
-        })
-    except Exception:
-        return jsonify({'ok': False})
-
-# ── Telegram two-way chat (admin agent via Telegram) ───────────
-
-def _get_or_create_telegram_session(chat_id: int) -> str:
-    """Get or create an admin-agent session for this Telegram chat. Returns session_id."""
-    session_id = f"telegram_{chat_id}"
-
-    async def _ensure():
-        session = await session_service.get_session(
-            app_name=app_name, user_id=USER_ID, session_id=session_id
-        )
-        if session is None:
-            await session_service.create_session(
-                app_name=app_name, user_id=USER_ID, session_id=session_id
-            )
-            db.save_session_metadata(session_id, title="Telegram")
-        return session_id
-
-    return run_async(_ensure(), timeout=15)
-
-
-def _run_agent_for_message(session_id: str, user_message: str) -> str:
-    """Run the admin agent with the given message in the given session; return reply text."""
-    content = types.Content(role="user", parts=[types.Part(text=user_message)])
-    final_response_text = "No response received"
-
-    async def get_response():
-        nonlocal final_response_text
-        gen = runner.run_async(
-            user_id=USER_ID,
-            session_id=session_id,
-            new_message=content,
-        )
-        try:
-            async for event in gen:
-                if event.is_final_response():
-                    if event.content and event.content.parts:
-                        final_response_text = event.content.parts[0].text
-                    break
-        finally:
-            await gen.aclose()
-
-    run_async(get_response(), timeout=60)
-    return final_response_text
-
-
-def _send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:
-    """Send a text message to a Telegram chat. Returns True on success."""
-    try:
-        resp = http_requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": text},
-            timeout=10,
-        )
-        return resp.ok and resp.json().get("ok", False)
-    except Exception as e:
-        flask_logger.error(f"Telegram sendMessage failed: {e}", exc_info=True)
-        return False
-
-
-def _process_telegram_update(update: dict) -> None:
-    """Process one Telegram update: run agent, send reply. Runs in background thread."""
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    if not bot_token:
-        return
-    message = update.get("message") or update.get("edited_message")
-    if not message:
-        return
-    chat = message.get("chat", {})
-    chat_id = chat.get("id")
-    text = (message.get("text") or "").strip()
-    if chat_id is None or not text:
-        return
-    # Use this chat for one-way notifications (read from DB when TELEGRAM_CHAT_ID is not set)
-    try:
-        db.set_setting("TELEGRAM_NOTIFICATION_CHAT_ID", str(chat_id))
-    except Exception as e:
-        flask_logger.debug(f"Could not save Telegram notification chat_id: {e}")
-    try:
-        session_id = _get_or_create_telegram_session(chat_id)
-        reply = _run_agent_for_message(session_id, text)
-        # Telegram message length limit is 4096
-        if len(reply) > 4096:
-            reply = reply[:4093] + "..."
-        _send_telegram_message(bot_token, chat_id, reply)
-    except Exception as e:
-        flask_logger.error(f"Telegram update processing failed: {e}", exc_info=True)
-        _send_telegram_message(
-            bot_token,
-            chat_id,
-            f"Sorry, something went wrong: {str(e)[:500]}",
-        )
-
-
-@app.route("/api/telegram/webhook", methods=["POST"])
-def telegram_webhook():
-    """Receive Telegram updates (set bot webhook to this URL). Returns 200 immediately; processes in background."""
-    data = request.get_json(silent=True) or {}
-    # Return 200 quickly so Telegram doesn't retry
-    threading.Thread(target=_process_telegram_update, args=(data,), daemon=True).start()
-    return "", 200
-
-
-def _telegram_polling_loop():
-    """Long-poll Telegram getUpdates and process messages. Run in a daemon thread."""
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    if not bot_token:
-        return
-    last_update_id = 0
-    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
-    flask_logger.info("Telegram polling started — you can chat with the admin agent via Telegram.")
-    while True:
-        try:
-            resp = http_requests.get(
-                url,
-                params={"offset": last_update_id, "timeout": 30},
-                timeout=35,
-            )
-            if not resp.ok:
-                continue
-            data = resp.json()
-            if not data.get("ok"):
-                continue
-            for update in data.get("result", []):
-                last_update_id = update.get("update_id", 0) + 1
-                _process_telegram_update(update)
-        except Exception as e:
-            flask_logger.debug(f"Telegram polling error: {e}")
-        except Exception:
-            break
-
-
-_telegram_poll_thread = None
-
-def _ensure_telegram_polling():
-    """Start the Telegram polling thread if a token is set and it isn't already running."""
-    global _telegram_poll_thread
-    if _telegram_poll_thread and _telegram_poll_thread.is_alive():
-        return
-    if not os.getenv("TELEGRAM_BOT_TOKEN", "").strip():
-        return
-    _telegram_poll_thread = threading.Thread(
-        target=_telegram_polling_loop,
-        daemon=True,
-        name="TelegramPolling",
-    )
-    _telegram_poll_thread.start()
-
-# Start on boot if token is already available
-_ensure_telegram_polling()
-
-# ── Chat API ──────────────────────────────────────────────────
-
-@app.route('/chat', methods=['POST'])
-def chat():
-    """Handle chat messages."""
-    data = request.json
-    user_message = data.get('message', '').strip()
-    session_id = data.get('session_id', '').strip()
-    
-    if not user_message:
-        return jsonify({'error': 'Message cannot be empty'}), 400
-    
-    if not session_id:
-        return jsonify({'error': 'session_id is required'}), 400
-    
-    try:
-        # Update session title with first message (if still untitled)
-        meta = db.get_session_metadata(session_id)
-        if meta and not meta['title']:
-            title = user_message[:60].strip()
-            if len(user_message) > 60:
-                title += '...'
-            db.update_session_title(session_id, title)
-        
-        # Run the agent and get response using the background event loop
-        content = types.Content(role='user', parts=[types.Part(text=user_message)])
-        
-        final_response_text = "No response received"
-        async def get_response():
-            nonlocal final_response_text
-            # Use async generator properly with try/finally to ensure cleanup
-            gen = runner.run_async(
-                user_id=USER_ID,
-                session_id=session_id,
-                new_message=content
-            )
-            try:
-                async for event in gen:
-                    if event.is_final_response():
-                        if event.content and event.content.parts:
-                            final_response_text = event.content.parts[0].text
-                        break
-            finally:
-                # Properly close the async generator to avoid resource leaks
-                await gen.aclose()
-
-        # Run the coroutine in the background loop
-        future = asyncio.run_coroutine_threadsafe(get_response(), background_loop)
-        future.result(timeout=60)  # 60 second timeout
-        
-        return jsonify({'response': final_response_text})
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 if __name__ == '__main__':
     debug = os.getenv('FLASK_DEBUG', '0') == '1'
-    app.run(debug=debug, host='0.0.0.0', port=5050, threaded=True)
+    port = int(os.getenv('PORT', '5050'))
+    host = os.getenv('HOST', '0.0.0.0')
+    ssl_adhoc = os.getenv('SSL_ADHOC', '0') == '1'
+    ssl_cert = os.getenv('SSL_CERT_FILE', '').strip()
+    ssl_key = os.getenv('SSL_KEY_FILE', '').strip()
+
+    ssl_context = None
+    if ssl_adhoc:
+        ssl_context = 'adhoc'
+    elif ssl_cert and ssl_key:
+        ssl_context = (ssl_cert, ssl_key)
+
+    proto = 'https' if ssl_context else 'http'
+    bind_host = host if host not in ('0.0.0.0', '::') else 'localhost'
+    print(f"VideoMemory UI: {proto}://{bind_host}:{port}/devices")
+    print(f"VideoMemory API health: {proto}://{bind_host}:{port}/api/health")
+
+    app.run(debug=debug, host=host, port=port, threaded=True, ssl_context=ssl_context)

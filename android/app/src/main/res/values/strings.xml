@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">VideoMemory Stream</string>
+    <string name="stream_screen_subtitle">Stream your phone camera to VideoMemory with one tap.</string>
+    <string name="rtmp_destination">RTMP destination</string>
     <string name="hint_rtmp_url">rtmp://YOUR_IP:1935/live/phone1</string>
-    <string name="start">Start stream</string>
-    <string name="stop">Stop stream</string>
+    <string name="default_rtmp_url">rtmp://192.168.1.100:1935/live/phone1</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="status_idle">Idle</string>
+    <string name="status_streaming">Streaming</string>
+    <string name="camera_preview">Camera preview</string>
+    <string name="streaming_notification_title">Streaming active</string>
+    <string name="streaming_notification_text">VideoMemory stream is running in the background.</string>
+    <string name="streaming_notification_text_with_target">Streaming to %1$s</string>
+    <string name="streaming_notification_channel_name">VideoMemory Streaming</string>
+    <string name="streaming_notification_channel_description">Shows status while the camera stream is active.</string>
 </resources>

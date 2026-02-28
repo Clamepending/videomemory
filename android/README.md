@@ -36,3 +36,16 @@ gradle wrapper   # if gradlew is missing
 
 - **RootEncoder** (pedroSG94): camera capture, H.264/AAC encode, RTMP push.
 - Single screen: URL field, Start/Stop, camera preview.
+
+## Play Store Readiness (Important)
+
+This app is still a developer utility and needs release preparation before Play submission.
+
+Current code improvements in this repo:
+- `targetSdk` / `compileSdk` updated to Android 15 (API 35)
+- foreground service notification while streaming (camera + microphone)
+- basic runtime permission flow improvements
+
+Before submitting to Google Play, complete the checklist in:
+
+- `/Users/mark/Desktop/projects/videomemory/android/PLAY_STORE_CHECKLIST.md`

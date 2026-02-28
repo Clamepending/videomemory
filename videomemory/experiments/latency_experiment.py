@@ -273,7 +273,7 @@ def call_anthropic(model_name: str, image_base64: str, prompt: str, api_key: str
             max_tokens=4096,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_base64}},
-                {"type": "text", "text": prompt + "\n\nPlease respond with valid JSON matching this schema: {\"task_updates\": [], \"system_actions\": []}"}
+                {"type": "text", "text": prompt + "\n\nPlease respond with valid JSON matching this schema: {\"task_updates\": []}"}
             ]}]
         )
     
@@ -317,7 +317,7 @@ def call_openrouter(model_name: str, image_base64: str, prompt: str, api_key: st
                     "model": model_name,
                     "messages": [{"role": "user", "content": [
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
-                        {"type": "text", "text": prompt + "\n\nPlease respond with valid JSON matching this schema: {\"task_updates\": [], \"system_actions\": []}"}
+                        {"type": "text", "text": prompt + "\n\nPlease respond with valid JSON matching this schema: {\"task_updates\": []}"}
                     ]}],
                     "response_format": {"type": "json_object"}
                 }

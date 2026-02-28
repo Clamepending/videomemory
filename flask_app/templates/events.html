@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+
+{% block title %}Events - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+        .events-page {
+            width: 1160px;
+            max-width: 100%;
+            padding: 26px 20px;
+            height: 100%;
+            overflow-y: auto;
+        }
+
+        .events-page h2 {
+            font-size: 28px;
+            font-weight: 500;
+            color: #ececec;
+            margin-bottom: 10px;
+        }
+
+        .events-page .page-desc {
+            color: #8f8f8f;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar .field {
+            background: #2d2d2d;
+            border: 1px solid #424242;
+            color: #ececec;
+            border-radius: 8px;
+            padding: 7px 10px;
+            font-size: 13px;
+        }
+
+        .toolbar button {
+            border: 1px solid #4c4c4c;
+            background: #2f2f2f;
+            color: #ececec;
+            border-radius: 8px;
+            padding: 7px 11px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .toolbar button:hover {
+            background: #3a3a3a;
+        }
+
+        .status {
+            color: #a7a7a7;
+            font-size: 12px;
+        }
+
+        .events-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 12px;
+            border: 1px solid #404040;
+        }
+
+        .events-table th,
+        .events-table td {
+            border: 1px solid #404040;
+            padding: 8px;
+            text-align: left;
+            vertical-align: top;
+            word-wrap: break-word;
+            overflow-wrap: anywhere;
+        }
+
+        .events-table th {
+            background: #262626;
+            color: #d7d7d7;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .mono {
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            color: #c7e4ff;
+            white-space: pre-wrap;
+        }
+
+        .badge {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .ok {
+            background: rgba(25, 195, 125, 0.2);
+            color: #7ee7ba;
+        }
+
+        .err {
+            background: rgba(255, 80, 80, 0.17);
+            color: #ff9999;
+        }
+
+        .empty {
+            color: #8a8a8a;
+            margin-top: 18px;
+            font-size: 13px;
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="events-page">
+        <h2>MCP Events</h2>
+        <p class="page-desc">Live request/response events from the MCP server. Use this to debug communication between VideoMemory and your agent.</p>
+
+        <div class="toolbar">
+            <label class="field">Limit
+                <input id="limitInput" type="number" min="1" max="1000" value="200" style="width:72px; margin-left:6px; background:transparent; border:none; color:#ececec; outline:none;">
+            </label>
+            <label class="field">Method
+                <input id="methodFilter" type="text" placeholder="e.g. tools/call" style="width:180px; margin-left:6px; background:transparent; border:none; color:#ececec; outline:none;">
+            </label>
+            <button id="refreshBtn" type="button">Refresh</button>
+            <button id="clearBtn" type="button">Clear Buffer</button>
+            <span id="status" class="status">Loading...</span>
+        </div>
+
+        <table class="events-table" id="eventsTable" style="display:none;">
+            <thead>
+                <tr>
+                    <th style="width:70px;">Seq</th>
+                    <th style="width:170px;">Time</th>
+                    <th style="width:90px;">Status</th>
+                    <th style="width:70px;">ms</th>
+                    <th style="width:70px;">Tx</th>
+                    <th style="width:120px;">Remote</th>
+                    <th style="width:140px;">Method</th>
+                    <th style="width:220px;">Params</th>
+                    <th>Summary</th>
+                </tr>
+            </thead>
+            <tbody id="eventsBody"></tbody>
+        </table>
+        <div class="empty" id="emptyState" style="display:none;">No MCP events yet.</div>
+    </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const statusEl = document.getElementById('status');
+    const bodyEl = document.getElementById('eventsBody');
+    const tableEl = document.getElementById('eventsTable');
+    const emptyEl = document.getElementById('emptyState');
+    const limitInput = document.getElementById('limitInput');
+    const methodFilter = document.getElementById('methodFilter');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    let timer = null;
+
+    function fmtTime(ts) {
+        if (!ts) return '';
+        try {
+            return new Date(ts * 1000).toLocaleString();
+        } catch (_) {
+            return String(ts);
+        }
+    }
+
+    function badge(status) {
+        const cls = status && status.indexOf('error') >= 0 ? 'err' : (status === 'ok' ? 'ok' : (status === 'tool_error' ? 'err' : 'ok'));
+        const label = status || '';
+        return `<span class="badge ${cls}">${label}</span>`;
+    }
+
+    function normalizeText(v) {
+        if (v === null || v === undefined) return '';
+        if (typeof v === 'string') return v;
+        try {
+            return JSON.stringify(v);
+        } catch (_) {
+            return String(v);
+        }
+    }
+
+    function eventSummary(ev) {
+        if (ev.result_error) return normalizeText(ev.result_error);
+        if (ev.error) return normalizeText(ev.error);
+        if (ev.result_summary) return normalizeText(ev.result_summary);
+        if (typeof ev.is_error_result === 'boolean') return `isError=${ev.is_error_result}`;
+        return '';
+    }
+
+    function render(events) {
+        const filter = (methodFilter.value || '').trim().toLowerCase();
+        const rows = (events || []).filter(ev => {
+            if (!filter) return true;
+            return String(ev.method || '').toLowerCase().includes(filter);
+        });
+
+        if (!rows.length) {
+            tableEl.style.display = 'none';
+            emptyEl.style.display = 'block';
+            bodyEl.innerHTML = '';
+            return;
+        }
+
+        emptyEl.style.display = 'none';
+        tableEl.style.display = 'table';
+        bodyEl.innerHTML = rows.slice().reverse().map(ev => `
+            <tr>
+                <td>${ev.seq || ''}</td>
+                <td>${fmtTime(ev.ts)}</td>
+                <td>${badge(ev.status)}</td>
+                <td>${ev.duration_ms ?? ''}</td>
+                <td>${ev.transport || ''}</td>
+                <td>${ev.remote_addr || ''}</td>
+                <td class="mono">${normalizeText(ev.method)}</td>
+                <td class="mono">${normalizeText(ev.params)}</td>
+                <td class="mono">${normalizeText(eventSummary(ev))}</td>
+            </tr>
+        `).join('');
+    }
+
+    async function loadEvents() {
+        const limit = Math.max(1, Math.min(1000, Number(limitInput.value || 200)));
+        statusEl.textContent = 'Loading...';
+        try {
+            const resp = await fetch(`/api/mcp/events?limit=${limit}`);
+            const data = await resp.json();
+            if (!resp.ok || data.status === 'error') {
+                throw new Error(data.error || `HTTP ${resp.status}`);
+            }
+            render(data.events || []);
+            statusEl.textContent = `Updated ${new Date().toLocaleTimeString()} (${(data.events || []).length} event(s))`;
+        } catch (err) {
+            statusEl.textContent = `Error: ${err.message}`;
+        }
+    }
+
+    async function clearEvents() {
+        if (!confirm('Clear MCP event buffer?')) return;
+        statusEl.textContent = 'Clearing...';
+        try {
+            const resp = await fetch('/api/mcp/events', { method: 'DELETE' });
+            const data = await resp.json();
+            if (!resp.ok || data.status === 'error') {
+                throw new Error(data.error || `HTTP ${resp.status}`);
+            }
+            await loadEvents();
+        } catch (err) {
+            statusEl.textContent = `Error: ${err.message}`;
+        }
+    }
+
+    function startPolling() {
+        if (timer) clearInterval(timer);
+        timer = setInterval(loadEvents, 2000);
+    }
+
+    refreshBtn.addEventListener('click', loadEvents);
+    clearBtn.addEventListener('click', clearEvents);
+    methodFilter.addEventListener('input', loadEvents);
+    limitInput.addEventListener('change', loadEvents);
+
+    loadEvents();
+    startPolling();
+</script>
+{% endblock %}

@@ -488,14 +488,7 @@ HTML_TEMPLATE = """
                                 });
                             }
                             
-                            if (output.system_actions && output.system_actions.length > 0) {
-                                output.system_actions.forEach(action => {
-                                    html += 'Action: ' + action.take_action + '<br>';
-                                });
-                            }
-                            
-                            if ((!output.task_updates || output.task_updates.length === 0) && 
-                                (!output.system_actions || output.system_actions.length === 0)) {
+                            if (!output.task_updates || output.task_updates.length === 0) {
                                 html += '<span class="no-data">No updates</span>';
                             }
                             

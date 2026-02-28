@@ -24,6 +24,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        prefillRtmpUrl()
         requestPermissions()
         binding.preview.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(h: SurfaceHolder) {}
@@ -32,6 +33,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         })
         binding.btnStart.setOnClickListener { startStream() }
         binding.btnStop.setOnClickListener { stopStream() }
+        renderStreamingState()
     }
 
     private fun requestPermissions() {
@@ -66,21 +68,18 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
                 return
             }
         }
+        saveRtmpUrl(url)
         rtmpStream!!.startPreview(binding.preview)
         rtmpStream!!.startStream(url)
         streaming = true
-        binding.btnStart.isEnabled = false
-        binding.btnStop.isEnabled = true
-        binding.urlInput.isEnabled = false
+        renderStreamingState()
     }
 
     private fun stopStream() {
         rtmpStream?.stopStream()
         rtmpStream?.stopPreview()
         streaming = false
-        binding.btnStart.isEnabled = true
-        binding.btnStop.isEnabled = false
-        binding.urlInput.isEnabled = true
+        renderStreamingState()
     }
 
     override fun onConnectionStarted(url: String) {}
@@ -109,7 +108,41 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         super.onDestroy()
     }
 
+    private fun prefillRtmpUrl() {
+        if (!binding.urlInput.text.isNullOrBlank()) return
+        val saved = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getString(KEY_LAST_RTMP_URL, null)
+            ?.trim()
+        val initialValue = if (saved.isNullOrBlank()) getString(R.string.default_rtmp_url) else saved
+        binding.urlInput.setText(initialValue)
+        binding.urlInput.setSelection(initialValue.length)
+    }
+
+    private fun saveRtmpUrl(url: String) {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putString(KEY_LAST_RTMP_URL, url)
+            .apply()
+    }
+
+    private fun renderStreamingState() {
+        binding.btnStart.isEnabled = !streaming
+        binding.btnStop.isEnabled = streaming
+        binding.urlInput.isEnabled = !streaming
+        if (streaming) {
+            binding.statusText.text = getString(R.string.status_streaming)
+            binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.status_live_text))
+            binding.statusText.setBackgroundResource(R.drawable.status_pill_live)
+        } else {
+            binding.statusText.text = getString(R.string.status_idle)
+            binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.status_idle_text))
+            binding.statusText.setBackgroundResource(R.drawable.status_pill_idle)
+        }
+    }
+
     companion object {
         private const val TAG = "VideoMemoryStream"
+        private const val PREFS_NAME = "videomemory_stream_prefs"
+        private const val KEY_LAST_RTMP_URL = "last_rtmp_url"
     }
 }

@@ -1,10 +1,9 @@
 [project]
 name = "videomemory"
 version = "0.1.0"
-description = "Video memory system with AI agents"
+description = "Video memory ingestion and monitoring core"
 requires-python = ">=3.9"
 dependencies = [
-    "google-adk",
     "google-genai",
     "python-dotenv",
     "pyserial",

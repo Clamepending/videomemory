@@ -46,6 +46,33 @@
             margin-bottom: 20px;
         }
 
+        .contract-card {
+            background: #1f1f1f;
+            border: 1px solid #3a3a3a;
+            border-radius: 10px;
+            padding: 14px;
+            margin-top: 14px;
+        }
+
+        .contract-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #d0d0d0;
+            margin-bottom: 8px;
+        }
+
+        .contract-list {
+            margin: 0;
+            padding-left: 16px;
+            color: #a8a8a8;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .contract-list code {
+            color: #c7e4ff;
+        }
+
         /* ── Individual setting rows ───────────── */
         .setting-row {
             margin-bottom: 18px;
@@ -160,21 +187,6 @@
             cursor: not-allowed;
         }
 
-        .btn-test {
-            background: #2d5aa0;
-            color: white;
-        }
-
-        .btn-test:hover {
-            background: #3a6fbe;
-        }
-
-        .btn-test:disabled {
-            background: #404040;
-            color: #666;
-            cursor: not-allowed;
-        }
-
         .btn-clear {
             background: none;
             border: 1px solid #404040;
@@ -238,58 +250,12 @@
 {% block content %}
     <div class="settings-page">
         <h2>Settings</h2>
-        <p class="page-desc">Configure API keys, webhooks, and external services. Settings are saved to the local database and persist across restarts.</p>
-
-        <!-- ── Notifications ──────────────────────── -->
-        <div class="settings-section">
-            <h3>Notifications</h3>
-            <p class="section-desc">Configure how VideoMemory sends notifications and alerts.</p>
-
-            <div class="setting-row" data-key="DISCORD_WEBHOOK_URL">
-                <div class="setting-label">
-                    <label>Discord Webhook URL</label>
-                    <span class="badge" id="badge-DISCORD_WEBHOOK_URL"></span>
-                </div>
-                <div class="setting-hint">Paste a Discord channel webhook URL to receive notifications. <a href="https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks" target="_blank" style="color:#8ab4ff;">How to create a webhook</a></div>
-                <div class="setting-input-row">
-                    <input type="text" class="setting-input" id="input-DISCORD_WEBHOOK_URL" placeholder="https://discord.com/api/webhooks/...">
-                    <button class="btn btn-test" onclick="testDiscord()" id="btn-test-discord">Test</button>
-                    <button class="btn btn-save" onclick="saveSetting('DISCORD_WEBHOOK_URL')">Save</button>
-                </div>
-                <div class="setting-status" id="status-DISCORD_WEBHOOK_URL"></div>
-            </div>
-
-            <hr style="border: none; border-top: 1px solid #404040; margin: 22px 0;">
-
-            <div class="setting-row" data-key="TELEGRAM_BOT_TOKEN">
-                <div class="setting-label">
-                    <label>Telegram Bot Token</label>
-                    <span class="badge" id="badge-TELEGRAM_BOT_TOKEN"></span>
-                </div>
-                <div class="setting-hint">The API token for your Telegram bot (from @BotFather).</div>
-                <div class="setting-input-row">
-                    <input type="password" class="setting-input" id="input-TELEGRAM_BOT_TOKEN" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
-                    <button type="button" class="toggle-vis" id="toggle-TELEGRAM_BOT_TOKEN" onclick="toggleVisibility('TELEGRAM_BOT_TOKEN')">show</button>
-                    <button class="btn btn-save" onclick="saveSetting('TELEGRAM_BOT_TOKEN')">Save</button>
-                </div>
-                <div class="setting-status" id="status-TELEGRAM_BOT_TOKEN"></div>
-                <div id="telegram-bot-link" class="setting-status" style="margin-top: 8px;"></div>
-            </div>
-
-            <div class="telegram-setup-guide" style="margin-top: 16px; padding: 14px 16px; background: rgba(100, 150, 255, 0.06); border: 1px solid rgba(100, 150, 255, 0.15); border-radius: 8px; font-size: 13px; color: #aaa; line-height: 1.6;">
-                <strong style="color: #8ab4ff; font-size: 13px;">Setup</strong>
-                <ol style="margin: 8px 0 0 0; padding-left: 20px;">
-                    <li>In Telegram, search for <strong style="color: #ccc;">@BotFather</strong> and send <code style="background: #1a1a1a; padding: 1px 5px; border-radius: 3px; color: #ccc;">/newbot</code>. Copy the <strong style="color: #ccc;">API token</strong> you get.</li>
-                    <li>Start a chat with your new bot and send it any message.</li>
-                    <li>Paste the token above and click <strong style="color: #ccc;">Save</strong>, then restart the app. You can then chat with the same admin agent from Telegram.</li>
-                </ol>
-            </div>
-        </div>
+        <p class="page-desc">Configure API keys and model settings. Settings are saved to the local database and persist across restarts.</p>
 
         <!-- ── AI Providers ───────────────────────── -->
         <div class="settings-section">
             <h3>AI Model Providers</h3>
-            <p class="section-desc">API keys for the AI services that power the agent and video analysis.</p>
+            <p class="section-desc">API keys for the AI services that power video analysis.</p>
 
             <div class="setting-row" data-key="GOOGLE_API_KEY">
                 <div class="setting-label">
@@ -349,7 +315,7 @@
 
             <div class="restart-notice">
                 <span class="icon">&#9888;</span>
-                API key changes take effect after restarting the application.
+                API key changes apply immediately to running and new tasks.
             </div>
         </div>
 
@@ -368,10 +334,13 @@
                     <select class="setting-input" id="input-VIDEO_INGESTOR_MODEL">
                         <option value="">-- Use default (gemini-2.5-flash) --</option>
                         <option value="gemini-2.5-flash">Gemini 2.5 Flash (Google)</option>
-                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Google)</option>
+                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Google)</option>
                         <option value="gpt-4o-mini">GPT-4o Mini (OpenAI)</option>
                         <option value="gpt-4.1-nano">GPT-4.1 Nano (OpenAI)</option>
-                        <option value="qwen-2.5-vl-7b-instruct">Qwen 2.5 VL 7B (OpenRouter/Local)</option>
+                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Anthropic)</option>
+                        <option value="qwen-2-vl-7b">Qwen 2 VL 7B (OpenRouter)</option>
+                        <option value="phi-4-multimodal">Phi-4 Multimodal (OpenRouter)</option>
+                        <option value="molmo-2-8b">Molmo 2 8B (OpenRouter)</option>
                     </select>
                     <button class="btn btn-save" onclick="saveSetting('VIDEO_INGESTOR_MODEL')">Save</button>
                 </div>
@@ -380,7 +349,97 @@
 
             <div class="restart-notice">
                 <span class="icon">&#9888;</span>
-                Model changes take effect after restarting the application.
+                Model changes apply immediately to running and new tasks.
+            </div>
+        </div>
+
+        <!-- ── External Agent Integration ──────────── -->
+        <div class="settings-section">
+            <h3>External Agent Integration</h3>
+            <p class="section-desc">Configure webhook delivery to an external agent/gateway (for example OpenClaw).</p>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_WEBHOOK_URL">
+                <div class="setting-label">
+                    <label>Webhook URL</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_WEBHOOK_URL"></span>
+                </div>
+                <div class="setting-hint">Endpoint for task update events, e.g. http://localhost:18789/hooks/videomemory-alert</div>
+                <div class="setting-input-row">
+                    <input type="text" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_WEBHOOK_URL" placeholder="http://localhost:18789/hooks/videomemory-alert">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_WEBHOOK_URL')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_WEBHOOK_URL"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN">
+                <div class="setting-label">
+                    <label>Webhook Bearer Token</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN"></span>
+                </div>
+                <div class="setting-hint">Optional bearer token sent as Authorization header.</div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN" placeholder="your-shared-token">
+                    <button type="button" class="toggle-vis" id="toggle-VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN" onclick="toggleVisibility('VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S">
+                <div class="setting-label">
+                    <label>Webhook Timeout (seconds)</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S"></span>
+                </div>
+                <div class="setting-hint">HTTP timeout for webhook calls. Default is 3.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S" placeholder="3" min="1" step="0.5">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S">
+                <div class="setting-label">
+                    <label>Dedupe TTL (seconds)</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S"></span>
+                </div>
+                <div class="setting-hint">Suppress duplicate webhook events within this window. Default is 30.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S" placeholder="30" min="0" step="1">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S">
+                <div class="setting-label">
+                    <label>Min Send Interval (seconds)</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S"></span>
+                </div>
+                <div class="setting-hint">Minimum gap between webhook deliveries. Default is 0.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S" placeholder="0" min="0" step="0.1">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S"></div>
+            </div>
+
+            <div class="restart-notice">
+                <span class="icon">&#9888;</span>
+                Webhook settings apply immediately.
+            </div>
+
+            <div class="contract-card">
+                <div class="contract-title">Integration Agreement (How data flows)</div>
+                <ul class="contract-list">
+                    <li><strong>Agent -&gt; VideoMemory:</strong> Your agent can call VideoMemory over HTTP (<code>/api/*</code>) or MCP (<code>/mcp</code>).</li>
+                    <li><strong>MCP endpoint:</strong> <code>http://localhost:8765/mcp</code> (default in docker stack).</li>
+                    <li><strong>Core API base:</strong> <code>http://localhost:5050</code> (or your configured PORT).</li>
+                    <li><strong>Typical agent calls:</strong> <code>GET /api/devices</code>, <code>POST /api/tasks</code>, <code>GET /api/task/{id}</code>.</li>
+                    <li><strong>VideoMemory -&gt; Agent:</strong> On detections, VideoMemory POSTs <code>task_update</code> JSON to the configured webhook URL.</li>
+                    <li><strong>Auth:</strong> If token is set, callback includes <code>Authorization: Bearer ...</code>.</li>
+                    <li><strong>Tuning:</strong> Use timeout, dedupe TTL, and min interval fields above to control callback behavior.</li>
+                </ul>
             </div>
         </div>
     </div>
@@ -431,29 +490,9 @@
                         }
                     }
                 }
-                await updateTelegramBotLink();
             } catch (err) {
                 console.error('Failed to load settings:', err);
             }
-        }
-
-        async function updateTelegramBotLink() {
-            const el = document.getElementById('telegram-bot-link');
-            if (!el) return;
-            el.innerHTML = '';
-            try {
-                const resp = await fetch('/api/telegram/bot-info');
-                const data = await resp.json();
-                if (data.ok && data.url) {
-                    const a = document.createElement('a');
-                    a.href = data.url;
-                    a.target = '_blank';
-                    a.rel = 'noopener';
-                    a.style.color = '#8ab4ff';
-                    a.textContent = 'Open in Telegram →';
-                    el.appendChild(a);
-                }
-            } catch (err) {}
         }
 
         // ── Save a setting ──
@@ -500,43 +539,6 @@
             }
 
             setTimeout(() => { status.textContent = ''; }, 4000);
-        }
-
-        // ── Test Discord webhook ──
-
-        async function testDiscord() {
-            const btn = document.getElementById('btn-test-discord');
-            const status = document.getElementById('status-DISCORD_WEBHOOK_URL');
-
-            btn.disabled = true;
-            btn.textContent = 'Sending...';
-            status.textContent = '';
-
-            try {
-                // If there's a new URL in the input, save it first
-                const input = document.getElementById('input-DISCORD_WEBHOOK_URL');
-                if (input.value.trim()) {
-                    await saveSetting('DISCORD_WEBHOOK_URL');
-                }
-
-                const resp = await fetch('/api/settings/test/discord', { method: 'POST' });
-                const data = await resp.json();
-
-                if (data.status === 'success') {
-                    status.textContent = 'Test message sent! Check your Discord channel.';
-                    status.className = 'setting-status status-success';
-                } else {
-                    status.textContent = `Failed: ${data.message}`;
-                    status.className = 'setting-status status-error';
-                }
-            } catch (err) {
-                status.textContent = `Error: ${err.message}`;
-                status.className = 'setting-status status-error';
-            }
-
-            btn.disabled = false;
-            btn.textContent = 'Test';
-            setTimeout(() => { status.textContent = ''; }, 5000);
         }
 
         // ── Toggle password visibility ──
