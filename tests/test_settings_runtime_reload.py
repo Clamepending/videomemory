@@ -20,7 +20,6 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         with (
             patch.object(app_module, "db", mock_db),
             patch.object(app_module, "task_manager", mock_task_manager),
-            patch.object(app_module, "_ensure_telegram_polling") as mock_polling,
             patch.dict(os.environ, {"VIDEO_INGESTOR_MODEL": "gemini-2.5-flash-lite"}, clear=False),
         ):
             resp = self.client.put(
@@ -32,7 +31,6 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         self.assertEqual(resp.get_json(), {"status": "saved", "key": "GOOGLE_API_KEY"})
         mock_db.set_setting.assert_called_once_with("GOOGLE_API_KEY", "AIza-test-key")
         mock_task_manager.reload_model_provider.assert_called_once_with(model_name="gemini-2.5-flash-lite")
-        mock_polling.assert_not_called()
 
     def test_model_key_clear_triggers_runtime_reload(self):
         mock_db = MagicMock()
@@ -77,7 +75,7 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         mock_db.set_setting.assert_called_once_with("VIDEO_INGESTOR_MODEL", "gpt-4o-mini")
         mock_task_manager.reload_model_provider.assert_called_once_with(model_name="gpt-4o-mini")
 
-    def test_model_reload_failure_does_not_fail_setting_update(self):
+    def test_model_reload_failure_returns_500_but_still_persists_setting(self):
         mock_db = MagicMock()
         mock_task_manager = MagicMock()
         mock_task_manager.reload_model_provider.side_effect = RuntimeError("reload failed")
@@ -92,47 +90,33 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
                 json={"value": "AIza-test-key"},
             )
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json(), {"status": "saved", "key": "GOOGLE_API_KEY"})
+        self.assertEqual(resp.status_code, 500)
+        body = resp.get_json()
+        self.assertIn("error", body)
         mock_db.set_setting.assert_called_once_with("GOOGLE_API_KEY", "AIza-test-key")
         mock_task_manager.reload_model_provider.assert_called_once_with(model_name="gemini-2.5-flash")
 
-    def test_non_model_key_does_not_trigger_runtime_reload(self):
+    def test_openclaw_key_triggers_notifier_reload_without_model_reload(self):
         mock_db = MagicMock()
         mock_task_manager = MagicMock()
 
         with (
             patch.object(app_module, "db", mock_db),
             patch.object(app_module, "task_manager", mock_task_manager),
+            patch.object(app_module, "_reload_openclaw_notifier_from_env") as mock_notifier_reload,
         ):
             resp = self.client.put(
-                "/api/settings/DISCORD_WEBHOOK_URL",
-                json={"value": "https://discord.example/webhook"},
+                "/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_URL",
+                json={"value": "https://openclaw.example/hook"},
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json(), {"status": "saved", "key": "DISCORD_WEBHOOK_URL"})
-        mock_db.set_setting.assert_called_once_with("DISCORD_WEBHOOK_URL", "https://discord.example/webhook")
-        mock_task_manager.reload_model_provider.assert_not_called()
-
-    def test_telegram_key_still_triggers_polling_without_model_reload(self):
-        mock_db = MagicMock()
-        mock_task_manager = MagicMock()
-
-        with (
-            patch.object(app_module, "db", mock_db),
-            patch.object(app_module, "task_manager", mock_task_manager),
-            patch.object(app_module, "_ensure_telegram_polling") as mock_polling,
-        ):
-            resp = self.client.put(
-                "/api/settings/TELEGRAM_BOT_TOKEN",
-                json={"value": "12345:test-token"},
-            )
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json(), {"status": "saved", "key": "TELEGRAM_BOT_TOKEN"})
-        mock_db.set_setting.assert_called_once_with("TELEGRAM_BOT_TOKEN", "12345:test-token")
-        mock_polling.assert_called_once()
+        self.assertEqual(resp.get_json(), {"status": "saved", "key": "VIDEOMEMORY_OPENCLAW_WEBHOOK_URL"})
+        mock_db.set_setting.assert_called_once_with(
+            "VIDEOMEMORY_OPENCLAW_WEBHOOK_URL",
+            "https://openclaw.example/hook",
+        )
+        mock_notifier_reload.assert_called_once()
         mock_task_manager.reload_model_provider.assert_not_called()
 
 
