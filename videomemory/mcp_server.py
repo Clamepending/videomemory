@@ -7,10 +7,13 @@ tool/resource provider without reworking the application internals.
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import logging
 import os
 import sys
+import threading
+import time
 import traceback
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,6 +25,50 @@ import requests
 LOG_LEVEL = os.getenv("VIDEOMEMORY_MCP_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("videomemory.mcp")
+
+
+def _shorten(value: Any, max_len: int = 500) -> Any:
+    """Return a compact JSON-safe representation for event logging."""
+    try:
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            s = str(value)
+            return s if len(s) <= max_len else f"{s[:max_len]}...[truncated]"
+        dumped = json.dumps(value, ensure_ascii=True, default=str)
+        return dumped if len(dumped) <= max_len else f"{dumped[:max_len]}...[truncated]"
+    except Exception:
+        s = repr(value)
+        return s if len(s) <= max_len else f"{s[:max_len]}...[truncated]"
+
+
+class McpEventLog:
+    """Thread-safe in-memory ring buffer for MCP request/response telemetry."""
+
+    def __init__(self, max_events: int = 500):
+        self._events = collections.deque(maxlen=max(10, int(max_events)))
+        self._lock = threading.Lock()
+        self._seq = 0
+
+    def append(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            self._seq += 1
+            entry = {"seq": self._seq, **event}
+            self._events.append(entry)
+            return entry
+
+    def list(self, limit: int = 200) -> List[Dict[str, Any]]:
+        count = max(1, min(int(limit), 1000))
+        with self._lock:
+            return list(self._events)[-count:]
+
+    def clear(self) -> int:
+        with self._lock:
+            removed = len(self._events)
+            self._events.clear()
+            return removed
+
+    def count(self) -> int:
+        with self._lock:
+            return len(self._events)
 
 
 class ApiError(Exception):
@@ -76,7 +123,24 @@ class VideoMemoryApiClient:
         return self._request("GET", "/api/devices")
 
     def analyze_feed(self, io_id: str, prompt: str) -> Dict[str, Any]:
-        return self._request("POST", f"/api/device/{quote(io_id, safe='')}/analyze", json_body={"prompt": prompt})
+        # Newer core API uses /api/caption_frame. Keep fallback for older servers.
+        try:
+            return self._request("POST", "/api/caption_frame", json_body={"io_id": io_id, "prompt": prompt})
+        except ApiError as e:
+            # Only fall back when the endpoint itself is missing, not when
+            # caption_frame returned a real API error (e.g. no frame available).
+            endpoint_missing = (
+                e.status_code in (404, 405)
+                and isinstance(e.payload, dict)
+                and bool(e.payload.get("raw_text"))
+            )
+            if not endpoint_missing:
+                raise
+            return self._request(
+                "POST",
+                f"/api/device/{quote(io_id, safe='')}/analyze",
+                json_body={"prompt": prompt},
+            )
 
     def create_rtmp_camera(self, device_name: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
         body: Dict[str, Any] = {}
@@ -144,8 +208,11 @@ class VideoMemoryMcpServer:
     SERVER_VERSION = "0.1.0"
     PROTOCOL_VERSION = "2024-11-05"
 
-    def __init__(self, api_client: VideoMemoryApiClient):
+    def __init__(self, api_client: VideoMemoryApiClient, event_log: Optional[McpEventLog] = None):
         self.api = api_client
+        self.event_log = event_log or McpEventLog(
+            max_events=int(os.getenv("VIDEOMEMORY_MCP_EVENT_BUFFER_SIZE", "500"))
+        )
         self._tools = self._build_tools()
 
     def _build_tools(self) -> Dict[str, Dict[str, Any]]:
@@ -389,19 +456,22 @@ class VideoMemoryMcpServer:
 
         return None
 
-    def handle_message(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def handle_message(self, msg: Dict[str, Any], *, transport: str = "unknown", remote_addr: str = "") -> Optional[Dict[str, Any]]:
         """Handle a JSON-RPC request or notification."""
+        started = time.time()
         method = msg.get("method")
         msg_id = msg.get("id")
         params = msg.get("params") or {}
 
         if not method:
-            return self._error(msg_id, -32600, "Invalid Request: missing method")
+            result = self._error(msg_id, -32600, "Invalid Request: missing method")
+            self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+            return result
 
         try:
             if method == "initialize":
                 requested_version = (params or {}).get("protocolVersion")
-                return self._result(
+                result = self._result(
                     msg_id,
                     {
                         "protocolVersion": requested_version or self.PROTOCOL_VERSION,
@@ -415,10 +485,15 @@ class VideoMemoryMcpServer:
                         },
                     },
                 )
+                self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+                return result
             if method == "notifications/initialized":
+                self._record_event(msg, None, started, transport=transport, remote_addr=remote_addr)
                 return None
             if method == "ping":
-                return self._result(msg_id, {})
+                result = self._result(msg_id, {})
+                self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+                return result
             if method == "tools/list":
                 tools = []
                 for name, spec in self._tools.items():
@@ -429,41 +504,103 @@ class VideoMemoryMcpServer:
                             "inputSchema": spec["inputSchema"],
                         }
                     )
-                return self._result(msg_id, {"tools": tools})
+                result = self._result(msg_id, {"tools": tools})
+                self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+                return result
             if method == "tools/call":
                 name = params.get("name")
                 arguments = params.get("arguments") or {}
                 if name not in self._tools:
-                    return self._result(msg_id, self._tool_error(f"Unknown tool: {name}"))
+                    result = self._result(msg_id, self._tool_error(f"Unknown tool: {name}"))
+                    self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+                    return result
                 schema = self._tools[name]["inputSchema"]
                 validation_error = self._validate_tool_arguments(schema, arguments)
                 if validation_error is not None:
-                    return self._result(msg_id, self._tool_error(validation_error))
+                    result = self._result(msg_id, self._tool_error(validation_error))
+                    self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+                    return result
                 try:
                     result = self._tools[name]["handler"](arguments)
-                    return self._result(msg_id, self._tool_ok(result))
+                    rpc_result = self._result(msg_id, self._tool_ok(result))
+                    self._record_event(msg, rpc_result, started, transport=transport, remote_addr=remote_addr)
+                    return rpc_result
                 except ApiError as e:
                     err = {
                         "error": str(e),
                         "status_code": e.status_code,
                         "payload": e.payload,
                     }
-                    return self._result(msg_id, self._tool_error(err))
+                    rpc_result = self._result(msg_id, self._tool_error(err))
+                    self._record_event(msg, rpc_result, started, transport=transport, remote_addr=remote_addr)
+                    return rpc_result
             if method == "resources/list":
                 resources = self._list_resources()
-                return self._result(msg_id, {"resources": resources})
+                result = self._result(msg_id, {"resources": resources})
+                self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+                return result
             if method == "resources/read":
                 uri = params.get("uri", "")
                 contents = self._read_resource(uri)
-                return self._result(msg_id, {"contents": contents})
+                result = self._result(msg_id, {"contents": contents})
+                self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+                return result
             if method == "prompts/list":
-                return self._result(msg_id, {"prompts": []})
+                result = self._result(msg_id, {"prompts": []})
+                self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+                return result
             if method == "completion/complete":
-                return self._result(msg_id, {"completion": {"values": []}})
-            return self._error(msg_id, -32601, f"Method not found: {method}")
+                result = self._result(msg_id, {"completion": {"values": []}})
+                self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+                return result
+            result = self._error(msg_id, -32601, f"Method not found: {method}")
+            self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+            return result
         except Exception as e:
             logger.error("Unhandled MCP server error for method=%s: %s\n%s", method, e, traceback.format_exc())
-            return self._error(msg_id, -32603, f"Internal error: {e}")
+            result = self._error(msg_id, -32603, f"Internal error: {e}")
+            self._record_event(msg, result, started, transport=transport, remote_addr=remote_addr)
+            return result
+
+    def _record_event(self, request_msg: Dict[str, Any], response_msg: Optional[Dict[str, Any]], started_at: float, transport: str = "unknown", remote_addr: str = "") -> None:
+        """Record request/response telemetry for debugging UI."""
+        try:
+            method = request_msg.get("method")
+            params = request_msg.get("params") or {}
+            event: Dict[str, Any] = {
+                "ts": time.time(),
+                "duration_ms": round((time.time() - started_at) * 1000.0, 2),
+                "transport": transport,
+                "remote_addr": remote_addr or "",
+                "request_id": request_msg.get("id"),
+                "method": method,
+                "params": {},
+                "status": "ok",
+            }
+            if method == "tools/call":
+                event["params"] = {
+                    "name": _shorten(params.get("name"), 120),
+                    "arguments": _shorten(params.get("arguments"), 500),
+                }
+            else:
+                event["params"] = _shorten(params, 500)
+
+            if isinstance(response_msg, dict):
+                if "error" in response_msg:
+                    event["status"] = "rpc_error"
+                    event["error"] = _shorten(response_msg.get("error"), 500)
+                else:
+                    result = response_msg.get("result")
+                    if isinstance(result, dict):
+                        event["is_error_result"] = bool(result.get("isError"))
+                        if result.get("isError"):
+                            event["status"] = "tool_error"
+                            event["result_error"] = _shorten(result.get("structuredContent"), 500)
+                        else:
+                            event["result_summary"] = _shorten(result.get("structuredContent"), 500)
+            self.event_log.append(event)
+        except Exception:
+            logger.debug("Failed to record MCP event", exc_info=True)
 
     def _list_resources(self) -> List[Dict[str, Any]]:
         resources = [
@@ -625,7 +762,7 @@ def run_stdio(server: VideoMemoryMcpServer) -> int:
             msg = _read_stdio_message()
             if msg is None:
                 return 0
-            response = server.handle_message(msg)
+            response = server.handle_message(msg, transport="stdio")
             if response is not None and msg.get("id") is not None:
                 _write_stdio_message(response)
         except KeyboardInterrupt:
@@ -662,11 +799,34 @@ class _HttpHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "service": "videomemory-mcp",
                     "api_base_url": self.mcp.api.base_url,
+                    "events_count": self.mcp.event_log.count(),
                     "hint": "POST JSON-RPC requests to /mcp",
                 },
             )
             return
+        if self.path.startswith("/events"):
+            try:
+                parsed = urlparse(self.path)
+                qs = parsed.query or ""
+                limit = 200
+                if "limit=" in qs:
+                    for pair in qs.split("&"):
+                        if pair.startswith("limit="):
+                            limit = int(pair.split("=", 1)[1] or "200")
+                            break
+                events = self.mcp.event_log.list(limit=limit)
+                self._send_json(200, {"status": "ok", "count": len(events), "events": events})
+            except Exception as e:
+                self._send_json(500, {"status": "error", "error": str(e)})
+            return
         self._send_json(404, {"error": "not found"})
+
+    def do_DELETE(self):  # noqa: N802
+        if self.path != "/events":
+            self._send_json(404, {"error": "not found"})
+            return
+        removed = self.mcp.event_log.clear()
+        self._send_json(200, {"status": "ok", "cleared": removed})
 
     def do_POST(self):  # noqa: N802
         if self.path != "/mcp":
@@ -684,7 +844,11 @@ class _HttpHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"invalid json: {e}"})
             return
 
-        response = self.mcp.handle_message(msg)
+        response = self.mcp.handle_message(
+            msg,
+            transport="http",
+            remote_addr=self.client_address[0] if self.client_address else "",
+        )
         if response is None or msg.get("id") is None:
             self.send_response(204)
             self.end_headers()

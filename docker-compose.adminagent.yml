@@ -38,6 +38,7 @@ services:
       PORT: "18789"
       GATEWAY_HOOK_PATH: "videomemory-alert"
       GATEWAY_TOKEN: "${GATEWAY_TOKEN:-change-me}"
+      ADMINAGENT_MCP_SERVERS_JSON: '[{"id":"videomemory","transport":"http","url":"http://videomemory:8765/mcp"}]'
       ADMINAGENT_FORWARD_ENABLED: "0"
       ADMINAGENT_FORWARD_URL: ""
       ADMINAGENT_FORWARD_TOKEN: ""

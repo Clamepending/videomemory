@@ -28,6 +28,7 @@ import cv2
 import platform
 from typing import Optional
 import logging
+import requests
 from pydantic import BaseModel, Field
 
 flask_logger = logging.getLogger('FlaskApp')
@@ -171,6 +172,11 @@ def settings_page():
 def documentation_page():
     """Render the documentation page."""
     return render_template('documentation.html')
+
+@app.route('/events')
+def events_page():
+    """Render the MCP events page."""
+    return render_template('events.html')
 
 @app.route('/device/<io_id>/debug')
 def device_debug(io_id):
@@ -1123,6 +1129,60 @@ def caption_frame():
         })
     except Exception as e:
         flask_logger.error("Error in /api/caption_frame: %s", e, exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+def _mcp_http_base_url() -> str:
+    """Resolve MCP HTTP base URL used by the UI events proxy."""
+    configured = os.getenv("VIDEOMEMORY_MCP_BASE_URL", "").strip()
+    if configured:
+        return configured.rstrip("/")
+    host = os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"
+    if host in ("0.0.0.0", "::"):
+        host = "127.0.0.1"
+    port = os.getenv("VIDEOMEMORY_MCP_PORT", "8765").strip() or "8765"
+    return f"http://{host}:{port}"
+
+
+@app.route('/api/mcp/events', methods=['GET'])
+def get_mcp_events():
+    """Get recent MCP calls for UI debugging."""
+    try:
+        limit_raw = request.args.get('limit', '200').strip()
+        try:
+            limit = max(1, min(int(limit_raw), 1000))
+        except ValueError:
+            return jsonify({'status': 'error', 'error': 'limit must be an integer'}), 400
+
+        resp = requests.get(
+            f"{_mcp_http_base_url()}/events",
+            params={'limit': limit},
+            timeout=2.5,
+        )
+        payload = resp.json() if resp.text else {}
+        if resp.status_code >= 400:
+            message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
+            return jsonify({'status': 'error', 'error': message}), 502
+        return jsonify(payload if isinstance(payload, dict) else {'status': 'ok', 'events': []})
+    except requests.RequestException as e:
+        return jsonify({'status': 'error', 'error': f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'}), 502
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/mcp/events', methods=['DELETE'])
+def clear_mcp_events():
+    """Clear MCP event buffer."""
+    try:
+        resp = requests.delete(f"{_mcp_http_base_url()}/events", timeout=2.5)
+        payload = resp.json() if resp.text else {}
+        if resp.status_code >= 400:
+            message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
+            return jsonify({'status': 'error', 'error': message}), 502
+        return jsonify(payload if isinstance(payload, dict) else {'status': 'ok'})
+    except requests.RequestException as e:
+        return jsonify({'status': 'error', 'error': f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'}), 502
+    except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 # ── Health & OpenAPI ──────────────────────────────────────────
