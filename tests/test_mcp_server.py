@@ -72,6 +72,20 @@ class McpServerTests(unittest.TestCase):
         resp = self._call("tools/list")
         names = [t["name"] for t in resp["result"]["tools"]]
         self.assertIn("create_rtmp_camera", names)
+        self.assertNotIn("create_srt_camera", names)
+        self.assertNotIn("create_whip_camera", names)
+
+    def test_tools_call_hidden_srt_tool_returns_error(self):
+        resp = self._call("tools/call", {"name": "create_srt_camera", "arguments": {}})
+        result = resp["result"]
+        self.assertTrue(result["isError"])
+        self.assertIn("Unknown tool", str(result["structuredContent"]["error"]))
+
+    def test_tools_call_hidden_whip_tool_returns_error(self):
+        resp = self._call("tools/call", {"name": "create_whip_camera", "arguments": {}})
+        result = resp["result"]
+        self.assertTrue(result["isError"])
+        self.assertIn("Unknown tool", str(result["structuredContent"]["error"]))
 
     def test_tools_call_success(self):
         resp = self._call(

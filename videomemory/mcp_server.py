@@ -255,36 +255,6 @@ class VideoMemoryMcpServer:
                     name=(args or {}).get("name"),
                 ),
             },
-            "create_srt_camera": {
-                "description": "Create a network camera entry and return an SRT publish URL (lower latency and more resilient than RTMP). VideoMemory pulls via RTSP automatically.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "device_name": {"type": "string"},
-                        "name": {"type": "string"},
-                    },
-                    "additionalProperties": False,
-                },
-                "handler": lambda args: self.api.create_srt_camera(
-                    device_name=(args or {}).get("device_name"),
-                    name=(args or {}).get("name"),
-                ),
-            },
-            "create_whip_camera": {
-                "description": "Create a network camera entry and return a WebRTC/WHIP ingest URL for very low-latency phone/web publishers. VideoMemory pulls via RTSP automatically.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "device_name": {"type": "string"},
-                        "name": {"type": "string"},
-                    },
-                    "additionalProperties": False,
-                },
-                "handler": lambda args: self.api.create_whip_camera(
-                    device_name=(args or {}).get("device_name"),
-                    name=(args or {}).get("name"),
-                ),
-            },
             "add_network_camera": {
                 "description": "Register a network camera URL (RTSP/HTTP/RTMP). RTMP URLs are converted to RTSP pull URLs internally.",
                 "inputSchema": {
