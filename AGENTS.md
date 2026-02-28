@@ -18,7 +18,7 @@ For local integration testing, choose one stack:
 
 - Core only: `docker compose -f docker-compose.core.yml up --build`
 - Core + OpenClaw: `docker compose -f docker-compose.openclaw.yml up --build`
-- Core + AdminAgent (sibling repo): `docker compose -f docker-compose.adminagent.yml up --build`
+- Core + SimpleAgent (sibling repo): `docker compose -f docker-compose.adminagent.yml up --build`
 
 ## OpenAPI Spec
 
@@ -141,7 +141,7 @@ Permanently removes a task and all its notes. Only use when you want to erase a 
 
 ### External agent integration
 
-Run your conversational/admin agent separately and have it call VideoMemory APIs.
+Run your conversational SimpleAgent separately and have it call VideoMemory APIs.
 
 - HTTP contract and examples: `docs/agent-integration-contract.md`
 - OpenAPI schema: `GET /openapi.json`
@@ -187,7 +187,7 @@ PUT /api/settings/GOOGLE_API_KEY
 {"value": "AIzaSy...your-key-here"}
 ```
 
-After setting a key, restart the service for it to take effect (or if running locally, restart the server).
+After setting a model key, it is applied immediately at runtime (no restart required).
 
 #### Check current settings
 

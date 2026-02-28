@@ -12,7 +12,7 @@ This launches MediaMTX and VideoMemory together for local development. Open http
 
 ## Core + external agent architecture
 
-VideoMemory is the **core ingest/task service**. Run your conversational/admin agent separately and integrate it using the VideoMemory HTTP API, webhook callbacks, and MCP server.
+VideoMemory is the **core ingest/task service**. Run your conversational SimpleAgent separately and integrate it using the VideoMemory HTTP API, webhook callbacks, and MCP server.
 
 Integration contract:
 
@@ -24,7 +24,7 @@ Run VideoMemory core with MCP:
 docker compose -f docker-compose.core.yml up --build
 ```
 
-Then launch OpenClaw (or your own admin gateway/agent) separately and connect it to VideoMemory.
+Then launch OpenClaw (or your own SimpleAgent gateway/agent) separately and connect it to VideoMemory.
 
 ### Testing flow options
 
@@ -33,11 +33,11 @@ Then launch OpenClaw (or your own admin gateway/agent) separately and connect it
 - **Core + OpenClaw:**
   - `docker compose -f docker-compose.openclaw.yml up --build`
   - `bash deploy/test-openclaw-stack.sh`
-- **Core + local AdminAgent (from sibling repo `../adminagent`):**
+- **Core + local SimpleAgent (from sibling repo `../adminagent`):**
   - `docker compose -f docker-compose.adminagent.yml up --build`
   - `bash deploy/test-adminagent-stack.sh`
 
-AdminAgent repository: `https://github.com/Clamepending/adminagent.git`
+SimpleAgent repository: `https://github.com/Clamepending/adminagent.git`
 
 ## OpenClaw + VideoMemory demo (detailed)
 
@@ -108,11 +108,7 @@ If you did not set `GOOGLE_API_KEY` in `.env`:
 1. Open `http://localhost:5050`
 2. Go to **Settings**
 3. Set `GOOGLE_API_KEY` (or another supported provider key)
-4. Restart the stack so the key is picked up:
-
-```bash
-docker compose -f docker-compose.openclaw.yml restart videomemory
-```
+4. API key changes apply immediately to running and new tasks (no restart required).
 
 ### 5. Run the demo flow
 

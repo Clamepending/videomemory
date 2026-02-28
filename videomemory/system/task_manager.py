@@ -388,6 +388,58 @@ class TaskManager:
             ingestor = self._ingestors[io_id]
             return ingestor.get_latest_frame()
         return None
+
+    def reload_model_provider(self, model_name: Optional[str] = None) -> Dict[str, Any]:
+        """Hot-reload the model provider and apply it to all active ingestors.
+
+        This is used when model settings (API keys/provider model) change at runtime,
+        so new inferences use the updated credentials/config without a process restart.
+
+        Args:
+            model_name: Optional model name override. If None/empty, uses
+                VIDEO_INGESTOR_MODEL from the environment (or factory default).
+
+        Returns:
+            Dictionary summarizing the reload result.
+        """
+        requested_model = (model_name or "").strip() or None
+        provider = get_VLM_provider(model_name=requested_model)
+        self._model_provider = provider
+
+        updated_ingestors = 0
+        failed_ingestors: List[str] = []
+
+        for io_id, ingestor in self._ingestors.items():
+            try:
+                # Prefer explicit ingestor API when available.
+                if hasattr(ingestor, "set_model_provider"):
+                    ingestor.set_model_provider(provider)
+                else:
+                    # Backward-compat fallback for older ingestor instances.
+                    ingestor._model_provider = provider
+                updated_ingestors += 1
+            except Exception as exc:
+                failed_ingestors.append(io_id)
+                logger.error(
+                    "Failed to update model provider for io_id=%s: %s",
+                    io_id,
+                    exc,
+                    exc_info=True,
+                )
+
+        result = {
+            "provider": type(provider).__name__,
+            "updated_ingestors": updated_ingestors,
+            "failed_ingestors": failed_ingestors,
+        }
+        logger.info(
+            "Reloaded model provider to %s (model=%s, updated_ingestors=%d, failed=%d)",
+            result["provider"],
+            requested_model or "env/default",
+            updated_ingestors,
+            len(failed_ingestors),
+        )
+        return result
     
     def get_ingestor(self, io_id: str) -> Optional[VideoStreamIngestor]:
         """Get the active VideoStreamIngestor for a device, if any.
@@ -449,31 +501,4 @@ class TaskManager:
             "message": f"Task updated successfully",
             "task_id": task_id,
             "io_id": io_id,
-        }
-
-    def reload_model_provider(self, model_name: Optional[str] = None) -> Dict[str, Any]:
-        """Rebuild and hot-swap the active model provider.
-
-        This applies new model/key settings immediately for new and running ingestors.
-        """
-        provider = get_VLM_provider(model_name=model_name)
-        self._model_provider = provider
-
-        updated_ingestors = 0
-        for ingestor in self._ingestors.values():
-            try:
-                ingestor.set_model_provider(provider)
-                updated_ingestors += 1
-            except Exception as e:
-                logger.error("Failed to hot-swap provider for ingestor: %s", e, exc_info=True)
-
-        provider_name = type(provider).__name__
-        logger.info(
-            "Hot-reloaded model provider: %s (updated %d active ingestor(s))",
-            provider_name,
-            updated_ingestors,
-        )
-        return {
-            "provider": provider_name,
-            "updated_ingestors": updated_ingestors,
         }
