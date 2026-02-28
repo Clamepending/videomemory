@@ -33,5 +33,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("com.github.pedroSG94.RootEncoder:library:2.4.5")
 }

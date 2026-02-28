@@ -421,6 +421,12 @@
             align-items: center;
         }
 
+        .rtmp-url-main {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
         .rtmp-url-input {
             flex: 1;
             background: #0d0d0d;
@@ -445,6 +451,58 @@
 
         .copy-btn:hover { background: #15a86b; }
         .copy-btn.copied { background: #0d8554; }
+
+        .rtmp-qr-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .rtmp-qr-code {
+            width: 188px;
+            min-height: 188px;
+            padding: 8px;
+            background: #ffffff;
+            border-radius: 10px;
+            border: 1px solid #3a3a3a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .rtmp-qr-code img,
+        .rtmp-qr-code canvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+
+        .rtmp-qr-help {
+            font-size: 12px;
+            color: #a0a0a0;
+            line-height: 1.4;
+        }
+
+        @media (max-width: 680px) {
+            .rtmp-url-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .copy-btn {
+                width: 100%;
+            }
+
+            .rtmp-qr-panel {
+                align-items: center;
+            }
+
+            .rtmp-qr-help {
+                text-align: center;
+            }
+        }
 {% endblock %}
 
 {% block content %}
@@ -467,9 +525,15 @@
             <button class="create-rtmp-btn" id="createRtmpBtn" type="button">Create RTMP camera</button>
             <div class="rtmp-url-box" id="rtmpUrlBox">
                 <div class="rtmp-url-label">Paste this URL into the VideoMemory Stream app on your phone</div>
-                <div class="rtmp-url-row">
-                    <input type="text" class="rtmp-url-input" id="rtmpUrlInput" readonly />
-                    <button class="copy-btn" id="copyRtmpBtn" type="button">Copy</button>
+                <div class="rtmp-url-main">
+                    <div class="rtmp-url-row">
+                        <input type="text" class="rtmp-url-input" id="rtmpUrlInput" readonly />
+                        <button class="copy-btn" id="copyRtmpBtn" type="button">Copy</button>
+                    </div>
+                    <div class="rtmp-qr-panel">
+                        <div class="rtmp-qr-code" id="rtmpQrCode" aria-label="RTMP QR code"></div>
+                        <div class="rtmp-qr-help">In the VideoMemory Stream app, tap <strong>Scan QR</strong> and point your phone at this code.</div>
+                    </div>
                 </div>
                 <div class="rtmp-url-label" id="rtmpUrlHint" style="margin-top: 8px; color: #888; text-transform: none; display: none;">Replace YOUR_SERVER_IP with this computer's LAN IP (e.g. 192.168.1.42) so your phone can connect.</div>
                 <div class="rtmp-warning" id="rtmpPortWarning"></div>
@@ -497,6 +561,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
+    <script src="{{ url_for('static', filename='js/qrcode.min.js') }}"></script>
     <script>
         let fpsUpdateInterval = null;
 
@@ -560,6 +625,7 @@
                 if (resp.ok && data.status === 'success') {
                     input.value = data.rtmp_url;
                     box.classList.add('visible');
+                    renderRtmpQr(data.rtmp_url);
                     const hint = document.getElementById('rtmpUrlHint');
                     hint.style.display = data.rtmp_url.indexOf('YOUR_SERVER_IP') !== -1 ? 'block' : 'none';
                     const warn = document.getElementById('rtmpPortWarning');
@@ -573,14 +639,37 @@
                     }
                     loadDevices();
                 } else {
+                    renderRtmpQr('');
                     alert(data.error || 'Failed to create RTMP camera');
                 }
             } catch (e) {
+                renderRtmpQr('');
                 alert(e.message);
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Create RTMP camera';
             }
+        }
+
+        function renderRtmpQr(url) {
+            const qrNode = document.getElementById('rtmpQrCode');
+            if (!qrNode) return;
+            qrNode.innerHTML = '';
+            if (!url) return;
+
+            if (typeof QRCode === 'undefined') {
+                qrNode.textContent = 'QR unavailable';
+                return;
+            }
+
+            new QRCode(qrNode, {
+                text: url,
+                width: 172,
+                height: 172,
+                colorDark: '#121212',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
+            });
         }
 
         function copyRtmpUrl() {

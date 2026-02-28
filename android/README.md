@@ -28,7 +28,7 @@ gradle wrapper   # if gradlew is missing
 
 1. **Start MediaMTX** on your server/PC (see [rtmp-server/](../rtmp-server/README.md)).
 2. In VideoMemory, go to **Devices** and click **Create RTMP camera** (optionally set a name like `front-door`).
-3. Copy the generated URL and paste it into the Android app (example: `rtmp://192.168.1.42:1935/live/front-door`).
+3. In the Android app, tap **Scan QR** and scan the code shown in VideoMemory (or copy/paste the URL manually).
 4. Tap **Start stream**. Grant camera and mic permissions if asked.
 5. Create tasks for that device as usual. Stop the stream with **Stop stream** when done.
 

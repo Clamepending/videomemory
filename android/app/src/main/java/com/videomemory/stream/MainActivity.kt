@@ -10,6 +10,10 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanner
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
 import com.pedro.common.ConnectChecker
 import com.pedro.library.rtmp.RtmpStream
 import com.videomemory.stream.databinding.ActivityMainBinding
@@ -19,6 +23,13 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private lateinit var binding: ActivityMainBinding
     private var rtmpStream: RtmpStream? = null
     private var streaming = false
+    private val qrScanner: GmsBarcodeScanner by lazy {
+        val options = GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .enableAutoZoom()
+            .build()
+        GmsBarcodeScanning.getClient(this, options)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,6 +44,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         })
         binding.btnStart.setOnClickListener { startStream() }
         binding.btnStop.setOnClickListener { stopStream() }
+        binding.btnScanQr.setOnClickListener { scanQrCode() }
         renderStreamingState()
     }
 
@@ -82,6 +94,27 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         renderStreamingState()
     }
 
+    private fun scanQrCode() {
+        if (streaming) return
+        qrScanner.startScan()
+            .addOnSuccessListener { barcode ->
+                val raw = barcode.rawValue?.trim().orEmpty()
+                val rtmpUrl = extractRtmpUrl(raw)
+                if (rtmpUrl == null) {
+                    Toast.makeText(this, getString(R.string.scan_qr_invalid), Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+                binding.urlInput.setText(rtmpUrl)
+                binding.urlInput.setSelection(rtmpUrl.length)
+                saveRtmpUrl(rtmpUrl)
+                Toast.makeText(this, getString(R.string.scan_qr_success), Toast.LENGTH_SHORT).show()
+            }
+            .addOnFailureListener { error ->
+                Log.e(TAG, "QR scan failed", error)
+                Toast.makeText(this, getString(R.string.scan_qr_error), Toast.LENGTH_SHORT).show()
+            }
+    }
+
     override fun onConnectionStarted(url: String) {}
     override fun onConnectionSuccess() {
         runOnUiThread { Toast.makeText(this, "Connected", Toast.LENGTH_SHORT).show() }
@@ -125,10 +158,25 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             .apply()
     }
 
+    private fun extractRtmpUrl(raw: String): String? {
+        if (raw.isBlank()) return null
+        val embedded = Regex("""rtmps?://\S+""", RegexOption.IGNORE_CASE).find(raw)?.value ?: raw
+        val cleaned = embedded.trim().trimEnd('.', ',', ';', ')', ']')
+        return if (
+            cleaned.startsWith("rtmp://", ignoreCase = true) ||
+            cleaned.startsWith("rtmps://", ignoreCase = true)
+        ) {
+            cleaned
+        } else {
+            null
+        }
+    }
+
     private fun renderStreamingState() {
         binding.btnStart.isEnabled = !streaming
         binding.btnStop.isEnabled = streaming
         binding.urlInput.isEnabled = !streaming
+        binding.btnScanQr.isEnabled = !streaming
         if (streaming) {
             binding.statusText.text = getString(R.string.status_streaming)
             binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.status_live_text))

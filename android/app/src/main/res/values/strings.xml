@@ -5,6 +5,11 @@
     <string name="rtmp_destination">RTMP destination</string>
     <string name="hint_rtmp_url">rtmp://YOUR_IP:1935/live/phone1</string>
     <string name="default_rtmp_url">rtmp://192.168.1.100:1935/live/phone1</string>
+    <string name="scan_qr">Scan QR</string>
+    <string name="scan_qr_hint">Create RTMP camera in VideoMemory, then scan its QR code to auto-fill this field.</string>
+    <string name="scan_qr_success">RTMP URL loaded from QR code</string>
+    <string name="scan_qr_invalid">QR code does not contain an RTMP URL</string>
+    <string name="scan_qr_error">Could not scan QR code</string>
     <string name="start">Start</string>
     <string name="stop">Stop</string>
     <string name="status_idle">Idle</string>
