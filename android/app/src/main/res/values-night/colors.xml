@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#E2E8F0</color>
+    <color name="primary_dark">#F8FAFC</color>
+    <color name="surface_background">#0B1220</color>
+    <color name="surface_card">#111827</color>
+    <color name="card_stroke">#1F2937</color>
+    <color name="input_background">#0F172A</color>
+    <color name="text_primary">#F1F5F9</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="button_primary">#2563EB</color>
+    <color name="button_outline">#334155</color>
+    <color name="preview_background">#020617</color>
+    <color name="status_idle_bg">#1E293B</color>
+    <color name="status_idle_text">#CBD5E1</color>
+    <color name="status_live_bg">#14532D</color>
+    <color name="status_live_text">#BBF7D0</color>
+    <color name="overlay_dark">#66000000</color>
+    <color name="theme_toggle_surface">#1E293B</color>
+    <color name="theme_toggle_stroke">#334155</color>
+    <color name="theme_toggle_icon">#F8FAFC</color>
+</resources>

@@ -8,12 +8,16 @@ services:
     command: ["bash", "/app/deploy/start-with-mcp.sh"]
     environment:
       PORT: "5050"
-      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-videomemory}"
+      # Public host embedded in generated RTMP URLs/QR (set by launcher script).
+      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-}"
+      # Internal host used by VideoMemory workers to pull from MediaMTX.
+      RTMP_INGEST_INTERNAL_HOST: "127.0.0.1"
       VIDEOMEMORY_RTSP_PULL_PORT: "8554"
       VIDEOMEMORY_MCP_PORT: "8765"
       # Point VideoMemory webhook notifications to the external AdminAgent service.
       VIDEOMEMORY_OPENCLAW_WEBHOOK_URL: "http://adminagent:18789/hooks/videomemory-alert"
-      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${GATEWAY_TOKEN:-change-me}"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-change-me}"
+      VIDEOMEMORY_OPENCLAW_BOT_ID: "${VIDEOMEMORY_OPENCLAW_BOT_ID:-videomemory}"
       VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S: "30"
       VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S: "1"
       GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
@@ -30,14 +34,15 @@ services:
 
   adminagent:
     build:
-      context: ../adminagent
+      context: ${SIMPLEAGENT_BUILD_CONTEXT:-../simpleagent}
       dockerfile: Dockerfile
     container_name: adminagent
     restart: unless-stopped
     environment:
       PORT: "18789"
       GATEWAY_HOOK_PATH: "videomemory-alert"
-      GATEWAY_TOKEN: "${GATEWAY_TOKEN:-change-me}"
+      GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-change-me}"
+      OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-change-me}"
       ADMINAGENT_MCP_SERVERS_JSON: '[{"id":"videomemory","transport":"http","url":"http://videomemory:8765/mcp"}]'
       ADMINAGENT_FORWARD_ENABLED: "0"
       ADMINAGENT_FORWARD_URL: ""
@@ -45,7 +50,7 @@ services:
     depends_on:
       - videomemory
     ports:
-      - "18789:18789"
+      - "18889:18789"
 
 volumes:
   videomemory-data:

@@ -37,9 +37,11 @@ class OpenClawWakeNotifier:
             webhook_url = os.getenv("VIDEOMEMORY_OPENCLAW_WEBHOOK_URL", "")
         if bearer_token is _UNSET:
             bearer_token = os.getenv("VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN", "")
+        bot_id = os.getenv("VIDEOMEMORY_OPENCLAW_BOT_ID", "").strip()
 
         self.webhook_url = str(webhook_url or "").strip()
         self.bearer_token = str(bearer_token or "").strip()
+        self.bot_id = str(bot_id or "").strip()
         self.timeout_seconds = float(
             timeout_seconds if timeout_seconds is not None else os.getenv("VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S", "3")
         )
@@ -103,6 +105,8 @@ class OpenClawWakeNotifier:
             "note_timestamp": note_timestamp,
             "sent_at": time.time(),
         }
+        if self.bot_id:
+            payload["bot_id"] = self.bot_id
         event_key = self._event_key(payload)
         should_send, skip_reason = self._should_send(event_key)
         if not should_send:

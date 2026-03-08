@@ -8,7 +8,10 @@ services:
     command: ["bash", "/app/deploy/start-with-mcp.sh"]
     environment:
       PORT: "5050"
-      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-videomemory}"
+      # Public host embedded in generated RTMP URLs/QR (set by launcher script).
+      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-}"
+      # Internal host used by VideoMemory workers to pull from MediaMTX.
+      RTMP_INGEST_INTERNAL_HOST: "127.0.0.1"
       VIDEOMEMORY_RTSP_PULL_PORT: "8554"
       VIDEOMEMORY_MCP_PORT: "8765"
       # Optional outbound hook for external gateways/agents (OpenClaw-like contract).

@@ -16,4 +16,7 @@
     <color name="status_live_bg">#DCFCE7</color>
     <color name="status_live_text">#166534</color>
     <color name="overlay_dark">#66000000</color>
+    <color name="theme_toggle_surface">#EEF2F7</color>
+    <color name="theme_toggle_stroke">#D1D5DB</color>
+    <color name="theme_toggle_icon">#111827</color>
 </resources>
