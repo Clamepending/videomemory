@@ -612,7 +612,9 @@ def create_rtmp_camera():
             name = f"RTMP Camera ({stream_key.split('/')[-1]})"
         public_url = f"rtmp://{public_host}:1935/{stream_key}"
         ingest_url = f"rtmp://{internal_host}:1935/{stream_key}"
-        camera_info = io_manager.add_network_camera(ingest_url, name)
+        requested_device_name = (data.get('device_name') or '').strip()
+        preferred_io_id = requested_device_name or stream_key.split('/')[-1]
+        camera_info = io_manager.add_network_camera(ingest_url, name, io_id=preferred_io_id)
         stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
         device_out = dict(camera_info)
         if device_out.get("url"):
@@ -1617,6 +1619,10 @@ def openapi_spec():
 _SENSITIVE_KEYS = {
     'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
+    'VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
 }
 
 # All known setting keys (for the settings page)
@@ -1631,6 +1637,12 @@ _KNOWN_SETTINGS = [
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S',
     'VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S',
     'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
+    'VIDEOMEMORY_OPENCLAW_BOT_ID',
+    'VIDEOMEMORY_SIMPLEAGENT_BASE_URL',
+    'VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
 ]
 
 _MODEL_RUNTIME_KEYS = {
@@ -1647,6 +1659,19 @@ _OPENCLAW_RUNTIME_KEYS = {
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S',
     'VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S',
     'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
+    'VIDEOMEMORY_OPENCLAW_BOT_ID',
+}
+
+_SIMPLEAGENT_RUNTIME_KEYS = {
+    'VIDEOMEMORY_SIMPLEAGENT_BASE_URL',
+    'VIDEOMEMORY_OPENCLAW_BOT_ID',
+    'VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'GOOGLE_API_KEY',
 }
 
 
@@ -1656,12 +1681,122 @@ def _reload_openclaw_notifier_from_env() -> None:
         updated = OpenClawWakeNotifier.from_env()
         openclaw_notifier.webhook_url = updated.webhook_url
         openclaw_notifier.bearer_token = updated.bearer_token
+        openclaw_notifier.bot_id = updated.bot_id
         openclaw_notifier.timeout_seconds = updated.timeout_seconds
         openclaw_notifier.dedupe_ttl_seconds = updated.dedupe_ttl_seconds
         openclaw_notifier.min_interval_seconds = updated.min_interval_seconds
         openclaw_notifier.enabled = updated.enabled
     except Exception as e:
         flask_logger.warning("Failed to reload OpenClaw notifier settings: %s", e)
+
+
+def _simpleagent_base_url() -> str:
+    """Resolve SimpleAgent base URL used by the bundled local test stack."""
+    raw = os.getenv('VIDEOMEMORY_SIMPLEAGENT_BASE_URL', '').strip()
+    if raw:
+        return raw.rstrip('/')
+
+    # In docker-compose test stacks, reuse the adminagent/local webhook host/port if available.
+    webhook_url = os.getenv('VIDEOMEMORY_OPENCLAW_WEBHOOK_URL', '').strip()
+    if webhook_url:
+        parsed = urlparse(webhook_url)
+        hostname = (parsed.hostname or '').lower()
+        if parsed.scheme and parsed.netloc and hostname in {'adminagent', 'localhost', '127.0.0.1'}:
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip('/')
+
+    return ''
+
+
+def _sync_simpleagent_from_env(changed_key: str) -> None:
+    """Best-effort sync of saved test-stack settings into the SimpleAgent service."""
+    base_url = _simpleagent_base_url()
+    if not base_url:
+        return
+    timeout_raw = os.getenv('VIDEOMEMORY_SIMPLEAGENT_SYNC_TIMEOUT_S', '4').strip() or '4'
+    try:
+        timeout_s = max(1.0, float(timeout_raw))
+    except ValueError:
+        timeout_s = 4.0
+    bot_id = os.getenv('VIDEOMEMORY_OPENCLAW_BOT_ID', '').strip() or 'videomemory'
+
+    # Prefer explicit SimpleAgent keys, but fall back to core VideoMemory provider keys.
+    api_key_candidates = {
+        'openai_api_key': ('VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY', 'OPENAI_API_KEY'),
+        'anthropic_api_key': ('VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'),
+        'google_api_key': ('VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY', 'GOOGLE_API_KEY'),
+    }
+    api_sync_keys = {'VIDEOMEMORY_SIMPLEAGENT_BASE_URL'}
+    for candidate_keys in api_key_candidates.values():
+        api_sync_keys.update(candidate_keys)
+
+    if changed_key in api_sync_keys:
+        payload = {}
+        for request_key, candidate_keys in api_key_candidates.items():
+            value = ''
+            for env_key in candidate_keys:
+                maybe = os.getenv(env_key, '').strip()
+                if maybe:
+                    value = maybe
+                    break
+            if value:
+                payload[request_key] = value
+
+        if payload:
+            try:
+                resp = requests.post(
+                    f'{base_url}/api/config/settings',
+                    json=payload,
+                    timeout=timeout_s,
+                )
+                if resp.status_code >= 400:
+                    flask_logger.warning(
+                        'SimpleAgent settings sync failed: status=%s body=%s',
+                        resp.status_code,
+                        (resp.text or '')[:300],
+                    )
+            except Exception as e:
+                flask_logger.warning('SimpleAgent settings sync failed: %s', e)
+
+    telegram_sync_keys = {
+        'VIDEOMEMORY_SIMPLEAGENT_BASE_URL',
+        'VIDEOMEMORY_OPENCLAW_BOT_ID',
+        'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
+    }
+    if changed_key in telegram_sync_keys:
+        try:
+            create_resp = requests.post(
+                f'{base_url}/api/bots',
+                json={'bot_id': bot_id, 'name': 'VideoMemory', 'model': 'gpt-5-mini'},
+                timeout=timeout_s,
+            )
+            if create_resp.status_code not in (200, 409):
+                flask_logger.warning(
+                    'SimpleAgent bot ensure failed for %s: status=%s body=%s',
+                    bot_id,
+                    create_resp.status_code,
+                    (create_resp.text or '')[:300],
+                )
+                return
+        except Exception as e:
+            flask_logger.warning('SimpleAgent bot ensure failed for %s: %s', bot_id, e)
+            return
+
+        telegram_token = os.getenv('VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN', '').strip()
+        try:
+            resp = requests.post(
+                f'{base_url}/api/bots/{bot_id}/config',
+                json={'telegram_bot_token': telegram_token},
+                timeout=timeout_s,
+            )
+            if resp.status_code >= 400:
+                flask_logger.warning(
+                    'SimpleAgent telegram token sync failed for %s: status=%s body=%s',
+                    bot_id,
+                    resp.status_code,
+                    (resp.text or '')[:300],
+                )
+        except Exception as e:
+            flask_logger.warning('SimpleAgent telegram token sync failed for %s: %s', bot_id, e)
 
 
 def _apply_runtime_setting_change(changed_key: str) -> None:
@@ -1678,6 +1813,9 @@ def _apply_runtime_setting_change(changed_key: str) -> None:
             reload_result.get('provider'),
             reload_result.get('updated_ingestors', 0),
         )
+
+    if changed_key in _SIMPLEAGENT_RUNTIME_KEYS:
+        _sync_simpleagent_from_env(changed_key)
 
 def _mask_value(key: str, value: str) -> str:
     """Mask sensitive values, showing only the last 4 characters."""

@@ -1,6 +1,7 @@
 """IO Manager for tracking and managing camera streams."""
 
 import logging
+import re
 from typing import Dict, List, Optional
 from .detection import DeviceDetector
 from .url_utils import get_pull_url
@@ -86,13 +87,14 @@ class IOmanager:
             self._last_error = f"Failed to refresh streams: {str(e)}"
             return False
     
-    def add_network_camera(self, url: str, name: str = None) -> Dict:
+    def add_network_camera(self, url: str, name: str = None, io_id: Optional[str] = None) -> Dict:
         """Register a network camera (RTSP/HTTP/RTMP stream).
         
         Args:
             url: The stream URL (e.g. rtsp://..., http://..., or rtmp://... for
                  push sources like the Android app; RTMP is converted to RTSP for pulling).
             name: Optional display name. Defaults to the URL host.
+            io_id: Optional stable camera ID. If omitted, a legacy netN ID is used.
         
         Returns:
             Dictionary with the new device info including io_id.
@@ -113,8 +115,21 @@ class IOmanager:
                     existing.get("io_id"),
                 )
                 return existing
-        
-        if self._db:
+
+        requested_io_id = (io_id or "").strip()
+        if requested_io_id:
+            if not re.match(r"^[A-Za-z0-9_-]+$", requested_io_id):
+                raise ValueError("io_id can only contain letters, numbers, underscore, or dash")
+
+            local_collision = requested_io_id in self._io_streams and requested_io_id not in self._network_cameras
+            if local_collision:
+                raise ValueError(f"io_id '{requested_io_id}' is already used by a local camera")
+
+            existing_network = self._network_cameras.get(requested_io_id)
+            if existing_network and existing_network.get("url") != url:
+                raise ValueError(f"Network camera io_id '{requested_io_id}' already exists")
+            io_id = requested_io_id
+        elif self._db:
             io_id = self._db.get_next_network_camera_id()
         else:
             existing = {k for k in self._network_cameras if k.startswith('net')}

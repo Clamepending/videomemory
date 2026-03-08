@@ -442,6 +442,101 @@
                 </ul>
             </div>
         </div>
+
+        <!-- ── SimpleAgent Test Stack ────────────── -->
+        <div class="settings-section">
+            <h3>SimpleAgent Test Stack</h3>
+            <p class="section-desc">
+                Optional helpers for the bundled VideoMemory + SimpleAgent test stack. Saved values are synced to SimpleAgent when it is reachable.
+            </p>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_SIMPLEAGENT_BASE_URL">
+                <div class="setting-label">
+                    <label>SimpleAgent Base URL</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_SIMPLEAGENT_BASE_URL"></span>
+                </div>
+                <div class="setting-hint">Where the SimpleAgent UI/API is running (default: http://localhost:18889).</div>
+                <div class="setting-input-row">
+                    <input type="text" class="setting-input" id="input-VIDEOMEMORY_SIMPLEAGENT_BASE_URL" placeholder="http://localhost:18889">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_SIMPLEAGENT_BASE_URL')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_SIMPLEAGENT_BASE_URL"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_OPENCLAW_BOT_ID">
+                <div class="setting-label">
+                    <label>SimpleAgent BOT_ID</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_OPENCLAW_BOT_ID"></span>
+                </div>
+                <div class="setting-hint">BOT_ID used for VideoMemory alerts and Telegram binding in the test stack.</div>
+                <div class="setting-input-row">
+                    <input type="text" class="setting-input" id="input-VIDEOMEMORY_OPENCLAW_BOT_ID" placeholder="videomemory">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_OPENCLAW_BOT_ID')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_OPENCLAW_BOT_ID"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY">
+                <div class="setting-label">
+                    <label>SimpleAgent OpenAI API Key</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY"></span>
+                </div>
+                <div class="setting-hint">Sets OpenAI key in SimpleAgent for GPT models.</div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY" placeholder="sk-proj-...">
+                    <button type="button" class="toggle-vis" id="toggle-VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY" onclick="toggleVisibility('VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY">
+                <div class="setting-label">
+                    <label>SimpleAgent Anthropic API Key</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY"></span>
+                </div>
+                <div class="setting-hint">Sets Anthropic key in SimpleAgent for Claude models.</div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY" placeholder="sk-ant-...">
+                    <button type="button" class="toggle-vis" id="toggle-VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY" onclick="toggleVisibility('VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY">
+                <div class="setting-label">
+                    <label>SimpleAgent Google API Key</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY"></span>
+                </div>
+                <div class="setting-hint">Sets Google key in SimpleAgent for Gemini models.</div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY" placeholder="AIza...">
+                    <button type="button" class="toggle-vis" id="toggle-VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY" onclick="toggleVisibility('VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN">
+                <div class="setting-label">
+                    <label>SimpleAgent Telegram Bot Token</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN"></span>
+                </div>
+                <div class="setting-hint">Applied to the selected BOT_ID via SimpleAgent bot config.</div>
+                <div class="setting-input-row">
+                    <input type="password" class="setting-input" id="input-VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN" placeholder="123456789:AA...">
+                    <button type="button" class="toggle-vis" id="toggle-VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN" onclick="toggleVisibility('VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN')">show</button>
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN"></div>
+            </div>
+
+            <div class="restart-notice">
+                <span class="icon">&#9888;</span>
+                If SimpleAgent is down, values are still saved here and will sync on the next update.
+            </div>
+        </div>
     </div>
 {% endblock %}
 

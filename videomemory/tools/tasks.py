@@ -127,7 +127,7 @@ def add_camera(device_name: str) -> dict:
     rtmp_url = f"rtmp://{host}:1935/{stream_key}"
 
     try:
-        camera_info = _context.io_manager.add_network_camera(rtmp_url, raw_name)
+        camera_info = _context.io_manager.add_network_camera(rtmp_url, raw_name, io_id=raw_name)
         return {
             "status": "success",
             "device": camera_info,
@@ -408,4 +408,3 @@ def edit_task(task_id: str, new_description: str) -> dict:
             "status": "error",
             "message": f"Failed to edit task: {str(e)}",
         }
-

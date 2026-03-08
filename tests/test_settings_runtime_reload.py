@@ -20,6 +20,7 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         with (
             patch.object(app_module, "db", mock_db),
             patch.object(app_module, "task_manager", mock_task_manager),
+            patch.object(app_module, "_sync_simpleagent_from_env") as mock_simpleagent_sync,
             patch.dict(os.environ, {"VIDEO_INGESTOR_MODEL": "gemini-2.5-flash-lite"}, clear=False),
         ):
             resp = self.client.put(
@@ -31,6 +32,7 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         self.assertEqual(resp.get_json(), {"status": "saved", "key": "GOOGLE_API_KEY"})
         mock_db.set_setting.assert_called_once_with("GOOGLE_API_KEY", "AIza-test-key")
         mock_task_manager.reload_model_provider.assert_called_once_with(model_name="gemini-2.5-flash-lite")
+        mock_simpleagent_sync.assert_called_once_with("GOOGLE_API_KEY")
 
     def test_model_key_clear_triggers_runtime_reload(self):
         mock_db = MagicMock()
@@ -43,6 +45,7 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         with (
             patch.object(app_module, "db", mock_db),
             patch.object(app_module, "task_manager", mock_task_manager),
+            patch.object(app_module, "_sync_simpleagent_from_env") as mock_simpleagent_sync,
             patch("dotenv.dotenv_values", return_value={}),
             patch.dict(os.environ, {"VIDEO_INGESTOR_MODEL": ""}, clear=False),
         ):
@@ -55,6 +58,7 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         self.assertEqual(resp.get_json(), {"status": "cleared", "key": "GOOGLE_API_KEY"})
         mock_db.delete_setting.assert_called_once_with("GOOGLE_API_KEY")
         mock_task_manager.reload_model_provider.assert_called_once_with(model_name=None)
+        mock_simpleagent_sync.assert_called_once_with("GOOGLE_API_KEY")
 
     def test_model_selection_save_triggers_runtime_reload_with_new_model(self):
         mock_db = MagicMock()
@@ -83,6 +87,7 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         with (
             patch.object(app_module, "db", mock_db),
             patch.object(app_module, "task_manager", mock_task_manager),
+            patch.object(app_module, "_sync_simpleagent_from_env") as mock_simpleagent_sync,
             patch.dict(os.environ, {"VIDEO_INGESTOR_MODEL": "gemini-2.5-flash"}, clear=False),
         ):
             resp = self.client.put(
@@ -95,6 +100,7 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         self.assertIn("error", body)
         mock_db.set_setting.assert_called_once_with("GOOGLE_API_KEY", "AIza-test-key")
         mock_task_manager.reload_model_provider.assert_called_once_with(model_name="gemini-2.5-flash")
+        mock_simpleagent_sync.assert_not_called()
 
     def test_openclaw_key_triggers_notifier_reload_without_model_reload(self):
         mock_db = MagicMock()
@@ -117,6 +123,29 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
             "https://openclaw.example/hook",
         )
         mock_notifier_reload.assert_called_once()
+        mock_task_manager.reload_model_provider.assert_not_called()
+
+    def test_simpleagent_key_triggers_simpleagent_sync_without_model_reload(self):
+        mock_db = MagicMock()
+        mock_task_manager = MagicMock()
+
+        with (
+            patch.object(app_module, "db", mock_db),
+            patch.object(app_module, "task_manager", mock_task_manager),
+            patch.object(app_module, "_sync_simpleagent_from_env") as mock_simpleagent_sync,
+        ):
+            resp = self.client.put(
+                "/api/settings/VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY",
+                json={"value": "sk-test-simpleagent"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json(), {"status": "saved", "key": "VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY"})
+        mock_db.set_setting.assert_called_once_with(
+            "VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY",
+            "sk-test-simpleagent",
+        )
+        mock_simpleagent_sync.assert_called_once_with("VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY")
         mock_task_manager.reload_model_provider.assert_not_called()
 
 
