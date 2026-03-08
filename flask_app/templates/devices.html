@@ -427,6 +427,32 @@
             gap: 14px;
         }
 
+        .setup-mode-toggle {
+            display: inline-flex;
+            gap: 6px;
+            padding: 4px;
+            border-radius: 999px;
+            background: #111111;
+            border: 1px solid #3d3d3d;
+            width: fit-content;
+        }
+
+        .setup-mode-btn {
+            border: none;
+            background: transparent;
+            color: #a7a7a7;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 999px;
+            cursor: pointer;
+        }
+
+        .setup-mode-btn.active {
+            background: #19c37d;
+            color: #ffffff;
+        }
+
         .rtmp-url-input {
             flex: 1;
             background: #0d0d0d;
@@ -524,15 +550,19 @@
             </div>
             <button class="create-rtmp-btn" id="createRtmpBtn" type="button">Create RTMP camera</button>
             <div class="rtmp-url-box" id="rtmpUrlBox">
-                <div class="rtmp-url-label">Paste this URL into the VideoMemory Stream app on your phone</div>
+                <div class="rtmp-url-label" id="rtmpUrlLabel">Paste this RTMP URL into the VideoMemory Stream app on your phone</div>
                 <div class="rtmp-url-main">
+                    <div class="setup-mode-toggle" role="tablist" aria-label="App setup mode">
+                        <button class="setup-mode-btn active" id="setupModeStreaming" data-mode="streaming" type="button">Streaming</button>
+                        <button class="setup-mode-btn" id="setupModeEvent" data-mode="event" type="button">Event</button>
+                    </div>
                     <div class="rtmp-url-row">
                         <input type="text" class="rtmp-url-input" id="rtmpUrlInput" readonly />
                         <button class="copy-btn" id="copyRtmpBtn" type="button">Copy</button>
                     </div>
                     <div class="rtmp-qr-panel">
                         <div class="rtmp-qr-code" id="rtmpQrCode" aria-label="RTMP QR code"></div>
-                        <div class="rtmp-qr-help">In the VideoMemory Stream app, tap <strong>Scan QR</strong> and point your phone at this code.</div>
+                        <div class="rtmp-qr-help" id="rtmpQrHelp">In the VideoMemory Stream app, tap <strong>Scan QR</strong> and point your phone at this code.</div>
                     </div>
                 </div>
                 <div class="rtmp-url-label" id="rtmpUrlHint" style="margin-top: 8px; color: #888; text-transform: none; display: none;">Replace YOUR_SERVER_IP with this computer's LAN IP (e.g. 192.168.1.42) so your phone can connect.</div>
@@ -564,6 +594,77 @@
     <script src="{{ url_for('static', filename='js/qrcode.min.js') }}"></script>
     <script>
         let fpsUpdateInterval = null;
+        let setupMode = 'streaming';
+        let latestRtmpUrl = '';
+        let latestEventBaseUrl = '';
+        let latestRtmpWarning = '';
+
+        function deriveEventBaseUrlFromRtmp(rtmpUrl) {
+            const raw = (rtmpUrl || '').trim();
+            if (!raw) return '';
+            let host = '';
+            try {
+                const parsed = new URL(raw);
+                host = parsed.hostname || '';
+            } catch (_) {
+                const m = raw.match(/^rtmps?:\/\/([^/:/?#]+|\[[^\]]+\])/i);
+                if (m && m[1]) host = m[1].replace(/^\[|\]$/g, '');
+            }
+            if (!host) return '';
+            const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+            const port = window.location.port;
+            if (port) return `${protocol}//${host}:${port}`;
+            return `${protocol}//${host}`;
+        }
+
+        function setSetupMode(mode) {
+            setupMode = mode === 'event' ? 'event' : 'streaming';
+            document.querySelectorAll('.setup-mode-btn').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.mode === setupMode);
+            });
+            updateSetupDisplay();
+        }
+
+        function currentSetupUrl() {
+            return setupMode === 'event' ? latestEventBaseUrl : latestRtmpUrl;
+        }
+
+        function updateSetupDisplay() {
+            const label = document.getElementById('rtmpUrlLabel');
+            const input = document.getElementById('rtmpUrlInput');
+            const help = document.getElementById('rtmpQrHelp');
+            const hint = document.getElementById('rtmpUrlHint');
+            const warn = document.getElementById('rtmpPortWarning');
+            const url = currentSetupUrl();
+
+            if (label) {
+                label.textContent = setupMode === 'event'
+                    ? 'Paste this backend URL into the VideoMemory Stream app (Event mode)'
+                    : 'Paste this RTMP URL into the VideoMemory Stream app (Streaming mode)';
+            }
+            if (input) input.value = url;
+            renderRtmpQr(url);
+            if (help) {
+                help.innerHTML = setupMode === 'event'
+                    ? 'In the VideoMemory Stream app, switch to <strong>Event</strong> mode and scan this QR (or paste this URL).'
+                    : 'In the VideoMemory Stream app, tap <strong>Scan QR</strong> and point your phone at this code.';
+            }
+            if (hint) {
+                hint.textContent = setupMode === 'event'
+                    ? "Replace YOUR_SERVER_IP with this computer's LAN IP (e.g. 192.168.1.42) so your phone can reach the VideoMemory backend URL."
+                    : "Replace YOUR_SERVER_IP with this computer's LAN IP (e.g. 192.168.1.42) so your phone can connect.";
+                hint.style.display = url.indexOf('YOUR_SERVER_IP') !== -1 ? 'block' : 'none';
+            }
+            if (warn) {
+                if (setupMode === 'streaming' && latestRtmpWarning) {
+                    warn.textContent = latestRtmpWarning;
+                    warn.style.display = 'block';
+                } else {
+                    warn.textContent = '';
+                    warn.style.display = 'none';
+                }
+            }
+        }
 
         function revokePreviewObjectUrls(root = document) {
             const previews = root.querySelectorAll('.device-preview[data-object-url]');
@@ -623,26 +724,23 @@
                 });
                 const data = await resp.json();
                 if (resp.ok && data.status === 'success') {
-                    input.value = data.rtmp_url;
+                    latestRtmpUrl = data.rtmp_url || '';
+                    latestEventBaseUrl = deriveEventBaseUrlFromRtmp(latestRtmpUrl);
+                    latestRtmpWarning = ((data.diagnostics || {}).warning || '').trim();
                     box.classList.add('visible');
-                    renderRtmpQr(data.rtmp_url);
-                    const hint = document.getElementById('rtmpUrlHint');
-                    hint.style.display = data.rtmp_url.indexOf('YOUR_SERVER_IP') !== -1 ? 'block' : 'none';
-                    const warn = document.getElementById('rtmpPortWarning');
-                    const diag = data.diagnostics || {};
-                    if (diag.warning) {
-                        warn.textContent = diag.warning;
-                        warn.style.display = 'block';
-                    } else {
-                        warn.textContent = '';
-                        warn.style.display = 'none';
-                    }
+                    updateSetupDisplay();
                     loadDevices();
                 } else {
+                    latestRtmpUrl = '';
+                    latestEventBaseUrl = '';
+                    latestRtmpWarning = '';
                     renderRtmpQr('');
                     alert(data.error || 'Failed to create RTMP camera');
                 }
             } catch (e) {
+                latestRtmpUrl = '';
+                latestEventBaseUrl = '';
+                latestRtmpWarning = '';
                 renderRtmpQr('');
                 alert(e.message);
             } finally {
@@ -690,6 +788,10 @@
 
         document.getElementById('createRtmpBtn').addEventListener('click', createRtmpCamera);
         document.getElementById('copyRtmpBtn').addEventListener('click', copyRtmpUrl);
+        document.querySelectorAll('.setup-mode-btn').forEach((btn) => {
+            btn.addEventListener('click', () => setSetupMode(btn.dataset.mode || 'streaming'));
+        });
+        setSetupMode('streaming');
 
         async function addNetworkCamera() {
             const urlInput = document.getElementById('netUrl');

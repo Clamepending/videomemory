@@ -2,6 +2,9 @@
 <resources>
     <string name="app_name">VideoMemory Stream</string>
     <string name="stream_screen_subtitle">Stream your phone camera to VideoMemory with one tap.</string>
+    <string name="mode_streaming">Streaming</string>
+    <string name="mode_event">Event</string>
+    <string name="mode_switch_description">Toggle between streaming mode and event mode</string>
     <string name="rtmp_destination">RTMP destination</string>
     <string name="hint_rtmp_url">rtmp://YOUR_IP:1935/live/phone1</string>
     <string name="default_rtmp_url">rtmp://192.168.1.100:1935/live/phone1</string>
@@ -14,10 +17,26 @@
     <string name="stop">Stop</string>
     <string name="status_idle">Idle</string>
     <string name="status_streaming">Streaming</string>
+    <string name="event_mode_title">Event mode</string>
+    <string name="event_mode_hint">Monitor backend MCP and webhook events from your VideoMemory server.</string>
+    <string name="event_backend_label">Backend URL</string>
+    <string name="hint_event_backend">http://YOUR_IP:5050</string>
+    <string name="scan_event_qr">Scan Event QR</string>
+    <string name="scan_event_qr_success">Backend URL loaded from QR code</string>
+    <string name="scan_event_qr_invalid">QR code does not contain an HTTP URL</string>
+    <string name="event_refresh">Refresh Events</string>
+    <string name="event_status_idle">Waiting to load events.</string>
+    <string name="event_status_loading">Loading events...</string>
+    <string name="event_status_updated">Updated %1$s (%2$d event(s))</string>
+    <string name="event_status_warning">Warning: %1$s</string>
+    <string name="event_status_error">Failed to load events: %1$s</string>
+    <string name="event_log_empty">No events yet.</string>
     <string name="camera_preview">Camera preview</string>
     <string name="streaming_notification_title">Streaming active</string>
     <string name="streaming_notification_text">VideoMemory stream is running in the background.</string>
     <string name="streaming_notification_text_with_target">Streaming to %1$s</string>
     <string name="streaming_notification_channel_name">VideoMemory Streaming</string>
     <string name="streaming_notification_channel_description">Shows status while the camera stream is active.</string>
+    <string name="theme_switch_to_dark">Switch to dark mode</string>
+    <string name="theme_switch_to_light">Switch to light mode</string>
 </resources>
