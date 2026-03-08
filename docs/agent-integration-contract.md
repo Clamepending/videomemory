@@ -103,4 +103,4 @@ Then run your agent/gateway service separately (OpenClaw or custom) and connect 
 Convenience local stacks in this repo:
 
 - `docker-compose.openclaw.yml` for OpenClaw integration tests
-- `docker-compose.adminagent.yml` for the sibling `../adminagent` project
+- `docker-compose.simpleagent.yml` for the sibling `../simpleagent` project (legacy `docker-compose.adminagent.yml` is kept as a compatibility alias)

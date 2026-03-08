@@ -1,4 +1,3 @@
-# Legacy filename kept for compatibility. Prefer docker-compose.simpleagent.yml.
 services:
   videomemory:
     build:

@@ -469,6 +469,19 @@ def _rtmp_url_host() -> str:
     def _is_container_runtime() -> bool:
         return os.path.exists("/.dockerenv")
 
+    # Local dev priority: prefer a directly reachable LAN IP so phones can
+    # connect on the same network even when UI is accessed through tunnels.
+    if not _is_container_runtime():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+            s.close()
+            if lan_ip and not lan_ip.startswith("127."):
+                return lan_ip
+        except Exception:
+            pass
+
     try:
         forwarded = _clean_host(request.headers.get("X-Forwarded-Host", ""))
         if forwarded and not _is_private_or_loopback(forwarded):
@@ -482,19 +495,6 @@ def _rtmp_url_host() -> str:
             return h
     except Exception:
         pass
-
-    # Local dev convenience: if UI is opened on localhost, generate a LAN IP so
-    # phones on the same network can connect without manual placeholder edits.
-    if not _is_container_runtime():
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            lan_ip = s.getsockname()[0]
-            s.close()
-            if lan_ip and not lan_ip.startswith("127."):
-                return lan_ip
-        except Exception:
-            pass
 
     return "YOUR_SERVER_IP"
 
@@ -1696,12 +1696,12 @@ def _simpleagent_base_url() -> str:
     if raw:
         return raw.rstrip('/')
 
-    # In docker-compose test stacks, reuse the adminagent/local webhook host/port if available.
+    # In docker-compose test stacks, reuse the simpleagent/local webhook host/port if available.
     webhook_url = os.getenv('VIDEOMEMORY_OPENCLAW_WEBHOOK_URL', '').strip()
     if webhook_url:
         parsed = urlparse(webhook_url)
         hostname = (parsed.hostname or '').lower()
-        if parsed.scheme and parsed.netloc and hostname in {'adminagent', 'localhost', '127.0.0.1'}:
+        if parsed.scheme and parsed.netloc and hostname in {'simpleagent', 'adminagent', 'localhost', '127.0.0.1'}:
             return f"{parsed.scheme}://{parsed.netloc}".rstrip('/')
 
     return ''

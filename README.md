@@ -34,12 +34,12 @@ Then launch OpenClaw (or your own SimpleAgent gateway/agent) separately and conn
   - `docker compose -f docker-compose.openclaw.yml up --build`
   - `bash deploy/test-openclaw-stack.sh`
 - **Core + local SimpleAgent (from sibling repo `../simpleagent`):**
-  - `bash deploy/up-adminagent-stack.sh`
-  - `bash deploy/test-adminagent-stack.sh`
+  - `bash deploy/up-simpleagent-stack.sh`
+  - `bash deploy/test-simpleagent-stack.sh`
 
-SimpleAgent repository: `https://github.com/Clamepending/adminagent.git`
+SimpleAgent repository: `https://github.com/Clamepending/simpleagent.git`
 
-For phone streaming demos, `deploy/up-adminagent-stack.sh` auto-detects your current LAN IP on each launch and exports it as `RTMP_SERVER_HOST` so generated RTMP URLs/QR codes target the right host.
+For phone streaming demos, `deploy/up-simpleagent-stack.sh` auto-detects your current LAN IP on each launch and exports it as `RTMP_SERVER_HOST` so generated RTMP URLs/QR codes target the right host.
 The launcher also fetches latest upstream SimpleAgent (`origin/main`) and builds from that commit on each run.
 SimpleAgent is exposed on `http://localhost:18889` in this stack.
 

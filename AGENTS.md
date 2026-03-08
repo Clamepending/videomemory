@@ -18,7 +18,7 @@ For local integration testing, choose one stack:
 
 - Core only: `docker compose -f docker-compose.core.yml up --build`
 - Core + OpenClaw: `docker compose -f docker-compose.openclaw.yml up --build`
-- Core + SimpleAgent (sibling repo): `docker compose -f docker-compose.adminagent.yml up --build`
+- Core + SimpleAgent (sibling repo): `docker compose -f docker-compose.simpleagent.yml up --build`
 
 ## OpenAPI Spec
 
