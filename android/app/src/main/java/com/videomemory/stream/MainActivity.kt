@@ -77,11 +77,14 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         binding.btnScanEventQr.setOnClickListener { scanEventQrCode() }
         binding.btnRefreshEvents.setOnClickListener { loadEvents() }
         binding.themeToggleButton.setOnClickListener { toggleThemeMode() }
-        binding.modeSwitch.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked && (streaming || starting)) {
+        binding.modeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val newEventMode = checkedId == R.id.btnModeEvent
+            if (newEventMode == eventMode) return@addOnButtonCheckedListener
+            if (newEventMode && (streaming || starting)) {
                 stopStream()
             }
-            eventMode = isChecked
+            eventMode = newEventMode
             if (eventMode) {
                 ensureEventBaseUrl()
                 loadEvents()
@@ -260,6 +263,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         val streamingMode = !eventMode
         val active = streaming || starting
         val hasUrl = !binding.urlInput.text.isNullOrBlank()
+        val checkedModeId = if (streamingMode) R.id.btnModeStreaming else R.id.btnModeEvent
+        if (binding.modeToggleGroup.checkedButtonId != checkedModeId) {
+            binding.modeToggleGroup.check(checkedModeId)
+        }
         binding.streamingModeContent.visibility = if (streamingMode) View.VISIBLE else View.GONE
         binding.eventModeContent.visibility = if (streamingMode) View.GONE else View.VISIBLE
         binding.streamControlsRow.visibility = if (streamingMode && (hasUrl || active)) View.VISIBLE else View.GONE
@@ -271,18 +278,6 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         binding.urlInput.isEnabled = streamingMode && !active
         binding.btnScanQr.isEnabled = streamingMode && !active
         binding.btnScanEventQr.isEnabled = !streamingMode && !active
-        binding.streamingModeLabel.setTextColor(
-            ContextCompat.getColor(
-                this,
-                if (streamingMode) R.color.text_primary else R.color.text_secondary
-            )
-        )
-        binding.eventModeLabel.setTextColor(
-            ContextCompat.getColor(
-                this,
-                if (streamingMode) R.color.text_secondary else R.color.text_primary
-            )
-        )
         if (streamingMode) {
             if (active) {
                 binding.statusText.text = getString(R.string.status_streaming)

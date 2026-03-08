@@ -14,52 +14,9 @@
         android:textColor="@color/text_primary"
         android:textSize="26sp"
         android:textStyle="bold"
-        app:layout_constraintEnd_toStartOf="@id/modeToggleRow"
+        app:layout_constraintEnd_toStartOf="@id/themeToggleButton"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
-
-    <LinearLayout
-        android:id="@+id/modeToggleRow"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginEnd="8dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        app:layout_constraintBottom_toBottomOf="@id/titleText"
-        app:layout_constraintEnd_toStartOf="@id/themeToggleButton"
-        app:layout_constraintTop_toTopOf="@id/titleText">
-
-        <TextView
-            android:id="@+id/streamingModeLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/mode_streaming"
-            android:textColor="@color/text_primary"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/modeSwitch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:layout_marginEnd="6dp"
-            android:checked="false"
-            android:showText="false"
-            android:textOff=""
-            android:textOn=""
-            app:showText="false"
-            android:contentDescription="@string/mode_switch_description" />
-
-        <TextView
-            android:id="@+id/eventModeLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/mode_event"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-    </LinearLayout>
 
     <androidx.appcompat.widget.AppCompatImageButton
         android:id="@+id/themeToggleButton"
@@ -86,6 +43,40 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/titleText" />
 
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/modeToggleGroup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        app:checkedButton="@id/btnModeStreaming"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/subtitleText"
+        app:selectionRequired="true"
+        app:singleSelection="true">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnModeStreaming"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:text="@string/mode_streaming"
+            android:textAllCaps="false"
+            app:cornerRadius="12dp"
+            app:strokeColor="@color/button_outline" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnModeEvent"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:text="@string/mode_event"
+            android:textAllCaps="false"
+            app:cornerRadius="12dp"
+            app:strokeColor="@color/button_outline" />
+    </com.google.android.material.button.MaterialButtonToggleGroup>
+
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/controlCard"
         android:layout_width="0dp"
@@ -96,7 +87,7 @@
         app:cardElevation="0dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/subtitleText"
+        app:layout_constraintTop_toBottomOf="@id/modeToggleGroup"
         app:strokeColor="@color/card_stroke"
         app:strokeWidth="1dp">
 
