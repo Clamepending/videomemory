@@ -11,15 +11,10 @@
             overflow-y: auto;
         }
         
-        .tasks-header {
-            margin-bottom: 30px;
-        }
-        
         .tasks-header h1 {
             font-size: 28px;
             font-weight: 500;
             color: #ececec;
-            margin-bottom: 10px;
         }
         
         .tasks-grid {
@@ -164,6 +159,134 @@
             padding-left: 10px;
         }
         
+        .tasks-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .add-task-btn {
+            background: #19c37d;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .add-task-btn:hover {
+            background: #15a76b;
+        }
+
+        .add-task-form {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .add-task-form.visible {
+            display: block;
+        }
+
+        .add-task-form label {
+            display: block;
+            font-size: 13px;
+            color: #999;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .add-task-form select,
+        .add-task-form textarea {
+            width: 100%;
+            background: #1a1a1a;
+            border: 1px solid #404040;
+            border-radius: 8px;
+            color: #ececec;
+            font-family: inherit;
+            font-size: 14px;
+            padding: 10px 12px;
+            transition: border-color 0.2s;
+        }
+
+        .add-task-form select:focus,
+        .add-task-form textarea:focus {
+            outline: none;
+            border-color: #19c37d;
+        }
+
+        .add-task-form textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .form-actions button {
+            padding: 9px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: background 0.2s;
+        }
+
+        .form-submit-btn {
+            background: #19c37d;
+            color: white;
+        }
+
+        .form-submit-btn:hover {
+            background: #15a76b;
+        }
+
+        .form-submit-btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        .form-cancel-btn {
+            background: #404040;
+            color: #ececec;
+        }
+
+        .form-cancel-btn:hover {
+            background: #555;
+        }
+
+        .delete-task-btn {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            line-height: 1;
+            transition: color 0.2s, background 0.2s;
+        }
+
+        .delete-task-btn:hover {
+            color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.1);
+        }
+
         .no-tasks {
             text-align: center;
             padding: 60px 20px;
@@ -197,6 +320,23 @@
     <div class="tasks-container">
         <div class="tasks-header">
             <h1>Tasks</h1>
+            <button class="add-task-btn" onclick="toggleAddForm()">+ Add Task</button>
+        </div>
+        <div id="addTaskForm" class="add-task-form">
+            <div class="form-group">
+                <label for="deviceSelect">Device</label>
+                <select id="deviceSelect">
+                    <option value="" disabled selected>Loading devices…</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="taskDescription">Task Description</label>
+                <textarea id="taskDescription" placeholder="e.g. Count the number of people entering the room"></textarea>
+            </div>
+            <div class="form-actions">
+                <button class="form-cancel-btn" onclick="toggleAddForm()">Cancel</button>
+                <button class="form-submit-btn" id="submitTaskBtn" onclick="submitTask()">Create Task</button>
+            </div>
         </div>
         <div id="tasksContent">
             <div class="loading">Loading tasks...</div>
@@ -206,8 +346,8 @@
 
 {% block extra_scripts %}
     <script>
-        // Cache device names: io_id -> device name
         let deviceNames = {};
+        let deviceList = [];
 
         async function fetchDeviceNames() {
             try {
@@ -215,81 +355,156 @@
                 const data = await resp.json();
                 const devices = data.devices || {};
                 deviceNames = {};
+                deviceList = [];
                 for (const category of Object.values(devices)) {
                     for (const dev of category) {
                         deviceNames[dev.io_id] = dev.name;
+                        deviceList.push(dev);
                     }
                 }
+                populateDeviceDropdown();
             } catch (e) {
                 console.error('Failed to fetch devices:', e);
             }
         }
 
+        function populateDeviceDropdown() {
+            const select = document.getElementById('deviceSelect');
+            select.innerHTML = '';
+            if (deviceList.length === 0) {
+                select.innerHTML = '<option value="" disabled selected>No devices found</option>';
+                return;
+            }
+            deviceList.forEach((dev, i) => {
+                const opt = document.createElement('option');
+                opt.value = dev.io_id;
+                opt.textContent = dev.name;
+                if (i === 0) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+
+        function toggleAddForm() {
+            const form = document.getElementById('addTaskForm');
+            form.classList.toggle('visible');
+            if (form.classList.contains('visible')) {
+                document.getElementById('taskDescription').focus();
+            }
+        }
+
+        async function submitTask() {
+            const ioId = document.getElementById('deviceSelect').value;
+            const desc = document.getElementById('taskDescription').value.trim();
+            if (!ioId || !desc) return;
+
+            const btn = document.getElementById('submitTaskBtn');
+            btn.disabled = true;
+            btn.textContent = 'Creating…';
+
+            try {
+                const resp = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ io_id: ioId, task_description: desc })
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    alert('Error: ' + (err.error || 'Failed to create task'));
+                    return;
+                }
+                document.getElementById('taskDescription').value = '';
+                document.getElementById('addTaskForm').classList.remove('visible');
+                loadTasks();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Task';
+            }
+        }
+
+        async function deleteTask(taskId, event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!confirm('Delete task #' + taskId + '? This will permanently remove it and all its notes.')) return;
+
+            try {
+                const resp = await fetch('/api/task/' + taskId, { method: 'DELETE' });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    alert('Error: ' + (err.error || 'Failed to delete task'));
+                    return;
+                }
+                loadTasks();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
         async function loadTasks() {
             const contentDiv = document.getElementById('tasksContent');
-            
+
             try {
-                // Fetch tasks and device names in parallel
                 const [tasksResp] = await Promise.all([
                     fetch('/api/tasks'),
                     Object.keys(deviceNames).length === 0 ? fetchDeviceNames() : Promise.resolve()
                 ]);
                 const data = await tasksResp.json();
-                
+
                 if (!tasksResp.ok) {
                     contentDiv.innerHTML = `<div class="error">Error: ${data.error || 'Failed to load tasks'}</div>`;
                     return;
                 }
-                
+
                 const tasks = data.tasks || [];
-                
+
                 if (tasks.length === 0) {
                     contentDiv.innerHTML = `
                         <div class="no-tasks">
                             <h2>No tasks yet</h2>
-                            <p>Tasks will appear here when they are created.</p>
+                            <p>Click <strong>+ Add Task</strong> above to create one, or use the API.</p>
                         </div>
                     `;
                     return;
                 }
-                
-                // Sort tasks by task_id (as number) descending to show newest first
+
                 tasks.sort((a, b) => {
                     const idA = parseInt(a.task_id) || 0;
                     const idB = parseInt(b.task_id) || 0;
                     return idB - idA;
                 });
-                
+
                 const tasksGrid = document.createElement('div');
                 tasksGrid.className = 'tasks-grid';
-                
+
                 tasks.forEach(task => {
                     const taskCard = document.createElement('a');
                     taskCard.href = `/task/${task.task_id || ''}`;
                     const status = task.status || (task.done ? 'done' : 'active');
                     taskCard.className = `task-card ${status !== 'active' ? status : ''}`;
-                    
+
                     const statusLabels = {
                         'active': 'Active',
                         'done': 'Done',
                         'terminated': 'Terminated'
                     };
-                    
-                    // Resolve device name from io_id
+
                     const deviceName = deviceNames[task.io_id] || `Device ${task.io_id}`;
                     const botLabel = task.bot_id ? `Bot: ${escapeHtml(task.bot_id)}` : '';
-                    
-                    // Get latest note
-                    const latestNote = task.task_note && task.task_note.length > 0 
-                        ? task.task_note[task.task_note.length - 1] 
+
+                    const latestNote = task.task_note && task.task_note.length > 0
+                        ? task.task_note[task.task_note.length - 1]
                         : null;
-                    
+
                     taskCard.innerHTML = `
                         <div class="task-header">
                             <span class="task-id">Task #${task.task_id || 'N/A'}</span>
-                            <span class="task-status ${status}">
-                                ${statusLabels[status] || status}
-                            </span>
+                            <div>
+                                <span class="task-status ${status}">
+                                    ${statusLabels[status] || status}
+                                </span>
+                                <button class="delete-task-btn" onclick="deleteTask('${task.task_id}', event)" title="Delete task">&#x2715;</button>
+                            </div>
                         </div>
                         <div class="task-device">
                             <span class="device-icon">&#9654;</span>
@@ -299,7 +514,7 @@
                         <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>
                         <div class="task-note">
                             <div class="task-note-label">Latest Note</div>
-                            ${latestNote 
+                            ${latestNote
                                 ? `${latestNote.content && latestNote.content.startsWith('Action taken:') ? '<div class="task-note-action-badge">Action taken</div>' : ''}
                                    <div class="task-note-content ${latestNote.content && latestNote.content.startsWith('Action taken:') ? 'action-taken' : ''}">${escapeHtml(latestNote.content || 'No content')}</div>
                                    <div class="task-note-timestamp">${latestNote.timestamp || ''}</div>`
@@ -307,28 +522,25 @@
                             }
                         </div>
                     `;
-                    
+
                     tasksGrid.appendChild(taskCard);
                 });
-                
+
                 contentDiv.innerHTML = '';
                 contentDiv.appendChild(tasksGrid);
-                
+
             } catch (error) {
                 contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
             }
         }
-        
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
-        
-        // Load tasks on page load
+
         loadTasks();
-        
-        // Refresh tasks every 5 seconds
         setInterval(loadTasks, 5000);
     </script>
 {% endblock %}
