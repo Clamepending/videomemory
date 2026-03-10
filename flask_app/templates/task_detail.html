@@ -98,6 +98,11 @@
             font-size: 14px;
         }
 
+        .task-bot-id {
+            color: #6b7280;
+            font-size: 12px;
+        }
+
         .task-description {
             font-size: 18px;
             color: #ececec;
@@ -234,6 +239,7 @@
                 
                 // Resolve device name from io_id
                 const deviceName = deviceNames[task.io_id] || `Device ${task.io_id}`;
+                const botLabel = task.bot_id ? `Bot: ${escapeHtml(task.bot_id)}` : '';
                 
                 let taskInfoHtml = `
                     <div class="task-info-card">
@@ -246,6 +252,7 @@
                         <div class="task-device">
                             <span class="device-icon">&#9654;</span>
                             ${escapeHtml(deviceName)}
+                            ${botLabel ? `<span class="task-bot-id"> · ${botLabel}</span>` : ''}
                         </div>
                         <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>
                     </div>

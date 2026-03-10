@@ -2,7 +2,7 @@
 
 VideoMemory is a video monitoring system. You create **tasks** for camera input devices, and the system analyses the video feed using vision-language models to fulfil those tasks (counting events, detecting conditions, triggering actions, etc.).
 
-This document describes how to run the VideoMemory **core service** and interact with it via HTTP/MCP from an external agent or gateway.
+This document describes how to run the VideoMemory **core service** and interact with it via HTTP from an external agent.
 
 ## Quick Start
 
@@ -17,8 +17,7 @@ The server is available at `http://localhost:5050` (or at the host's IP on port 
 For local integration testing, choose one stack:
 
 - Core only: `docker compose -f docker-compose.core.yml up --build`
-- Core + OpenClaw: `docker compose -f docker-compose.openclaw.yml up --build`
-- Core + SimpleAgent (sibling repo): `docker compose -f docker-compose.simpleagent.yml up --build`
+- Core + SimpleAgent: `docker compose -f docker-compose.simpleagent.yml up --build`
 
 ## OpenAPI Spec
 
@@ -89,9 +88,12 @@ POST /api/tasks
 ```json
 {
   "io_id": "0",
-  "task_description": "Count the number of people entering the room"
+  "task_description": "Count the number of people entering the room",
+  "bot_id": "optional-bot-identifier"
 }
 ```
+
+- `bot_id` (optional): Identifier of the bot that created this task; stored for multi-bot / debug and shown in the UI.
 
 1. First call `GET /api/devices` to find the `io_id` of the camera you want.
 2. Then create a task with a natural-language description of what to monitor.

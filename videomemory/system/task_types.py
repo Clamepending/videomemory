@@ -37,7 +37,7 @@ class Task:
     """
     def __init__(self, task_number: int, task_desc: str, task_note: List[NoteEntry] = None,
                  done: bool = False, io_id: str = None, task_id: str = None,
-                 status: str = STATUS_ACTIVE):
+                 status: str = STATUS_ACTIVE, bot_id: str = None):
         self.task_number = task_number
         self.task_id = task_id
         self.task_desc = task_desc
@@ -45,16 +45,20 @@ class Task:
         self.done = done
         self.io_id = io_id
         self.status = status
-    
+        self.bot_id = bot_id  # Optional; which bot created this task (debug / multi-bot compatibility)
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        return {
+        d = {
             "task_number": self.task_number,
             "task_id": self.task_id,
             "task_desc": self.task_desc,
             "task_note": [note.to_dict() if isinstance(note, NoteEntry) else note for note in self.task_note],
             "done": self.done,
             "io_id": self.io_id,
-            "status": self.status
+            "status": self.status,
         }
+        if self.bot_id is not None:
+            d["bot_id"] = self.bot_id
+        return d
 

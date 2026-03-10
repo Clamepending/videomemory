@@ -2,7 +2,6 @@
 """Flask app for VideoMemory core APIs and UI."""
 
 import asyncio
-import collections
 import hashlib
 import ipaddress
 import os
@@ -22,7 +21,6 @@ from flask import Flask, render_template, request, jsonify, Response, redirect
 from dotenv import load_dotenv
 import videomemory.system
 import videomemory.tools
-from videomemory.integrations import OpenClawWakeNotifier
 from videomemory.system.logging_config import setup_logging
 from videomemory.system.model_providers import get_VLM_provider
 from videomemory.system.database import TaskDatabase, get_default_data_dir
@@ -34,33 +32,6 @@ import requests
 from pydantic import BaseModel, Field
 
 flask_logger = logging.getLogger('FlaskApp')
-
-
-class UiEventLog:
-    """Thread-safe in-memory ring buffer for Events tab telemetry."""
-
-    def __init__(self, max_events: int = 500):
-        self._events = collections.deque(maxlen=max(10, int(max_events)))
-        self._lock = threading.Lock()
-        self._seq = 0
-
-    def append(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        with self._lock:
-            self._seq += 1
-            entry = {"seq": self._seq, **event}
-            self._events.append(entry)
-            return entry
-
-    def list(self, limit: int = 200) -> List[Dict[str, Any]]:
-        count = max(1, min(int(limit), 1000))
-        with self._lock:
-            return list(self._events)[-count:]
-
-    def clear(self) -> int:
-        with self._lock:
-            removed = len(self._events)
-            self._events.clear()
-            return removed
 
 # Load environment variables
 load_dotenv()
@@ -83,15 +54,10 @@ db.load_settings_to_env()
 # ── System components ─────────────────────────────────────────
 io_manager = videomemory.system.IOmanager(db=db)
 model_provider = get_VLM_provider()
-ui_event_log = UiEventLog(
-    max_events=int(os.getenv("VIDEOMEMORY_UI_EVENT_BUFFER_SIZE", "500"))
-)
-openclaw_notifier = OpenClawWakeNotifier.from_env(event_recorder=ui_event_log.append)
 task_manager = videomemory.system.TaskManager(
     io_manager=io_manager,
     model_provider=model_provider,
     db=db,
-    on_detection_event=openclaw_notifier.notify_task_update,
 )
 
 # Set managers in tools
@@ -205,11 +171,6 @@ def documentation_page():
     """Render the documentation page."""
     return render_template('documentation.html')
 
-@app.route('/events')
-def events_page():
-    """Render the integration events page."""
-    return render_template('events.html')
-
 @app.route('/device/<io_id>/debug')
 def device_debug(io_id):
     """Render the ingestor debug page for a device."""
@@ -238,6 +199,7 @@ def create_task():
     Body (JSON):
         io_id (str, required): The unique identifier of the input device.
         task_description (str, required): A description of the task to perform.
+        bot_id (str, optional): Identifier of the bot that created this task (multi-bot / debug).
     """
     try:
         data = request.json
@@ -246,13 +208,14 @@ def create_task():
         
         io_id = data.get('io_id', '').strip()
         task_description = data.get('task_description', '').strip()
+        bot_id = data.get('bot_id', '').strip() or None
         
         if not io_id:
             return jsonify({'status': 'error', 'error': 'io_id is required'}), 400
         if not task_description:
             return jsonify({'status': 'error', 'error': 'task_description is required'}), 400
         
-        result = videomemory.tools.tasks.add_task(io_id, task_description)
+        result = videomemory.tools.tasks.add_task(io_id, task_description, bot_id=bot_id)
         
         if result.get('status') == 'error':
             return jsonify(result), 400
@@ -1191,123 +1154,6 @@ def caption_frame():
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
-def _mcp_http_base_url() -> str:
-    """Resolve MCP HTTP base URL used by the UI events proxy."""
-    configured = os.getenv("VIDEOMEMORY_MCP_BASE_URL", "").strip()
-    if configured:
-        return configured.rstrip("/")
-    host = os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"
-    if host in ("0.0.0.0", "::"):
-        host = "127.0.0.1"
-    port = os.getenv("VIDEOMEMORY_MCP_PORT", "8765").strip() or "8765"
-    return f"http://{host}:{port}"
-
-
-def _normalize_events_for_ui(events: List[Dict[str, Any]], source: str) -> List[Dict[str, Any]]:
-    normalized: List[Dict[str, Any]] = []
-    seq_prefix = "M" if source == "mcp" else "W"
-    for item in events or []:
-        if not isinstance(item, dict):
-            normalized.append({
-                "event_source": source,
-                "method": f"{source}/unknown",
-                "status": "ok",
-                "result_summary": str(item),
-            })
-            continue
-        event = dict(item)
-        event.setdefault("event_source", source)
-        if event.get("seq") is not None:
-            event["seq"] = f"{seq_prefix}{event['seq']}"
-        normalized.append(event)
-    return normalized
-
-
-def _event_ts(ev: Dict[str, Any]) -> float:
-    try:
-        return float(ev.get("ts") or 0.0)
-    except Exception:
-        return 0.0
-
-
-@app.route('/api/mcp/events', methods=['GET'])
-def get_mcp_events():
-    """Get recent MCP and webhook events for UI debugging."""
-    try:
-        limit_raw = request.args.get('limit', '200').strip()
-        try:
-            limit = max(1, min(int(limit_raw), 1000))
-        except ValueError:
-            return jsonify({'status': 'error', 'error': 'limit must be an integer'}), 400
-
-        mcp_events: List[Dict[str, Any]] = []
-        mcp_warning = ""
-        try:
-            resp = requests.get(
-                f"{_mcp_http_base_url()}/events",
-                params={'limit': limit},
-                timeout=2.5,
-            )
-            payload = resp.json() if resp.text else {}
-            if resp.status_code >= 400:
-                message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
-                mcp_warning = f"MCP events unavailable: {message}"
-            elif isinstance(payload, dict):
-                raw_events = payload.get("events", [])
-                if isinstance(raw_events, list):
-                    mcp_events = raw_events
-            else:
-                mcp_warning = "MCP events endpoint returned an invalid payload"
-        except requests.RequestException as e:
-            mcp_warning = f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'
-
-        webhook_events = ui_event_log.list(limit=limit)
-        merged_events = _normalize_events_for_ui(mcp_events, "mcp") + _normalize_events_for_ui(webhook_events, "webhook")
-        merged_events.sort(key=_event_ts)
-        merged_events = merged_events[-limit:]
-
-        result = {'status': 'ok', 'count': len(merged_events), 'events': merged_events}
-        if mcp_warning:
-            result['warning'] = mcp_warning
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
-
-
-@app.route('/api/mcp/events', methods=['DELETE'])
-def clear_mcp_events():
-    """Clear MCP and webhook event buffers."""
-    try:
-        removed_webhook = ui_event_log.clear()
-        removed_mcp = 0
-        warning = ""
-
-        try:
-            resp = requests.delete(f"{_mcp_http_base_url()}/events", timeout=2.5)
-            payload = resp.json() if resp.text else {}
-            if resp.status_code >= 400:
-                message = payload.get('error') if isinstance(payload, dict) else f"HTTP {resp.status_code}"
-                warning = f"MCP clear failed: {message}"
-            elif isinstance(payload, dict):
-                try:
-                    removed_mcp = int(payload.get("removed", payload.get("count", 0)) or 0)
-                except (TypeError, ValueError):
-                    removed_mcp = 0
-        except requests.RequestException as e:
-            warning = f'Could not reach MCP server at {_mcp_http_base_url()}: {e}'
-
-        result = {
-            'status': 'ok',
-            'removed': removed_webhook + removed_mcp,
-            'removed_mcp': removed_mcp,
-            'removed_webhook': removed_webhook,
-        }
-        if warning:
-            result['warning'] = warning
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
-
 # ── Health & OpenAPI ──────────────────────────────────────────
 
 @app.route('/api/health', methods=['GET'])
@@ -1467,6 +1313,7 @@ def openapi_spec():
                             "properties": {
                                 "io_id": {"type": "string", "description": "Device identifier from GET /api/devices"},
                                 "task_description": {"type": "string", "description": "What to monitor for, e.g. 'Count the number of people entering the room'"},
+                                "bot_id": {"type": "string", "description": "Optional identifier of the bot that created this task (multi-bot / debug)."},
                             },
                         }}},
                     },
@@ -1606,6 +1453,7 @@ def openapi_spec():
                         "io_id": {"type": "string"},
                         "status": {"type": "string", "enum": ["active", "done", "terminated"]},
                         "done": {"type": "boolean"},
+                        "bot_id": {"type": "string", "description": "Optional bot that created this task (multi-bot / debug)."},
                     },
                 },
             }
@@ -1618,11 +1466,6 @@ def openapi_spec():
 # Keys that should be masked when returned to the frontend
 _SENSITIVE_KEYS = {
     'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY',
-    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
-    'VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY',
-    'VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY',
-    'VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY',
-    'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
 }
 
 # All known setting keys (for the settings page)
@@ -1632,17 +1475,6 @@ _KNOWN_SETTINGS = [
     'OPENROUTER_API_KEY',
     'ANTHROPIC_API_KEY',
     'VIDEO_INGESTOR_MODEL',
-    'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
-    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
-    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S',
-    'VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S',
-    'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
-    'VIDEOMEMORY_OPENCLAW_BOT_ID',
-    'VIDEOMEMORY_SIMPLEAGENT_BASE_URL',
-    'VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY',
-    'VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY',
-    'VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY',
-    'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
 ]
 
 _MODEL_RUNTIME_KEYS = {
@@ -1653,157 +1485,9 @@ _MODEL_RUNTIME_KEYS = {
     'VIDEO_INGESTOR_MODEL',
 }
 
-_OPENCLAW_RUNTIME_KEYS = {
-    'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
-    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
-    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S',
-    'VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S',
-    'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
-    'VIDEOMEMORY_OPENCLAW_BOT_ID',
-}
-
-_SIMPLEAGENT_RUNTIME_KEYS = {
-    'VIDEOMEMORY_SIMPLEAGENT_BASE_URL',
-    'VIDEOMEMORY_OPENCLAW_BOT_ID',
-    'VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY',
-    'VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY',
-    'VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY',
-    'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
-    'OPENAI_API_KEY',
-    'ANTHROPIC_API_KEY',
-    'GOOGLE_API_KEY',
-}
-
-
-def _reload_openclaw_notifier_from_env() -> None:
-    """Refresh OpenClaw notifier config from current environment settings."""
-    try:
-        updated = OpenClawWakeNotifier.from_env()
-        openclaw_notifier.webhook_url = updated.webhook_url
-        openclaw_notifier.bearer_token = updated.bearer_token
-        openclaw_notifier.bot_id = updated.bot_id
-        openclaw_notifier.timeout_seconds = updated.timeout_seconds
-        openclaw_notifier.dedupe_ttl_seconds = updated.dedupe_ttl_seconds
-        openclaw_notifier.min_interval_seconds = updated.min_interval_seconds
-        openclaw_notifier.enabled = updated.enabled
-    except Exception as e:
-        flask_logger.warning("Failed to reload OpenClaw notifier settings: %s", e)
-
-
-def _simpleagent_base_url() -> str:
-    """Resolve SimpleAgent base URL used by the bundled local test stack."""
-    raw = os.getenv('VIDEOMEMORY_SIMPLEAGENT_BASE_URL', '').strip()
-    if raw:
-        return raw.rstrip('/')
-
-    # In docker-compose test stacks, reuse the simpleagent/local webhook host/port if available.
-    webhook_url = os.getenv('VIDEOMEMORY_OPENCLAW_WEBHOOK_URL', '').strip()
-    if webhook_url:
-        parsed = urlparse(webhook_url)
-        hostname = (parsed.hostname or '').lower()
-        if parsed.scheme and parsed.netloc and hostname in {'simpleagent', 'adminagent', 'localhost', '127.0.0.1'}:
-            return f"{parsed.scheme}://{parsed.netloc}".rstrip('/')
-
-    return ''
-
-
-def _sync_simpleagent_from_env(changed_key: str) -> None:
-    """Best-effort sync of saved test-stack settings into the SimpleAgent service."""
-    base_url = _simpleagent_base_url()
-    if not base_url:
-        return
-    timeout_raw = os.getenv('VIDEOMEMORY_SIMPLEAGENT_SYNC_TIMEOUT_S', '4').strip() or '4'
-    try:
-        timeout_s = max(1.0, float(timeout_raw))
-    except ValueError:
-        timeout_s = 4.0
-    bot_id = os.getenv('VIDEOMEMORY_OPENCLAW_BOT_ID', '').strip() or 'videomemory'
-
-    # Prefer explicit SimpleAgent keys, but fall back to core VideoMemory provider keys.
-    api_key_candidates = {
-        'openai_api_key': ('VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY', 'OPENAI_API_KEY'),
-        'anthropic_api_key': ('VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'),
-        'google_api_key': ('VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY', 'GOOGLE_API_KEY'),
-    }
-    api_sync_keys = {'VIDEOMEMORY_SIMPLEAGENT_BASE_URL'}
-    for candidate_keys in api_key_candidates.values():
-        api_sync_keys.update(candidate_keys)
-
-    if changed_key in api_sync_keys:
-        payload = {}
-        for request_key, candidate_keys in api_key_candidates.items():
-            value = ''
-            for env_key in candidate_keys:
-                maybe = os.getenv(env_key, '').strip()
-                if maybe:
-                    value = maybe
-                    break
-            if value:
-                payload[request_key] = value
-
-        if payload:
-            try:
-                resp = requests.post(
-                    f'{base_url}/api/config/settings',
-                    json=payload,
-                    timeout=timeout_s,
-                )
-                if resp.status_code >= 400:
-                    flask_logger.warning(
-                        'SimpleAgent settings sync failed: status=%s body=%s',
-                        resp.status_code,
-                        (resp.text or '')[:300],
-                    )
-            except Exception as e:
-                flask_logger.warning('SimpleAgent settings sync failed: %s', e)
-
-    telegram_sync_keys = {
-        'VIDEOMEMORY_SIMPLEAGENT_BASE_URL',
-        'VIDEOMEMORY_OPENCLAW_BOT_ID',
-        'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
-    }
-    if changed_key in telegram_sync_keys:
-        try:
-            create_resp = requests.post(
-                f'{base_url}/api/bots',
-                json={'bot_id': bot_id, 'name': 'VideoMemory', 'model': 'gpt-5-mini'},
-                timeout=timeout_s,
-            )
-            if create_resp.status_code not in (200, 409):
-                flask_logger.warning(
-                    'SimpleAgent bot ensure failed for %s: status=%s body=%s',
-                    bot_id,
-                    create_resp.status_code,
-                    (create_resp.text or '')[:300],
-                )
-                return
-        except Exception as e:
-            flask_logger.warning('SimpleAgent bot ensure failed for %s: %s', bot_id, e)
-            return
-
-        telegram_token = os.getenv('VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN', '').strip()
-        try:
-            resp = requests.post(
-                f'{base_url}/api/bots/{bot_id}/config',
-                json={'telegram_bot_token': telegram_token},
-                timeout=timeout_s,
-            )
-            if resp.status_code >= 400:
-                flask_logger.warning(
-                    'SimpleAgent telegram token sync failed for %s: status=%s body=%s',
-                    bot_id,
-                    resp.status_code,
-                    (resp.text or '')[:300],
-                )
-        except Exception as e:
-            flask_logger.warning('SimpleAgent telegram token sync failed for %s: %s', bot_id, e)
-
 
 def _apply_runtime_setting_change(changed_key: str) -> None:
     """Apply in-process runtime reloads needed for a changed setting key."""
-    if changed_key in _OPENCLAW_RUNTIME_KEYS:
-        _reload_openclaw_notifier_from_env()
-
     if changed_key in _MODEL_RUNTIME_KEYS:
         model_name = os.getenv('VIDEO_INGESTOR_MODEL', '').strip() or None
         reload_result = task_manager.reload_model_provider(model_name=model_name)
@@ -1813,9 +1497,6 @@ def _apply_runtime_setting_change(changed_key: str) -> None:
             reload_result.get('provider'),
             reload_result.get('updated_ingestors', 0),
         )
-
-    if changed_key in _SIMPLEAGENT_RUNTIME_KEYS:
-        _sync_simpleagent_from_env(changed_key)
 
 def _mask_value(key: str, value: str) -> str:
     """Mask sensitive values, showing only the last 4 characters."""

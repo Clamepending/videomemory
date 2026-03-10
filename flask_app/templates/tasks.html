@@ -101,6 +101,11 @@
             font-size: 13px;
         }
 
+        .task-bot-id {
+            color: #6b7280;
+            font-size: 11px;
+        }
+
         .task-description {
             font-size: 16px;
             color: #ececec;
@@ -272,6 +277,7 @@
                     
                     // Resolve device name from io_id
                     const deviceName = deviceNames[task.io_id] || `Device ${task.io_id}`;
+                    const botLabel = task.bot_id ? `Bot: ${escapeHtml(task.bot_id)}` : '';
                     
                     // Get latest note
                     const latestNote = task.task_note && task.task_note.length > 0 
@@ -288,6 +294,7 @@
                         <div class="task-device">
                             <span class="device-icon">&#9654;</span>
                             ${escapeHtml(deviceName)}
+                            ${botLabel ? `<span class="task-bot-id"> · ${botLabel}</span>` : ''}
                         </div>
                         <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>
                         <div class="task-note">

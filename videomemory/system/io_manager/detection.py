@@ -148,7 +148,11 @@ class DeviceDetector:
             cameras = self._detect_cameras_linux()
             if cameras:
                 return cameras
-            logger.debug("V4L2 sysfs detection found no cameras, falling back to index scan")
+            # V4L2 sysfs is authoritative on Linux; skip the noisy OpenCV index
+            # scan which floods stderr with FFMPEG/V4L2 warnings in containers
+            # that have no cameras attached.
+            logger.debug("V4L2 sysfs detection found no cameras; skipping index scan on Linux")
+            return []
 
         for idx in range(10):
             cap = None

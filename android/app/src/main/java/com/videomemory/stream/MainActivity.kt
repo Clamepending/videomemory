@@ -2,11 +2,8 @@ package com.videomemory.stream
 
 import android.Manifest
 import android.content.res.Configuration
-import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.View
@@ -23,13 +20,6 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.pedro.common.ConnectChecker
 import com.pedro.library.rtmp.RtmpStream
 import com.videomemory.stream.databinding.ActivityMainBinding
-import org.json.JSONObject
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 class MainActivity : AppCompatActivity(), ConnectChecker {
 
@@ -37,18 +27,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private var rtmpStream: RtmpStream? = null
     private var streaming = false
     private var starting = false
-    private var eventMode = false
     private var pendingStartUrl: String? = null
-    private var eventFetchInFlight = false
-    private val uiHandler = Handler(Looper.getMainLooper())
-    private val eventTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault())
-    private val eventPollRunnable = object : Runnable {
-        override fun run() {
-            if (!eventMode) return
-            loadEvents()
-            uiHandler.postDelayed(this, EVENT_POLL_INTERVAL_MS)
-        }
-    }
     private val qrScanner: GmsBarcodeScanner by lazy {
         val options = GmsBarcodeScannerOptions.Builder()
             .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
@@ -74,26 +53,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         binding.btnStart.setOnClickListener { startStream() }
         binding.btnStop.setOnClickListener { stopStream() }
         binding.btnScanQr.setOnClickListener { scanQrCode() }
-        binding.btnScanEventQr.setOnClickListener { scanEventQrCode() }
-        binding.btnRefreshEvents.setOnClickListener { loadEvents() }
         binding.themeToggleButton.setOnClickListener { toggleThemeMode() }
-        binding.modeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (!isChecked) return@addOnButtonCheckedListener
-            val newEventMode = checkedId == R.id.btnModeEvent
-            if (newEventMode == eventMode) return@addOnButtonCheckedListener
-            if (newEventMode && (streaming || starting)) {
-                stopStream()
-            }
-            eventMode = newEventMode
-            if (eventMode) {
-                ensureEventBaseUrl()
-                loadEvents()
-                startEventPolling()
-            } else {
-                stopEventPolling()
-            }
-            renderStreamingState()
-        }
         binding.urlInput.doAfterTextChanged { renderStreamingState() }
         updateThemeToggleIcon()
         renderStreamingState()
@@ -102,14 +62,6 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     override fun onResume() {
         super.onResume()
         updateThemeToggleIcon()
-        if (eventMode) {
-            startEventPolling()
-        }
-    }
-
-    override fun onPause() {
-        stopEventPolling()
-        super.onPause()
     }
 
     private fun requestPermissions() {
@@ -120,7 +72,6 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     }
 
     private fun startStream() {
-        if (eventMode) return
         if (streaming || starting) return
         val url = binding.urlInput.text.toString().trim()
         if (url.isBlank()) {
@@ -162,7 +113,6 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     }
 
     private fun scanQrCode() {
-        if (eventMode) return
         if (streaming || starting) return
         qrScanner.startScan()
             .addOnSuccessListener { barcode ->
@@ -178,28 +128,6 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             }
             .addOnFailureListener { error ->
                 Log.e(TAG, "QR scan failed", error)
-                Toast.makeText(this, getString(R.string.scan_qr_error), Toast.LENGTH_SHORT).show()
-            }
-    }
-
-    private fun scanEventQrCode() {
-        if (!eventMode) return
-        if (streaming || starting) return
-        qrScanner.startScan()
-            .addOnSuccessListener { barcode ->
-                val raw = barcode.rawValue?.trim().orEmpty()
-                val baseUrl = extractEventBaseUrl(raw)
-                if (baseUrl == null) {
-                    Toast.makeText(this, getString(R.string.scan_event_qr_invalid), Toast.LENGTH_SHORT).show()
-                    return@addOnSuccessListener
-                }
-                binding.eventsBaseUrlInput.setText(baseUrl)
-                binding.eventsBaseUrlInput.setSelection(baseUrl.length)
-                Toast.makeText(this, getString(R.string.scan_event_qr_success), Toast.LENGTH_SHORT).show()
-                loadEvents()
-            }
-            .addOnFailureListener { error ->
-                Log.e(TAG, "Event QR scan failed", error)
                 Toast.makeText(this, getString(R.string.scan_qr_error), Toast.LENGTH_SHORT).show()
             }
     }
@@ -225,7 +153,6 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     override fun onNewBitrate(bitrate: Long) {}
 
     override fun onDestroy() {
-        stopEventPolling()
         rtmpStream?.release()
         rtmpStream = null
         super.onDestroy()
@@ -245,49 +172,25 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         }
     }
 
-    private fun extractEventBaseUrl(raw: String): String? {
-        if (raw.isBlank()) return null
-        val embedded = Regex("""https?://\S+""", RegexOption.IGNORE_CASE).find(raw)?.value ?: raw
-        var cleaned = embedded.trim().trimEnd('.', ',', ';', ')', ']')
-        if (!cleaned.startsWith("http://", ignoreCase = true) &&
-            !cleaned.startsWith("https://", ignoreCase = true)
-        ) {
-            return null
-        }
-        val endpointPattern = Regex("""/api/mcp/events/?$""", RegexOption.IGNORE_CASE)
-        cleaned = cleaned.replace(endpointPattern, "")
-        return normalizeApiBaseUrl(cleaned)
-    }
-
     private fun renderStreamingState() {
-        val streamingMode = !eventMode
         val active = streaming || starting
         val hasUrl = !binding.urlInput.text.isNullOrBlank()
-        val checkedModeId = if (streamingMode) R.id.btnModeStreaming else R.id.btnModeEvent
-        if (binding.modeToggleGroup.checkedButtonId != checkedModeId) {
-            binding.modeToggleGroup.check(checkedModeId)
-        }
-        binding.streamingModeContent.visibility = if (streamingMode) View.VISIBLE else View.GONE
-        binding.eventModeContent.visibility = if (streamingMode) View.GONE else View.VISIBLE
-        binding.streamControlsRow.visibility = if (streamingMode && (hasUrl || active)) View.VISIBLE else View.GONE
-        binding.btnStart.visibility = if (streamingMode && !active) View.VISIBLE else View.GONE
-        binding.btnStop.visibility = if (streamingMode && active) View.VISIBLE else View.GONE
-        binding.previewCard.visibility = if (streamingMode && active) View.VISIBLE else View.GONE
-        binding.btnStart.isEnabled = streamingMode && !active && hasUrl
-        binding.btnStop.isEnabled = streamingMode && active
-        binding.urlInput.isEnabled = streamingMode && !active
-        binding.btnScanQr.isEnabled = streamingMode && !active
-        binding.btnScanEventQr.isEnabled = !streamingMode && !active
-        if (streamingMode) {
-            if (active) {
-                binding.statusText.text = getString(R.string.status_streaming)
-                binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.status_live_text))
-                binding.statusText.setBackgroundResource(R.drawable.status_pill_live)
-            } else {
-                binding.statusText.text = getString(R.string.status_idle)
-                binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.status_idle_text))
-                binding.statusText.setBackgroundResource(R.drawable.status_pill_idle)
-            }
+        binding.streamControlsRow.visibility = if (hasUrl || active) View.VISIBLE else View.GONE
+        binding.btnStart.visibility = if (!active) View.VISIBLE else View.GONE
+        binding.btnStop.visibility = if (active) View.VISIBLE else View.GONE
+        binding.previewCard.visibility = if (active) View.VISIBLE else View.GONE
+        binding.btnStart.isEnabled = !active && hasUrl
+        binding.btnStop.isEnabled = active
+        binding.urlInput.isEnabled = !active
+        binding.btnScanQr.isEnabled = !active
+        if (active) {
+            binding.statusText.text = getString(R.string.status_streaming)
+            binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.status_live_text))
+            binding.statusText.setBackgroundResource(R.drawable.status_pill_live)
+        } else {
+            binding.statusText.text = getString(R.string.status_idle)
+            binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.status_idle_text))
+            binding.statusText.setBackgroundResource(R.drawable.status_pill_idle)
         }
     }
 
@@ -322,191 +225,6 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         )
     }
 
-    private fun ensureEventBaseUrl() {
-        if (!binding.eventsBaseUrlInput.text.isNullOrBlank()) return
-        val candidate = deriveApiBaseUrlFromRtmp(binding.urlInput.text?.toString().orEmpty())
-            ?: DEFAULT_API_BASE_URL
-        binding.eventsBaseUrlInput.setText(candidate)
-        binding.eventsBaseUrlInput.setSelection(candidate.length)
-    }
-
-    private fun deriveApiBaseUrlFromRtmp(rtmpUrl: String): String? {
-        val raw = rtmpUrl.trim()
-        if (raw.isBlank()) return null
-        return try {
-            val parsed = Uri.parse(raw)
-            val host = parsed.host?.trim().orEmpty()
-            if (host.isBlank()) {
-                null
-            } else {
-                "http://$host:$DEFAULT_API_PORT"
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun normalizeApiBaseUrl(raw: String): String? {
-        var base = raw.trim()
-        if (base.isBlank()) return null
-        if (!base.startsWith("http://", ignoreCase = true) &&
-            !base.startsWith("https://", ignoreCase = true)
-        ) {
-            base = "http://$base"
-        }
-        return base.trimEnd('/')
-    }
-
-    private fun startEventPolling() {
-        stopEventPolling()
-        uiHandler.postDelayed(eventPollRunnable, EVENT_POLL_INTERVAL_MS)
-    }
-
-    private fun stopEventPolling() {
-        uiHandler.removeCallbacks(eventPollRunnable)
-    }
-
-    private fun loadEvents() {
-        if (!eventMode || eventFetchInFlight) return
-        val baseUrl = normalizeApiBaseUrl(binding.eventsBaseUrlInput.text?.toString().orEmpty())
-        if (baseUrl == null) {
-            binding.eventStatusText.text = getString(
-                R.string.event_status_error,
-                getString(R.string.hint_event_backend)
-            )
-            return
-        }
-        binding.eventStatusText.text = getString(R.string.event_status_loading)
-        val url = "$baseUrl/api/mcp/events?limit=$EVENT_FETCH_LIMIT"
-        eventFetchInFlight = true
-        Thread {
-            val result = runCatching { fetchEvents(url) }
-            runOnUiThread {
-                eventFetchInFlight = false
-                if (!eventMode) return@runOnUiThread
-                result
-                    .onSuccess { payload ->
-                        val output = if (payload.lines.isEmpty()) {
-                            getString(R.string.event_log_empty)
-                        } else {
-                            payload.lines.joinToString("\n\n")
-                        }
-                        binding.eventLogText.text = output
-                        binding.eventStatusText.text = getString(
-                            R.string.event_status_updated,
-                            nowTimeText(),
-                            payload.count
-                        )
-                        if (!payload.warning.isNullOrBlank()) {
-                            binding.eventStatusText.append(
-                                "\n" + getString(R.string.event_status_warning, payload.warning)
-                            )
-                        }
-                    }
-                    .onFailure { error ->
-                        binding.eventStatusText.text = getString(
-                            R.string.event_status_error,
-                            compactText(error.message ?: error.javaClass.simpleName, 120)
-                        )
-                    }
-            }
-        }.start()
-    }
-
-    private fun fetchEvents(url: String): EventFetchPayload {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 2500
-            readTimeout = 2500
-            setRequestProperty("Accept", "application/json")
-        }
-        try {
-            val code = conn.responseCode
-            val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                ?.bufferedReader()
-                ?.use { it.readText() }
-                .orEmpty()
-            if (code !in 200..299) {
-                throw IOException(extractHttpError(code, body))
-            }
-            return parseEventsPayload(body)
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun extractHttpError(statusCode: Int, body: String): String {
-        if (body.isBlank()) return "HTTP $statusCode"
-        return try {
-            val json = JSONObject(body)
-            val detail = json.optString("error").ifBlank { json.optString("message") }
-            if (detail.isBlank()) "HTTP $statusCode" else "HTTP $statusCode: $detail"
-        } catch (_: Exception) {
-            "HTTP $statusCode: ${compactText(body, 120)}"
-        }
-    }
-
-    private fun parseEventsPayload(body: String): EventFetchPayload {
-        val json = JSONObject(body)
-        val warning = json.optString("warning").trim().ifBlank { null }
-        val events = json.optJSONArray("events")
-        val count = json.optInt("count", events?.length() ?: 0)
-        if (events == null || events.length() == 0) {
-            return EventFetchPayload(emptyList(), count, warning)
-        }
-        val lines = mutableListOf<String>()
-        val start = maxOf(0, events.length() - EVENT_RENDER_LIMIT)
-        for (i in start until events.length()) {
-            val item = events.opt(i)
-            if (item is JSONObject) {
-                lines += formatEventLine(item)
-            } else {
-                lines += compactText(item?.toString().orEmpty(), 200)
-            }
-        }
-        return EventFetchPayload(lines, count, warning)
-    }
-
-    private fun formatEventLine(event: JSONObject): String {
-        val ts = event.optDouble("ts", Double.NaN)
-        val timeText = if (ts.isNaN()) {
-            "--:--:--"
-        } else {
-            eventTimeFormatter.format(Instant.ofEpochMilli((ts * 1000.0).toLong()))
-        }
-        val seq = event.opt("seq")?.toString()?.takeIf { it.isNotBlank() } ?: "-"
-        val source = event.optString("event_source").ifBlank { "event" }
-        val method = event.optString("method").ifBlank { "unknown" }
-        val status = event.optString("status").ifBlank { "ok" }
-        val summary = firstNonBlank(
-            event.optString("result_summary"),
-            event.optString("result_error"),
-            event.optString("error")
-        )
-        return if (summary.isBlank()) {
-            "[$timeText] $seq $source/$method $status"
-        } else {
-            "[$timeText] $seq $source/$method $status\n${compactText(summary, 220)}"
-        }
-    }
-
-    private fun firstNonBlank(vararg values: String): String {
-        for (value in values) {
-            if (value.isNotBlank() && value != "null") return value
-        }
-        return ""
-    }
-
-    private fun compactText(value: String, maxLen: Int): String {
-        val singleLine = value.replace(Regex("\\s+"), " ").trim()
-        if (singleLine.length <= maxLen) return singleLine
-        return singleLine.take(maxLen - 3) + "..."
-    }
-
-    private fun nowTimeText(): String {
-        return eventTimeFormatter.format(Instant.now())
-    }
-
     private fun startPendingStreamIfReady() {
         if (!starting || streaming) return
         if (!binding.preview.holder.surface.isValid) return
@@ -520,7 +238,6 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             pendingStartUrl = null
             renderStreamingState()
         } catch (e: IllegalArgumentException) {
-            // Surface validity can race with rendering; retry shortly.
             Log.w(TAG, "Preview surface not ready yet", e)
             binding.preview.postDelayed({ startPendingStreamIfReady() }, 120L)
         } catch (e: Exception) {
@@ -534,16 +251,5 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
     companion object {
         private const val TAG = "VideoMemoryStream"
-        private const val EVENT_POLL_INTERVAL_MS = 3000L
-        private const val EVENT_FETCH_LIMIT = 200
-        private const val EVENT_RENDER_LIMIT = 30
-        private const val DEFAULT_API_PORT = 5050
-        private const val DEFAULT_API_BASE_URL = "http://127.0.0.1:5050"
     }
 }
-
-private data class EventFetchPayload(
-    val lines: List<String>,
-    val count: Int,
-    val warning: String?
-)

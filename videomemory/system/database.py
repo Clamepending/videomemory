@@ -101,18 +101,22 @@ class TaskDatabase:
                 # Back-fill: done tasks get 'done', others stay 'active'
                 conn.execute("UPDATE tasks SET status = 'done' WHERE done = 1")
                 logger.info("Migrated tasks table: added status column")
+            if 'bot_id' not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN bot_id TEXT")
+                logger.info("Migrated tasks table: added bot_id column")
     
     # ── Task methods ─────────────────────────────────────────────
 
     def save_task(self, task) -> None:
         """Insert or update a task."""
+        bot_id = getattr(task, 'bot_id', None)
         with self._get_conn() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO tasks
-                   (task_id, task_number, task_desc, done, status, io_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (task_id, task_number, task_desc, done, status, io_id, created_at, bot_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (task.task_id, task.task_number, task.task_desc,
-                 int(task.done), task.status, task.io_id, time.time())
+                 int(task.done), task.status, task.io_id, time.time(), bot_id)
             )
     
     def update_task_done(self, task_id: str, done: bool, status: str = None) -> None:
@@ -181,7 +185,7 @@ class TaskDatabase:
                     "SELECT content, timestamp FROM task_notes WHERE task_id = ? ORDER BY timestamp",
                     (r['task_id'],)
                 ).fetchall()
-                result.append({
+                row_dict = {
                     'task_id': r['task_id'],
                     'task_number': r['task_number'],
                     'task_desc': r['task_desc'],
@@ -192,7 +196,10 @@ class TaskDatabase:
                         {'content': n['content'], 'timestamp': n['timestamp']}
                         for n in notes
                     ]
-                })
+                }
+                if 'bot_id' in r.keys() and r['bot_id'] is not None:
+                    row_dict['bot_id'] = r['bot_id']
+                result.append(row_dict)
             return result
     
     def get_max_task_id(self) -> int:

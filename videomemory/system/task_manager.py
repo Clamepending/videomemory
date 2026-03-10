@@ -61,7 +61,8 @@ class TaskManager:
                     task_note=notes,
                     done=t['done'],
                     io_id=t['io_id'],
-                    status=t.get('status', STATUS_ACTIVE)
+                    status=t.get('status', STATUS_ACTIVE),
+                    bot_id=t.get('bot_id'),
                 )
                 self._tasks[t['task_id']] = task
             
@@ -96,12 +97,13 @@ class TaskManager:
         except Exception as e:
             logger.error(f"Failed to persist task update for {task.task_id}: {e}")
     
-    def add_task(self, io_id: str, task_description: str) -> Dict:
+    def add_task(self, io_id: str, task_description: str, bot_id: Optional[str] = None) -> Dict:
         """Add a new task for a specific IO stream.
         
         Args:
             io_id: The unique identifier of the IO stream
             task_description: Description of the task to be performed
+            bot_id: Optional identifier of the bot that created this task (for multi-bot / debug)
         
         Returns:
             Dictionary containing the task information and status
@@ -187,7 +189,8 @@ class TaskManager:
             task_desc=task_description,
             task_note=[],  # Empty list, will be shared by reference
             done=False,
-            io_id=io_id
+            io_id=io_id,
+            bot_id=bot_id,
         )
         
         
@@ -211,13 +214,16 @@ class TaskManager:
             # Don't fail the task addition if ingestor start fails - task is still added
             # But log the error for debugging
         
-        return {
+        result = {
             "status": "success",
             "message": f"Task added successfully",
             "task_id": task_id,
             "io_id": io_id,
             "task_description": task_description,
         }
+        if bot_id is not None:
+            result["bot_id"] = bot_id
+        return result
 
     def _emit_detection_event(self, task: Task, new_note: Optional[NoteEntry] = None):
         """Forward task detection updates to an optional integration callback."""
