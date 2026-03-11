@@ -388,7 +388,8 @@
                     const output = history[i];
                     const outputNumber = totalCount - (history.length - 1 - i);
                     html += '<div class="history-entry">';
-                    html += `<strong>Output #${outputNumber}</strong><br>`;
+                    const timeInfo = output.processing_time_ms != null ? ` <span style="color:#888; font-size:0.93em;">(${output.processing_time_ms} ms)</span>` : '';
+                    html += `<strong>Output #${outputNumber}</strong>${timeInfo}<br>`;
                     if (output.task_updates && output.task_updates.length > 0) {
                         output.task_updates.forEach(u => {
                             html += `Task ${u.task_number}: ${escapeHtml(u.task_note || '')}<br>`;

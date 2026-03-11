@@ -352,10 +352,12 @@ class VideoStreamIngestor:
                         continue
 
                     prompt = self._build_prompt()
+                    t0 = time.time()
                     results = await self._run_ml_inference(current_frame, prompt)
                     self._last_processed_frame = current_frame.copy()
 
                     if results:
+                        results["processing_time_ms"] = round((time.time() - t0) * 1000)
                         results["frame"] = current_frame.copy()
                         results["prompt"] = prompt
                         self._output_history.append(results)
