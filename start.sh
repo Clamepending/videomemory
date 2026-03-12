@@ -33,4 +33,16 @@ else
   echo "MediaMTX started (PID $MEDIAMTX_PID). RTMP :1935, RTSP :8554"
 fi
 
+# Use Tailscale IP for RTMP URLs when available (enables phone-on-cellular streaming).
+if [[ -z "$RTMP_SERVER_HOST" ]]; then
+  TS_IP=$(tailscale ip -4 2>/dev/null || true)
+  if [[ -n "$TS_IP" ]]; then
+    export RTMP_SERVER_HOST="$TS_IP"
+    echo "Tailscale connected: RTMP_SERVER_HOST=$TS_IP"
+  else
+    echo "Tailscale not active. To stream from outside your local network,"
+    echo "install Tailscale: https://tailscale.com/download"
+  fi
+fi
+
 exec uv run flask_app/app.py

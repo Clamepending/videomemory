@@ -20,6 +20,10 @@
     <string name="streaming_notification_text_with_target">Streaming to %1$s</string>
     <string name="streaming_notification_channel_name">VideoMemory Streaming</string>
     <string name="streaming_notification_channel_description">Shows status while the camera stream is active.</string>
+    <string name="quality_label">Stream quality</string>
+    <string name="quality_low">Low</string>
+    <string name="quality_medium">Medium</string>
+    <string name="quality_high">High</string>
     <string name="theme_switch_to_dark">Switch to dark mode</string>
     <string name="theme_switch_to_light">Switch to light mode</string>
 </resources>

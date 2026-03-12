@@ -23,10 +23,17 @@ import com.videomemory.stream.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity(), ConnectChecker {
 
+    private enum class Quality(val width: Int, val height: Int, val fps: Int, val bitrate: Int) {
+        LOW(640, 480, 10, 400_000),
+        MEDIUM(1280, 720, 15, 1_200_000),
+        HIGH(1280, 720, 30, 2_500_000)
+    }
+
     private lateinit var binding: ActivityMainBinding
     private var rtmpStream: RtmpStream? = null
     private var streaming = false
     private var starting = false
+    private var selectedQuality = Quality.MEDIUM
     private var pendingStartUrl: String? = null
     private val qrScanner: GmsBarcodeScanner by lazy {
         val options = GmsBarcodeScannerOptions.Builder()
@@ -55,6 +62,14 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         binding.btnScanQr.setOnClickListener { scanQrCode() }
         binding.themeToggleButton.setOnClickListener { toggleThemeMode() }
         binding.urlInput.doAfterTextChanged { renderStreamingState() }
+        binding.qualityGroup.setOnCheckedChangeListener { _, checkedId ->
+            selectedQuality = when (checkedId) {
+                R.id.qualityLow -> Quality.LOW
+                R.id.qualityHigh -> Quality.HIGH
+                else -> Quality.MEDIUM
+            }
+        }
+        binding.qualityMedium.isChecked = true
         updateThemeToggleIcon()
         renderStreamingState()
     }
@@ -83,11 +98,13 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             return
         }
         if (rtmpStream == null) {
+            val q = selectedQuality
             rtmpStream = RtmpStream(this, this)
             val ok = rtmpStream!!.prepareVideo(
-                width = 1280,
-                height = 720,
-                bitrate = 1_200_000,
+                width = q.width,
+                height = q.height,
+                fps = q.fps,
+                bitrate = q.bitrate,
                 rotation = 90
             ) &&
                 rtmpStream!!.prepareAudio(48000, true, 128 * 1024)
@@ -183,6 +200,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         binding.btnStop.isEnabled = active
         binding.urlInput.isEnabled = !active
         binding.btnScanQr.isEnabled = !active
+        binding.qualityLow.isEnabled = !active
+        binding.qualityMedium.isEnabled = !active
+        binding.qualityHigh.isEnabled = !active
         if (active) {
             binding.statusText.text = getString(R.string.status_streaming)
             binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.status_live_text))

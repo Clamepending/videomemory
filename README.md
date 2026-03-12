@@ -63,7 +63,7 @@ Use your Android phone as a wireless camera: the phone pushes video via **RTMP**
 3. Paste the URL into the [Android app](android/README.md) (or scan the QR code) and tap Start.
 4. Create tasks for that device as usual.
 
-Phone and VideoMemory must be on the same LAN.
+Phone and VideoMemory must be on the same LAN — or use [Tailscale](https://tailscale.com/download) to stream from anywhere. Install it on both devices, sign in, and `./start.sh` auto-detects your Tailscale IP.
 
 ## One-click cloud deployment (Fly.io)
 
