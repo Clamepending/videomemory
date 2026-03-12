@@ -1,0 +1,47 @@
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: videomemory-tailscale
+    hostname: videomemory
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    environment:
+      TS_AUTHKEY: "${TS_AUTHKEY}"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_EXTRA_ARGS: "${TS_EXTRA_ARGS:---advertise-tags=tag:container}"
+    ports:
+      - "5050:5050"      # Frontend + core HTTP API
+      - "1935:1935"      # RTMP push from Android
+      - "8554:8554"      # RTSP pull for VideoMemory ingest
+      - "8890:8890"      # SRT ingest
+      - "8889:8889"      # WebRTC/WHIP signaling endpoint (MediaMTX)
+      - "8189:8189/udp"  # WebRTC ICE/UDP (MediaMTX default)
+
+  videomemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: videomemory
+    restart: unless-stopped
+    network_mode: "service:tailscale"
+    depends_on:
+      - tailscale
+    environment:
+      PORT: "5050"
+      RTMP_SERVER_HOST: "${RTMP_SERVER_HOST:-}"
+      RTMP_INGEST_INTERNAL_HOST: "127.0.0.1"
+      VIDEOMEMORY_RTSP_PULL_PORT: "8554"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+    volumes:
+      - videomemory-data:/root/.local/share/videomemory
+
+volumes:
+  videomemory-data:
+  tailscale-state:

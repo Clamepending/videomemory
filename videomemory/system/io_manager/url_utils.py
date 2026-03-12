@@ -9,6 +9,8 @@ def get_pull_url(url: str) -> str:
 
     Converts common *push* ingest URLs (RTMP, SRT, WHIP/WebRTC ingest aliases)
     into an RTSP pull URL for VideoMemory's ingestor when possible.
+    The pull host is always 127.0.0.1 because MediaMTX runs locally, even when
+    the push URL uses a public/Tailscale IP.
     """
     if not url or not isinstance(url, str):
         return url
@@ -16,9 +18,9 @@ def get_pull_url(url: str) -> str:
     try:
         parsed = urlparse(u)
         scheme = (parsed.scheme or "").lower()
-        host = parsed.hostname or ""
         rtsp_port = os.environ.get("VIDEOMEMORY_RTSP_PULL_PORT", "8554")
-        netloc = f"{host}:{rtsp_port}" if host else ""
+        pull_host = os.environ.get("RTMP_INGEST_INTERNAL_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        netloc = f"{pull_host}:{rtsp_port}"
 
         if scheme == "rtmp":
             path = parsed.path or "/live/default"
