@@ -217,8 +217,8 @@ class VideoStreamIngestor:
     def _read_latest_frame(self) -> Tuple[bool, Optional[Any]]:
         """Read the freshest available frame from the current capture.
 
-        For network streams, we briefly drain buffered frames and keep the newest
-        one so each VLM cycle works on near-live content.
+        For network streams, drain any buffered frames with non-blocking grab()
+        and only decode the last one.
         """
         if self._camera is None:
             return False, None
@@ -226,23 +226,13 @@ class VideoStreamIngestor:
         if not self.is_network_stream:
             return self._camera.read()
 
-        drain_seconds = float(os.environ.get("VIDEOMEMORY_STREAM_DRAIN_SECONDS", "0.25"))
-        deadline = time.monotonic() + max(0.01, drain_seconds)
-        latest_frame = None
-        got_frame = False
-
-        while time.monotonic() < deadline:
-            ret, frame = self._camera.read()
-            if ret and frame is not None and frame.size > 0:
-                latest_frame = frame
-                got_frame = True
-                continue
-            time.sleep(0.005)
-
-        if got_frame:
-            return True, latest_frame
-
-        return self._camera.read()
+        # Grab (skip) buffered frames, then decode only the last one.
+        for _ in range(30):
+            t0 = time.monotonic()
+            self._camera.grab()
+            if time.monotonic() - t0 > 0.005:
+                break  # Blocked = caught up to live
+        return self._camera.retrieve()
 
     async def _capture_loop(self):
         """Continuously capture the newest frame into a single-slot mailbox."""
