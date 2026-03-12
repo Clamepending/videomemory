@@ -59,7 +59,7 @@ class VideoStreamIngestor:
         self.camera_index = camera_source
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
         self._running = False
-        self._tasks: list[asyncio.Task] = []
+        self._loop: Optional[asyncio.Task] = None
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
         self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
         self._target_resolution = target_resolution # Default to 640x480
@@ -109,15 +109,9 @@ class VideoStreamIngestor:
         self._running = True
         logger.info(f"Starting ingestor for camera index={self.camera_index}")
         
-        # Start all processing loops
-        # Note: These tasks run concurrently in the background
-        self._tasks = [
-            asyncio.create_task(self._capture_loop(), name=f"capture_{self.camera_index}"),
-            asyncio.create_task(self._process_input(), name=f"process_{self.camera_index}"),
-        ]
+        self._loop = asyncio.create_task(self._capture_loop(), name=f"capture_{self.camera_index}")
         
-        logger.info(f"Started {len(self._tasks)} processing loops for camera index={self.camera_index}")
-        logger.info(f"Task status: {[t.get_name() for t in self._tasks]}")
+        logger.info(f"Started capture loop for camera index={self.camera_index}")
         
         # Give tasks a moment to start and report any immediate errors
         await asyncio.sleep(0.1)
@@ -235,12 +229,16 @@ class VideoStreamIngestor:
         return self._camera.retrieve()
 
     async def _capture_loop(self):
-        """Continuously capture the newest frame into a single-slot mailbox."""
+        """Capture frames and run VLM processing in a single loop.
+
+        When no tasks are assigned the loop still grabs frames (keeping
+        ``_latest_frame`` fresh for the UI) but skips the expensive VLM
+        inference entirely.
+        """
         try:
             if not await self._ensure_camera_open():
                 return
-            
-            # Log which camera we're actually using
+
             if self.is_network_stream:
                 logger.info(f"Connected to network stream: {self.camera_source}")
             else:
@@ -253,21 +251,22 @@ class VideoStreamIngestor:
                             break
                 except Exception:
                     logger.info(f"Opening camera index={self.camera_source} (could not verify device name)")
-            
+
             logger.info(f"Started capture loop for camera source={self.camera_source}")
-            
+
             # Warm up camera by reading a few frames (especially important for USB cameras)
             for _ in range(5):
                 ret, _ = await asyncio.to_thread(self._camera.read)
                 if ret:
                     break
                 await asyncio.sleep(0.1)
-            
+
             consecutive_failures = 0
             max_consecutive_failures = 30 if self.is_network_stream else 10
-            
+
             while self._running:
                 try:
+                    # --- Frame capture ---
                     ret, current_frame = await asyncio.to_thread(self._read_latest_frame)
                     if not ret:
                         consecutive_failures += 1
@@ -279,50 +278,27 @@ class VideoStreamIngestor:
                             continue
                         await asyncio.sleep(0.05)
                         continue
-                    
+
                     consecutive_failures = 0
-                    
-                    # Validate frame
+
                     if current_frame is None or current_frame.size == 0:
                         logger.debug(f"Invalid frame from camera source={self.camera_source}")
                         continue
-                    
-                    # Resize frame to target resolution if needed
+
                     if current_frame.shape[1] != self._target_resolution[0] or current_frame.shape[0] != self._target_resolution[1]:
                         current_frame = cv2.resize(current_frame, self._target_resolution, interpolation=cv2.INTER_LINEAR)
-                    
-                    # Single-slot mailbox: always overwrite with freshest frame.
+
                     if current_frame.size > 0:
                         self._latest_frame = current_frame.copy()
-                            
-                except Exception as e:
-                    logger.error(f"Error capturing frame for camera index={self.camera_index}: {e}", exc_info=True)
-                    continue
-            logger.info(f"Stopped capture loop for camera index={self.camera_index}")
-                    
-        except asyncio.CancelledError:
-            logger.info(f"Capture loop cancelled for camera index={self.camera_index}")
-        except Exception as e:
-            logger.error(f"Error in capture loop for camera index={self.camera_index}: {e}", exc_info=True)
-            self._running = False
-        finally:
-            self._release_camera()
 
-    async def _process_input(self):
-        """Run VLM processing against the most recent captured frame."""
-        try:
-            logger.info(f"Started processing loop for camera source={self.camera_source}")
-
-            while self._running:
-                try:
-                    if self._latest_frame is None:
+                    # --- Skip VLM processing when there are no tasks ---
+                    if not self._tasks_list:
                         await asyncio.sleep(0.05)
                         continue
 
-                    current_frame = self._latest_frame.copy()
+                    # --- VLM processing ---
                     self._process_loop_ticks += 1
 
-                    # Log frame info periodically for debugging.
                     if self._process_loop_ticks % 100 == 0:
                         frame_mean = current_frame.mean()
                         logger.debug(
@@ -330,7 +306,6 @@ class VideoStreamIngestor:
                             f"mean={frame_mean:.2f}, min={current_frame.min()}, max={current_frame.max()}"
                         )
 
-                    # Skip VLM call if frame is effectively identical to the last processed frame.
                     if self._is_frame_duplicate(current_frame):
                         self._frames_skipped += 1
                         if self._frames_skipped % 50 == 1:
@@ -355,16 +330,19 @@ class VideoStreamIngestor:
                         await self._process_ml_results(results)
 
                 except Exception as e:
-                    logger.error(f"Error processing frame for camera index={self.camera_index}: {e}", exc_info=True)
+                    logger.error(f"Error in capture/process loop for camera index={self.camera_index}: {e}", exc_info=True)
                     await asyncio.sleep(0.1)
                     continue
 
-            logger.info(f"Stopped processing loop for camera index={self.camera_index}")
+            logger.info(f"Stopped capture loop for camera index={self.camera_index}")
+
         except asyncio.CancelledError:
-            logger.info(f"Processing loop cancelled for camera index={self.camera_index}")
+            logger.info(f"Capture loop cancelled for camera index={self.camera_index}")
         except Exception as e:
-            logger.error(f"Error in processing loop for camera index={self.camera_index}: {e}", exc_info=True)
+            logger.error(f"Error in capture loop for camera index={self.camera_index}: {e}", exc_info=True)
             self._running = False
+        finally:
+            self._release_camera()
     
     def _is_frame_duplicate(self, frame: Any) -> bool:
         """Check if a frame is effectively identical to the last processed frame.
@@ -408,53 +386,10 @@ class VideoStreamIngestor:
                 f"<task_newest_note timestamp=\"{note_time}\">{newest_note.content}</task_newest_note>"
             )
             
-            # # Build note history section
-            # # Only include the last 3 task notes to prevent prompt from growing too large
-            # # Full history is still maintained in task.task_note for system use
-            # notes_list = task.task_note
-            # recent_notes = list(notes_list)[-3:] if notes_list else []  # Get last 3 notes
-            
-            # tasks_lines.append("<task_notes_history>")
-            # if recent_notes:
-            #     for note_entry in recent_notes:
-            #         assert isinstance(note_entry, NoteEntry), "Note entry must be a NoteEntry object"
-            #         time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(note_entry.timestamp))
-            #         tasks_lines.append(f"<note timestamp=\"{time_str}\">{note_entry.content}</note>")
-            # else:
-            #     tasks_lines.append("<note timestamp=\"N/A\">No notes yet</note>")
-            # tasks_lines.append("</task_notes_history>")
-            
             tasks_lines.append("</task>")
         tasks_lines.append("</tasks>")
         
-        # # Build most recent notes section for easy comparison
-        # most_recent_lines = ["<most_recent_notes>"]
-        # for task in self._tasks_list:
-        #     notes_list = task.task_note
-        #     if notes_list:
-        #         newest_note = notes_list[-1]
-        #         assert isinstance(newest_note, NoteEntry), "Note entry must be a NoteEntry object"
-        #         time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))
-        #         most_recent_lines.append(f"<task_{task.task_number}_newest_note timestamp=\"{time_str}\">{newest_note.content}</task_{task.task_number}_newest_note>")
-        #     else:
-        #         most_recent_lines.append(f"<task_{task.task_number}_newest_note>No notes yet</task_{task.task_number}_newest_note>")
-        # most_recent_lines.append("</most_recent_notes>")
-        
-        # # Build history section (only model outputs, excluding frames and prompts)
-        # # Only include the last 4 historical actions for the model prompt
-        # history_lines = ["<history>"]
-        # recent_history = list(self._output_history)[-4:]  # Get last 4 items
-        # for output in recent_history:
-        #     # Create a copy without the frame and prompt for the prompt
-        #     output_for_prompt = {k: v for k, v in output.items() if k not in ("frame", "prompt")}
-        #     history_lines.append("<output>")
-        #     history_lines.append(f"<output_json>{json.dumps(output_for_prompt, default=str)}</output_json>")
-        #     history_lines.append("</output>")
-        # history_lines.append("</history>")
-        
-        # # Log prompt size for debugging (warn if getting very large)
-        # prompt_so_far = "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines)
-        # prompt_so_far = "\n".join(tasks_lines) + "\n\n" + "\n".join(most_recent_lines)
+
         prompt_so_far = "\n".join(tasks_lines)
         prompt_size_chars = len(prompt_so_far)
         if prompt_size_chars > 10000:  # Warn if prompt exceeds 10k characters
@@ -692,23 +627,15 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
         # 1. Signal shutdown
         self._running = False
         
-        # 2. Cancel all tasks
-        for task in self._tasks:
-            if not task.done():
-                task.cancel()
-        
-        # 3. Wait for tasks to complete (with timeout)
-        if self._tasks:
+        # 2. Cancel the loop
+        if self._loop and not self._loop.done():
+            self._loop.cancel()
             try:
-                await asyncio.wait_for(
-                    asyncio.gather(*self._tasks, return_exceptions=True),
-                    timeout=5.0
-                )
-            except asyncio.TimeoutError:
-                logger.warning(f"Tasks didn't complete within timeout for camera index={self.camera_index}")
+                await asyncio.wait_for(self._loop, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
         
-        # 4. Clear task list
-        self._tasks = []
+        self._loop = None
 
         # 5. Release camera if still open
         if self._camera:
