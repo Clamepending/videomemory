@@ -3,7 +3,7 @@
 # Registers a trap to kill MediaMTX when the parent script exits.
 
 set -e
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+: "${REPO_ROOT:="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}"
 MEDIAMTX_CFG="$REPO_ROOT/rtmp-server/mediamtx.yml"
 
 # Check for an existing instance started with our config
