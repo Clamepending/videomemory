@@ -117,6 +117,42 @@
             color: #8ab4ff;
         }
 
+        .provider-type-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+            margin-left: 6px;
+        }
+
+        .provider-type-badge.local {
+            background: rgba(25, 195, 125, 0.2);
+            color: #19c37d;
+        }
+
+        .provider-type-badge.cloud {
+            background: rgba(136, 136, 136, 0.2);
+            color: #888;
+        }
+
+        .vllm-status-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+            margin-left: 6px;
+        }
+
+        .vllm-status-badge.active {
+            background: rgba(25, 195, 125, 0.2);
+            color: #19c37d;
+        }
+
+        .vllm-status-badge.inactive {
+            background: rgba(255, 100, 80, 0.2);
+            color: #ff6450;
+        }
+
         .setting-hint {
             font-size: 12px;
             color: #666;
@@ -328,23 +364,43 @@
                 <div class="setting-label">
                     <label>Video Ingestor Model</label>
                     <span class="badge" id="badge-VIDEO_INGESTOR_MODEL"></span>
+                    <span class="provider-type-badge" id="model-provider-indicator" style="display:none;"></span>
+                    <span class="vllm-status-badge" id="vllm-status-indicator" style="display:none;"></span>
                 </div>
                 <div class="setting-hint">The model used for real-time video analysis. Different models have different speed/accuracy trade-offs.</div>
                 <div class="setting-input-row">
                     <select class="setting-input" id="input-VIDEO_INGESTOR_MODEL">
-                        <option value="">-- Use default (gemini-2.5-flash) --</option>
-                        <option value="gemini-2.5-flash">Gemini 2.5 Flash (Google)</option>
-                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Google)</option>
-                        <option value="gpt-4o-mini">GPT-4o Mini (OpenAI)</option>
-                        <option value="gpt-4.1-nano">GPT-4.1 Nano (OpenAI)</option>
-                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Anthropic)</option>
-                        <option value="qwen-2-vl-7b">Qwen 2 VL 7B (OpenRouter)</option>
-                        <option value="phi-4-multimodal">Phi-4 Multimodal (OpenRouter)</option>
-                        <option value="molmo-2-8b">Molmo 2 8B (OpenRouter)</option>
+                        <option value="">-- Use default (local-vllm) --</option>
+                        <optgroup label="Local (no API key)">
+                            <option value="local-vllm">Local model (vLLM)</option>
+                        </optgroup>
+                        <optgroup label="Cloud">
+                            <option value="gemini-2.5-flash">Gemini 2.5 Flash (Google)</option>
+                            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Google)</option>
+                            <option value="gpt-4o-mini">GPT-4o Mini (OpenAI)</option>
+                            <option value="gpt-4.1-nano">GPT-4.1 Nano (OpenAI)</option>
+                            <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Anthropic)</option>
+                            <option value="qwen-2-vl-7b">Qwen 2 VL 7B (OpenRouter)</option>
+                            <option value="phi-4-multimodal">Phi-4 Multimodal (OpenRouter)</option>
+                            <option value="molmo-2-8b">Molmo 2 8B (OpenRouter)</option>
+                        </optgroup>
                     </select>
                     <button class="btn btn-save" onclick="saveSetting('VIDEO_INGESTOR_MODEL')">Save</button>
                 </div>
                 <div class="setting-status" id="status-VIDEO_INGESTOR_MODEL"></div>
+            </div>
+
+            <div class="setting-row" data-key="LOCAL_MODEL_BASE_URL" id="row-LOCAL_MODEL_BASE_URL">
+                <div class="setting-label">
+                    <label>Local vLLM Base URL</label>
+                    <span class="badge" id="badge-LOCAL_MODEL_BASE_URL"></span>
+                </div>
+                <div class="setting-hint">Only used when Local vLLM model is selected. Default: http://localhost:8100 (set by start.sh). Override if vLLM runs elsewhere.</div>
+                <div class="setting-input-row">
+                    <input type="text" class="setting-input" id="input-LOCAL_MODEL_BASE_URL" placeholder="http://localhost:8100">
+                    <button class="btn btn-save" onclick="saveSetting('LOCAL_MODEL_BASE_URL')">Save</button>
+                </div>
+                <div class="setting-status" id="status-LOCAL_MODEL_BASE_URL"></div>
             </div>
 
             <div class="restart-notice">
@@ -583,6 +639,48 @@
                                 break;
                             }
                         }
+                    }
+
+                    // Set text input value for non-password fields
+                    if (input.tagName === 'INPUT' && input.type !== 'password' && info.is_set) {
+                        input.value = info.value;
+                    }
+                }
+
+                // Update model provider type indicator (Local vLLM vs Cloud)
+                const providerInfo = settings._model_provider_type;
+                const indicator = document.getElementById('model-provider-indicator');
+                const vllmStatusEl = document.getElementById('vllm-status-indicator');
+                const localRow = document.getElementById('row-LOCAL_MODEL_BASE_URL');
+                if (providerInfo && indicator) {
+                    if (providerInfo.type === 'local') {
+                        indicator.textContent = 'Local vLLM';
+                        indicator.className = 'provider-type-badge local';
+                        indicator.style.display = '';
+                        // Fetch vLLM status when local model is selected
+                        if (vllmStatusEl) {
+                            vllmStatusEl.style.display = '';
+                            vllmStatusEl.textContent = 'Checking...';
+                            vllmStatusEl.className = 'vllm-status-badge';
+                            fetch('/api/vllm/status')
+                                .then(r => r.json())
+                                .then(data => {
+                                    vllmStatusEl.textContent = data.active ? 'Active' : 'Not reachable';
+                                    vllmStatusEl.className = 'vllm-status-badge ' + (data.active ? 'active' : 'inactive');
+                                })
+                                .catch(() => {
+                                    vllmStatusEl.textContent = 'Not reachable';
+                                    vllmStatusEl.className = 'vllm-status-badge inactive';
+                                });
+                        }
+                    } else {
+                        indicator.textContent = 'Cloud';
+                        indicator.className = 'provider-type-badge cloud';
+                        indicator.style.display = '';
+                        if (vllmStatusEl) vllmStatusEl.style.display = 'none';
+                    }
+                    if (localRow) {
+                        localRow.style.display = providerInfo.type === 'local' ? '' : 'none';
                     }
                 }
             } catch (err) {

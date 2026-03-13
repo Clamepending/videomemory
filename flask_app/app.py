@@ -1002,7 +1002,7 @@ def get_ingestor_frame_and_prompt(io_id):
         latest_output = ingestor.get_latest_output()
         if not latest_output:
             return jsonify({'error': 'No output available yet', 'frame_base64': None, 'prompt': ''}), 200
-        
+
         latest_frame = latest_output.get('frame')
         latest_prompt = latest_output.get('prompt', '')
         
@@ -1468,6 +1468,9 @@ _SENSITIVE_KEYS = {
     'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY',
 }
 
+# Models that use local vLLM (no cloud API)
+_LOCAL_VLLM_MODELS = {'local-vllm'}
+
 # All known setting keys (for the settings page)
 _KNOWN_SETTINGS = [
     'GOOGLE_API_KEY',
@@ -1475,6 +1478,7 @@ _KNOWN_SETTINGS = [
     'OPENROUTER_API_KEY',
     'ANTHROPIC_API_KEY',
     'VIDEO_INGESTOR_MODEL',
+    'LOCAL_MODEL_BASE_URL',
 ]
 
 _MODEL_RUNTIME_KEYS = {
@@ -1483,6 +1487,7 @@ _MODEL_RUNTIME_KEYS = {
     'OPENROUTER_API_KEY',
     'ANTHROPIC_API_KEY',
     'VIDEO_INGESTOR_MODEL',
+    'LOCAL_MODEL_BASE_URL',
 }
 
 
@@ -1504,6 +1509,26 @@ def _mask_value(key: str, value: str) -> str:
         return '*' * (len(value) - 4) + value[-4:]
     return value
 
+@app.route('/api/vllm/status', methods=['GET'])
+def get_vllm_status():
+    """Check if local vLLM server is reachable."""
+    import urllib.request
+    base_url = (
+        os.getenv('LOCAL_MODEL_BASE_URL') or
+        os.getenv('VLLM_LOCAL_URL') or
+        'http://localhost:8100'
+    ).rstrip('/')
+    url = f'{base_url}/v1/models'
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            if resp.status == 200:
+                return jsonify({'active': True, 'url': base_url})
+    except Exception:
+        pass
+    return jsonify({'active': False, 'url': base_url})
+
+
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
     """Get all settings. Sensitive values are masked."""
@@ -1519,6 +1544,12 @@ def get_settings():
                 'is_set': bool(value),
                 'source': 'database' if db_val is not None else ('env' if env_val else 'unset')
             }
+        # Add model provider type for UI indicator (local vLLM vs cloud)
+        model_name = (result.get('VIDEO_INGESTOR_MODEL', {}).get('value') or '').strip().lower()
+        result['_model_provider_type'] = {
+            'type': 'local' if model_name in _LOCAL_VLLM_MODELS else 'cloud',
+            'model': model_name or 'local-vllm',
+        }
         return jsonify({'settings': result})
     except Exception as e:
         return jsonify({'error': str(e)}), 500

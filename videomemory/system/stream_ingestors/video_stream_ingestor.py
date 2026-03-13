@@ -308,16 +308,21 @@ class VideoStreamIngestor:
 
                     if self._is_frame_duplicate(current_frame):
                         self._frames_skipped += 1
-                        if self._frames_skipped % 50 == 1:
-                            logger.debug(
-                                f"Camera index={self.camera_index}: skipping duplicate frame "
-                                f"(total skipped: {self._frames_skipped})"
+                        if self._frames_skipped % 100 == 1:
+                            logger.info(
+                                "Skipping duplicate frames [camera=%s]: %d total skipped (diff < %.1f). "
+                                "If the scene is static, the model won't be called.",
+                                self.camera_index,
+                                self._frames_skipped,
+                                self._frame_diff_threshold,
                             )
                         await asyncio.sleep(0.1)
                         continue
 
                     prompt = self._build_prompt()
                     t0 = time.time()
+                    if self._total_output_count == 0:
+                        logger.info("First VLM inference attempt [camera=%s] (base_url from provider env)", self.camera_index)
                     results = await self._run_ml_inference(current_frame, prompt)
                     self._last_processed_frame = current_frame.copy()
 
@@ -400,7 +405,8 @@ class VideoStreamIngestor:
 
 You are a video ingestor. Output one JSON object containing task_updates.
 
-TASK_UPDATES: Add a task update IF AND ONLY IF there is something NEW or DIFFERENT in the imagefrom the most recent note for the task. Check the <task_newest_note> section - if the image matches the newest note for a task exactly, do NOT include that task in your updates (return empty list [] for no updates).
+When task_newest_note is "None", you MUST ALWAYS output at least one task_update. Describe what you see in the image relevant to the task. NEVER return {"task_updates": []} when the newest note is "None".
+
 
 CRITICAL: Any change in count, quantity, or state MUST be reported, including:
 - Changes from a non-zero count to zero
@@ -417,6 +423,8 @@ Output format (JSON only, nothing else):
 {"task_updates": [{task_number: <number>, task_note: <description>, task_done: <true/false>}, ...]}
 
 Examples:
+First observation (newest_note is None): {"task_updates": [{task_number: 0, task_note: "No people visible in frame.", task_done: false}]}
+
 When you observe a clap for "Count claps" task: {"task_updates": [{task_number: 0, task_note: "Clap detected. Total count: 1 clap.", task_done: false}]}
 
 When you observe 4 more claps (building on previous count): {"task_updates": [{task_number: 0, task_note: "4 more claps detected. Total count: 5 claps.", task_done: false}]}
@@ -431,7 +439,9 @@ When tracking counts and the count changes to zero (e.g., most recent note says 
 
 When tracking counts and the count changes from zero to non-zero (e.g., most recent note says "0 items" but image shows 2): {"task_updates": [{task_number: 0, task_note: "2 items are now visible.", task_done: false}]}
 
-When there is no new information and the task notes perfectly match the image (or same as newest note): {"task_updates": []}
+When task_newest_note is "None" (first observation): {"task_updates": [{task_number: 0, task_note: "Initial observation: 1 person visible in frame.", task_done: false}]}
+
+When there is no new information and the task notes perfectly match the image (and newest note is NOT "None"): {"task_updates": []}
 
 For multiple task updates: {"task_updates": [{task_number: 0, task_note: "Clap count: 5", task_done: false}, {task_number: 1, task_note: "2 people visible", task_done: false}]}
 
@@ -468,54 +478,95 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
             # Run the blocking call in a thread pool to avoid blocking the event loop
             response: VideoIngestorOutput = await asyncio.to_thread(_sync_generate_content)
             api_call_time = time.time() - api_call_start
+            n_updates = len(response.task_updates)
             logger.debug(f"API call [camera={self.camera_index}]: generate_content took {api_call_time:.3f}s")
+            if n_updates > 0:
+                logger.info(
+                    "LLM returned %d task_update(s) [camera=%s]: %s",
+                    n_updates,
+                    self.camera_index,
+                    [(u.task_number, u.task_note[:50] + "..." if len(u.task_note) > 50 else u.task_note) for u in response.task_updates],
+                )
+            else:
+                logger.debug(
+                    "LLM returned empty task_updates [camera=%s] (model saw no change from newest notes)",
+                    self.camera_index,
+                )
 
             # Providers return a validated Pydantic model instance.
-            # logger.info(f"LLM inference prompt: {self._build_prompt()}")
-            # logger.info(f"LLM inference output: {output}")
             return response.model_dump()
         except Exception as e:
             # Handle network errors gracefully - these can happen due to connection issues
             # but shouldn't crash the entire processing loop
             import httpx
             if isinstance(e, (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
-                logger.warning(f"LLM inference network error (will skip this frame): {type(e).__name__}: {e}")
+                logger.warning(
+                    "LLM inference network error (will skip this frame) [camera=%s]: %s: %s. "
+                    "If using Docker, ensure VLM base URL is reachable (e.g. host IP, not localhost).",
+                    self.camera_index,
+                    type(e).__name__,
+                    e,
+                )
             else:
-                logger.error(f"LLM inference error: {e}", exc_info=True)
+                logger.error(f"LLM inference error [camera={self.camera_index}]: {e}", exc_info=True)
             return None
     
     async def _process_ml_results(self, ml_results: Dict[str, Any]):
         """Process ML inference results: update task notes and queue actions."""
         if not ml_results:
             return
-        
+
+        task_updates = ml_results.get("task_updates", [])
+        available_task_numbers = [t.task_number for t in self._tasks_list]
+
         # Update tasks - append new notes instead of overwriting
-        for update in ml_results.get("task_updates", []):
-            task = next((t for t in self._tasks_list if t.task_number == update.get("task_number")), None)
-            if task:
-                new_note_content = update.get("task_note", "")
-                new_note = None
-                
-                # Append new note entry with current timestamp
-                if new_note_content:  # Only append if there's actual content
-                    new_note = NoteEntry(content=new_note_content)
-                    task.task_note.append(new_note)
-                
-                # Update done status
-                if update.get("task_done"):
-                    task.done = True
-                
-                # Persist changes via callback
-                if self._on_task_updated and (new_note or update.get("task_done")):
-                    try:
-                        self._on_task_updated(task, new_note)
-                    except Exception as e:
-                        logger.error(f"Failed to persist task update: {e}")
-                if self._on_detection_event and (new_note or update.get("task_done")):
-                    try:
-                        self._on_detection_event(task, new_note)
-                    except Exception as e:
-                        logger.error(f"Failed to emit detection event: {e}")
+        for update in task_updates:
+            raw_task_num = update.get("task_number")
+            # Coerce to int (model may return string "0" instead of int 0)
+            try:
+                task_num = int(raw_task_num) if raw_task_num is not None else None
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid task_number from model: %r (type=%s). Available: %s",
+                    raw_task_num,
+                    type(raw_task_num).__name__,
+                    available_task_numbers,
+                )
+                continue
+
+            task = next((t for t in self._tasks_list if t.task_number == task_num), None)
+            if not task:
+                logger.warning(
+                    "No task matched task_number=%s. Available task_numbers: %s [camera=%s]",
+                    task_num,
+                    available_task_numbers,
+                    self.camera_index,
+                )
+                continue
+
+            new_note_content = update.get("task_note", "")
+            new_note = None
+
+            # Append new note entry with current timestamp
+            if new_note_content:  # Only append if there's actual content
+                new_note = NoteEntry(content=new_note_content)
+                task.task_note.append(new_note)
+
+            # Update done status
+            if update.get("task_done"):
+                task.done = True
+
+            # Persist changes via callback
+            if self._on_task_updated and (new_note or update.get("task_done")):
+                try:
+                    self._on_task_updated(task, new_note)
+                except Exception as e:
+                    logger.error(f"Failed to persist task update: {e}")
+            if self._on_detection_event and (new_note or update.get("task_done")):
+                try:
+                    self._on_detection_event(task, new_note)
+                except Exception as e:
+                    logger.error(f"Failed to emit detection event: {e}")
         
     def add_task(self, task: Task):
         """Add a task to the video stream ingestor.

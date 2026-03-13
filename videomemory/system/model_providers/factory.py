@@ -9,8 +9,9 @@ from .openai_provider import OpenAIGPT41NanoProvider, OpenAIGPT4oMiniProvider
 from .openrouter_provider import (
     OpenRouterMolmo28BProvider,
     OpenRouterQwen2VL7BProvider,
-    OpenRouterPhi4MultimodalProvider
+    OpenRouterPhi4MultimodalProvider,
 )
+from .vllm_provider import LocalVLLMProvider
 
 logger = logging.getLogger('ModelProviderFactory')
 
@@ -26,6 +27,8 @@ MODEL_PROVIDER_MAP = {
     "molmo-2-8b": OpenRouterMolmo28BProvider,
     "qwen-2-vl-7b": OpenRouterQwen2VL7BProvider,
     "phi-4-multimodal": OpenRouterPhi4MultimodalProvider,
+    # Local vLLM (no cloud API key; uses whatever model the server is serving)
+    "local-vllm": LocalVLLMProvider,
 }
 
 
@@ -33,7 +36,7 @@ def get_VLM_provider(model_name: Optional[str] = None) -> BaseModelProvider:
     """Get a VLM (Vision Language Model) provider instance based on environment variable or provided name.
     
     Reads VIDEO_INGESTOR_MODEL environment variable if model_name is not provided.
-    Defaults to "gemini-2.5-flash" if neither is set.
+    Defaults to "local-vllm" if neither is set.
     
     Args:
         model_name: Optional model name to use. If None, reads from VIDEO_INGESTOR_MODEL env var.
@@ -45,7 +48,7 @@ def get_VLM_provider(model_name: Optional[str] = None) -> BaseModelProvider:
         ValueError: If model name is not recognized
     """
     if model_name is None:
-        model_name = os.getenv("VIDEO_INGESTOR_MODEL", "gemini-2.5-flash")
+        model_name = os.getenv("VIDEO_INGESTOR_MODEL", "local-vllm")
     
     model_name = model_name.lower().strip()
     
@@ -54,10 +57,10 @@ def get_VLM_provider(model_name: Optional[str] = None) -> BaseModelProvider:
         error_msg = (
             f"Unknown model name: '{model_name}'. "
             f"Available models: {available_models}. "
-            f"Falling back to default: gemini-2.5-flash"
+            f"Falling back to default: local-vllm"
         )
         logger.warning(error_msg)
-        model_name = "gemini-2.5-flash"
+        model_name = "local-vllm"
     
     provider_class = MODEL_PROVIDER_MAP[model_name]
     logger.info(f"Creating model provider: {model_name} ({provider_class.__name__})")

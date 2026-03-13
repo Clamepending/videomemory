@@ -31,7 +31,12 @@ source "$REPO_ROOT/scripts/start_mediamtx.sh"
 source "$REPO_ROOT/scripts/start_tailscale.sh"
 
 # ---------------------------------------------------------------------------
-# 3. VideoMemory – start the Flask application
+# 3. Local vLLM – optional local vision model (instead of cloud APIs)
+# ---------------------------------------------------------------------------
+source "$REPO_ROOT/scripts/start_vllm.sh"
+
+# ---------------------------------------------------------------------------
+# 4. VideoMemory – start the Flask application
 # ---------------------------------------------------------------------------
 echo ""
 echo "$(bold 'Starting VideoMemory...')"
