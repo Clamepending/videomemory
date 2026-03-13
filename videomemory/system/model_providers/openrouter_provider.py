@@ -167,3 +167,15 @@ class OpenRouterPhi4MultimodalProvider(_BaseOpenRouterProvider):
         """
         super().__init__(api_key=api_key, model_name="microsoft/phi-4-multimodal-instruct")
 
+
+class OpenRouterMistralSmall31Provider(_BaseOpenRouterProvider):
+    """Provider for OpenRouter Mistral Small 3.1 24B Instruct (vision-capable)."""
+    
+    def __init__(self, api_key: str = None):
+        """Initialize OpenRouter provider for Mistral Small 3.1 24B Instruct.
+        
+        Args:
+            api_key: OpenRouter API key. If None, will try to get from OPENROUTER_API_KEY env var.
+        """
+        super().__init__(api_key=api_key, model_name="mistralai/mistral-small-3.1-24b-instruct")
+

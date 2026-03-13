@@ -382,6 +382,7 @@
                             <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Anthropic)</option>
                             <option value="qwen-2-vl-7b">Qwen 2 VL 7B (OpenRouter)</option>
                             <option value="phi-4-multimodal">Phi-4 Multimodal (OpenRouter)</option>
+                            <option value="mistral-small-3.1">Mistral Small 3.1 (OpenRouter)</option>
                             <option value="molmo-2-8b">Molmo 2 8B (OpenRouter)</option>
                         </optgroup>
                     </select>
@@ -657,21 +658,41 @@
                         indicator.textContent = 'Local vLLM';
                         indicator.className = 'provider-type-badge local';
                         indicator.style.display = '';
-                        // Fetch vLLM status when local model is selected
+                        // Fetch vLLM status when local model is selected (retry if still starting)
                         if (vllmStatusEl) {
                             vllmStatusEl.style.display = '';
                             vllmStatusEl.textContent = 'Checking...';
                             vllmStatusEl.className = 'vllm-status-badge';
-                            fetch('/api/vllm/status')
-                                .then(r => r.json())
-                                .then(data => {
-                                    vllmStatusEl.textContent = data.active ? 'Active' : 'Not reachable';
-                                    vllmStatusEl.className = 'vllm-status-badge ' + (data.active ? 'active' : 'inactive');
-                                })
-                                .catch(() => {
-                                    vllmStatusEl.textContent = 'Not reachable';
-                                    vllmStatusEl.className = 'vllm-status-badge inactive';
-                                });
+                            let pollCount = 0;
+                            const maxPolls = 8;  // ~2 min at 15s interval
+                            function checkVllm() {
+                                fetch('/api/vllm/status')
+                                    .then(r => r.json())
+                                    .then(data => {
+                                        if (data.active) {
+                                            vllmStatusEl.textContent = 'Active';
+                                            vllmStatusEl.className = 'vllm-status-badge active';
+                                            return;
+                                        }
+                                        vllmStatusEl.textContent = 'Not reachable';
+                                        vllmStatusEl.className = 'vllm-status-badge inactive';
+                                        if (pollCount < maxPolls) {
+                                            pollCount++;
+                                            vllmStatusEl.textContent = 'Starting… retry in 15s';
+                                            setTimeout(checkVllm, 15000);
+                                        }
+                                    })
+                                    .catch(() => {
+                                        vllmStatusEl.textContent = 'Not reachable';
+                                        vllmStatusEl.className = 'vllm-status-badge inactive';
+                                        if (pollCount < maxPolls) {
+                                            pollCount++;
+                                            vllmStatusEl.textContent = 'Starting… retry in 15s';
+                                            setTimeout(checkVllm, 15000);
+                                        }
+                                    });
+                            }
+                            checkVllm();
                         }
                     } else {
                         indicator.textContent = 'Cloud';

@@ -1511,21 +1511,28 @@ def _mask_value(key: str, value: str) -> str:
 
 @app.route('/api/vllm/status', methods=['GET'])
 def get_vllm_status():
-    """Check if local vLLM server is reachable."""
+    """Check if local vLLM server is reachable.
+    
+    vLLM can take 1–2 min to load models; we retry with longer timeout.
+    """
     import urllib.request
+    import time
     base_url = (
         os.getenv('LOCAL_MODEL_BASE_URL') or
         os.getenv('VLLM_LOCAL_URL') or
         'http://localhost:8100'
     ).rstrip('/')
     url = f'{base_url}/v1/models'
-    try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            if resp.status == 200:
-                return jsonify({'active': True, 'url': base_url})
-    except Exception:
-        pass
+    timeout = 15  # vLLM model loading can be slow
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    return jsonify({'active': True, 'url': base_url})
+        except Exception:
+            if attempt < 2:
+                time.sleep(3)  # Wait before retry (vLLM may still be starting)
     return jsonify({'active': False, 'url': base_url})
 
 
