@@ -190,6 +190,16 @@ HTML_TEMPLATE = """
         .add-task-btn:active {
             background-color: #3d8b40;
         }
+        .frame-dedup-badge {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            background: #3d3d00;
+            color: #d4d400;
+            border: 1px solid #5c5c00;
+        }
     </style>
 </head>
 <body>
@@ -202,6 +212,7 @@ HTML_TEMPLATE = """
                 <h2>Current Frame & Prompt</h2>
                 <img id="currentFrame" alt="Current frame" />
                 <div class="timestamp" id="frameTimestamp"></div>
+                <div id="frameDedupBadge" class="frame-dedup-badge" style="display: none;"></div>
             </div>
             
             <div class="panel">
@@ -244,6 +255,13 @@ HTML_TEMPLATE = """
                     } else {
                         img.src = '';
                         timestamp.textContent = data.error || 'No frame available';
+                    }
+                    const dedupBadge = document.getElementById('frameDedupBadge');
+                    if (dedupBadge && data && data.dedup_status && data.dedup_status.consecutive_skips > 0) {
+                        dedupBadge.style.display = 'inline-block';
+                        dedupBadge.textContent = 'Scene unchanged — skipping analysis (' + data.dedup_status.consecutive_skips + ' frames skipped). No new outputs until the scene changes.';
+                    } else if (dedupBadge) {
+                        dedupBadge.style.display = 'none';
                     }
                     
                     if (data && data.prompt) {
@@ -569,9 +587,11 @@ def get_frame_and_prompt():
     if image_base64 is None:
         return jsonify({"error": "Failed to encode frame", "frame_base64": None, "prompt": latest_prompt or ""}), 500
     
+    dedup = ingestor.get_dedup_status()
     return jsonify({
         "frame_base64": image_base64,
-        "prompt": latest_prompt or ""
+        "prompt": latest_prompt or "",
+        "dedup_status": dedup,
     })
 
 

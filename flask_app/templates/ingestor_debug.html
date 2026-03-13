@@ -103,6 +103,17 @@
             margin-top: 6px;
         }
 
+        .frame-dedup-badge {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            background: #3d3d00;
+            color: #d4d400;
+            border: 1px solid #5c5c00;
+        }
+
         .prompt-pre {
             background: #1a1a1a;
             padding: 12px;
@@ -292,6 +303,7 @@
                         <h2>Current Frame</h2>
                         <img id="currentFrame" alt="Current frame" />
                         <div class="frame-timestamp" id="frameTimestamp"></div>
+                        <div id="frameDedupBadge" class="frame-dedup-badge" style="display: none;"></div>
                     </div>
                     <div class="debug-panel">
                         <h2>Ingestor Tasks</h2>
@@ -324,6 +336,13 @@
                 } else {
                     img.src = '';
                     ts.textContent = data.error || 'No frame available';
+                }
+                const dedupBadge = document.getElementById('frameDedupBadge');
+                if (dedupBadge && data.dedup_status && data.dedup_status.consecutive_skips > 0) {
+                    dedupBadge.style.display = 'inline-block';
+                    dedupBadge.textContent = `Scene unchanged — skipping analysis (${data.dedup_status.consecutive_skips} frames skipped). No new outputs until the scene changes.`;
+                } else if (dedupBadge) {
+                    dedupBadge.style.display = 'none';
                 }
                 if (data.prompt) {
                     prompt.textContent = data.prompt;

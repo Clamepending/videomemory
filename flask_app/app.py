@@ -1013,9 +1013,11 @@ def get_ingestor_frame_and_prompt(io_id):
         _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         image_base64 = base64.b64encode(buffer).decode('utf-8')
         
+        dedup = ingestor.get_dedup_status()
         return jsonify({
             'frame_base64': image_base64,
-            'prompt': latest_prompt or ''
+            'prompt': latest_prompt or '',
+            'dedup_status': dedup,
         })
     except Exception as e:
         flask_logger.error(f"Error in debug frame-and-prompt for {io_id}: {e}", exc_info=True)

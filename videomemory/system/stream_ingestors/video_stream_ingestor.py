@@ -72,7 +72,8 @@ class VideoStreamIngestor:
         # Frame deduplication: skip VLM calls when the frame hasn't changed
         self._last_processed_frame: Optional[Any] = None  # Last frame sent to VLM
         self._frame_diff_threshold: float = 3.0  # Mean absolute pixel difference threshold (0-255 scale)
-        self._frames_skipped: int = 0  # Counter for debugging
+        self._frames_skipped: int = 0  # Total frames skipped (lifetime)
+        self._consecutive_skips: int = 0  # Frames skipped since last VLM call (for UI)
         
         # # Rate limiting: track last request time (max 10 requests per minute = 6 seconds between requests)
         # self._last_request_time: float = 0.0
@@ -308,6 +309,7 @@ class VideoStreamIngestor:
 
                     if self._is_frame_duplicate(current_frame):
                         self._frames_skipped += 1
+                        self._consecutive_skips += 1
                         if self._frames_skipped % 100 == 1:
                             logger.info(
                                 "Skipping duplicate frames [camera=%s]: %d total skipped (diff < %.1f). "
@@ -325,6 +327,7 @@ class VideoStreamIngestor:
                         logger.info("First VLM inference attempt [camera=%s] (base_url from provider env)", self.camera_index)
                     results = await self._run_ml_inference(current_frame, prompt)
                     self._last_processed_frame = current_frame.copy()
+                    self._consecutive_skips = 0
 
                     if results:
                         results["processing_time_ms"] = round((time.time() - t0) * 1000)
@@ -711,6 +714,17 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
     def get_total_output_count(self) -> int:
         """Get the total number of outputs processed (for debugging)."""
         return self._total_output_count
+
+    def get_dedup_status(self) -> Dict[str, int]:
+        """Get frame deduplication status for UI display.
+        
+        Returns:
+            dict with frames_skipped (lifetime), consecutive_skips (since last VLM call)
+        """
+        return {
+            "frames_skipped": self._frames_skipped,
+            "consecutive_skips": self._consecutive_skips,
+        }
     
     def get_latest_frame(self) -> Optional[Any]:
         """Get the latest captured frame.
