@@ -450,9 +450,6 @@ For multiple task updates: {"task_updates": [{task_number: 0, task_note: "Clap c
 
 When task is complete: {"task_updates": [{task_number: 0, task_note: "Task completed - 10 claps counted", task_done: true}]}
 </instructions>"""
-        
-        # return "\n".join(tasks_lines) + "\n\n" + "\n".join(history_lines) + "\n\n" + instructions
-        # return "\n".join(tasks_lines) + "\n\n" + "\n".join(most_recent_lines) + "\n\n" + instructions
         return "\n".join(tasks_lines) + "\n\n" + instructions
     
     async def _run_ml_inference(self, frame: Any, prompt: str) -> Optional[Dict[str, Any]]:
