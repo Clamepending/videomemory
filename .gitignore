@@ -18,7 +18,7 @@ misc/
 .env
 
 # Database files
-data/
+*.db
 
 AgentDevelopmentKit_exploration/videomemory/logs/*
 
