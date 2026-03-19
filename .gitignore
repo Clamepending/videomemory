@@ -40,3 +40,5 @@ videomemory/experiments/*.jpeg
 videomemory/experiments/latency_results.json
 # Local launcher cache
 .cache/
+
+old/
