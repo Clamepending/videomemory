@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VideoMemory Offline Experiment Viewer</title>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --panel: #141925;
+      --panel-2: #1b2333;
+      --text: #e8edf7;
+      --muted: #9fb0cd;
+      --accent: #6ea8fe;
+      --ok: #61d095;
+      --warn: #f6c177;
+      --err: #f28b82;
+      --border: #263145;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .app {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+    .row {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 1100px) {
+      .row.two { grid-template-columns: 1.1fr 0.9fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    h1, h2, h3 {
+      margin: 0 0 10px 0;
+      font-weight: 600;
+    }
+    h1 { font-size: 18px; }
+    h2 { font-size: 15px; color: var(--muted); }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    input[type="text"], input[type="number"], input[type="file"], button, select {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+    input[type="text"] { min-width: 340px; }
+    button {
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .meta-grid {
+      display: grid;
+      gap: 6px 14px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .meta-item { font-size: 13px; }
+    .meta-key { color: var(--muted); margin-right: 6px; }
+    .status {
+      font-size: 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 2px 8px;
+      display: inline-block;
+    }
+    .status.processed { color: var(--ok); border-color: #2f6248; }
+    .status.skipped { color: var(--warn); border-color: #705523; }
+    .status.error { color: var(--err); border-color: #74403b; }
+    .image-wrap {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #0a0f18;
+      min-height: 220px;
+      display: grid;
+      place-items: center;
+    }
+    .image-wrap img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #0f1522;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      max-height: 320px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .hint { color: var(--muted); font-size: 12px; }
+    .notes-list {
+      max-height: 320px;
+      overflow: auto;
+      display: grid;
+      gap: 8px;
+    }
+    .note {
+      background: #101726;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 13px;
+    }
+    .note time {
+      color: var(--muted);
+      font-size: 12px;
+      display: block;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="card">
+      <h1>Offline Experiment Viewer</h1>
+      <div class="controls">
+        <input id="jsonFile" type="file" accept=".json,application/json" />
+        <input id="framesBase" type="text" value="../data/frames" />
+        <span class="hint">frames base path</span>
+      </div>
+      <div class="controls" style="margin-top:8px">
+        <input id="datasetName" type="text" value="house_tour" />
+        <button id="loadLatestBtn">Load Latest Dataset Output</button>
+        <span id="loadMsg" class="hint"></span>
+      </div>
+      <div class="controls" style="margin-top:8px">
+        <button id="prevBtn">Prev</button>
+        <button id="nextBtn">Next</button>
+        <label>Index <input id="idxInput" type="number" min="0" step="1" value="0" style="width:90px" /></label>
+        <select id="jumpStatus">
+          <option value="">Jump to status...</option>
+          <option value="processed">processed</option>
+          <option value="skipped">skipped</option>
+          <option value="error">error</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Experiment Metadata</h2>
+      <div id="metadata" class="meta-grid"></div>
+    </div>
+
+    <div class="row two">
+      <div class="card">
+        <h2>VLM Call</h2>
+        <div id="entryMeta" class="meta-grid" style="margin-bottom:10px"></div>
+        <div class="image-wrap">
+          <img id="frameImg" alt="Frame preview" />
+        </div>
+      </div>
+      <div class="card">
+        <h2>Task Notes</h2>
+        <div id="notes" class="notes-list"></div>
+      </div>
+    </div>
+
+    <div class="row two">
+      <div class="card">
+        <h2>Prompt (VLM Input)</h2>
+        <pre id="promptView"></pre>
+      </div>
+      <div class="card">
+        <h2>Model Output</h2>
+        <pre id="outputView"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const state = { data: null, index: 0 };
+
+    const el = {
+      file: document.getElementById('jsonFile'),
+      framesBase: document.getElementById('framesBase'),
+      datasetName: document.getElementById('datasetName'),
+      loadLatestBtn: document.getElementById('loadLatestBtn'),
+      loadMsg: document.getElementById('loadMsg'),
+      prev: document.getElementById('prevBtn'),
+      next: document.getElementById('nextBtn'),
+      idxInput: document.getElementById('idxInput'),
+      jumpStatus: document.getElementById('jumpStatus'),
+      metadata: document.getElementById('metadata'),
+      entryMeta: document.getElementById('entryMeta'),
+      img: document.getElementById('frameImg'),
+      prompt: document.getElementById('promptView'),
+      output: document.getElementById('outputView'),
+      notes: document.getElementById('notes')
+    };
+
+    function metaRow(key, value) {
+      const div = document.createElement('div');
+      div.className = 'meta-item';
+      const k = document.createElement('span');
+      k.className = 'meta-key';
+      k.textContent = key + ':';
+      const v = document.createElement('span');
+      if (value instanceof HTMLElement) v.appendChild(value);
+      else v.textContent = value == null ? 'null' : String(value);
+      div.appendChild(k);
+      div.appendChild(v);
+      return div;
+    }
+
+    function statusBadge(status) {
+      const s = document.createElement('span');
+      s.className = `status ${status || ''}`;
+      s.textContent = status || 'unknown';
+      return s;
+    }
+
+    function clampIndex(i) {
+      if (!state.data || !Array.isArray(state.data.vlm_io) || state.data.vlm_io.length === 0) return 0;
+      return Math.max(0, Math.min(i, state.data.vlm_io.length - 1));
+    }
+
+    function renderMetadata() {
+      el.metadata.innerHTML = '';
+      const md = state.data?.metadata || {};
+      const rows = [
+        ['frame_dir', md.frame_dir],
+        ['task_description', md.task_description],
+        ['model_provider', md.model_provider],
+        ['model_name', md.model_name],
+        ['target_resolution', Array.isArray(md.target_resolution) ? md.target_resolution.join('x') : md.target_resolution],
+        ['total_frames', md.total_frames],
+        ['processed', md.processed],
+        ['skipped', md.skipped],
+        ['errors', md.errors],
+        ['avg_inference_ms', md.avg_inference_ms],
+        ['min_inference_ms', md.min_inference_ms],
+        ['max_inference_ms', md.max_inference_ms],
+        ['total_time_s', md.total_time_s]
+      ];
+      rows.forEach(([k, v]) => el.metadata.appendChild(metaRow(k, v)));
+    }
+
+    function frameUrl(filename) {
+      const md = state.data?.metadata || {};
+      const frameDir = md.frame_dir || '';
+      const base = (el.framesBase.value || '../data/frames').replace(/\/$/, '');
+      return `${base}/${frameDir}/${filename}`;
+    }
+
+    function renderEntry() {
+      if (!state.data || !state.data.vlm_io?.length) return;
+      state.index = clampIndex(state.index);
+      const entry = state.data.vlm_io[state.index];
+      el.idxInput.value = state.index;
+
+      el.entryMeta.innerHTML = '';
+      el.entryMeta.appendChild(metaRow('index', state.index));
+      el.entryMeta.appendChild(metaRow('frame_index', entry.frame_index));
+      el.entryMeta.appendChild(metaRow('filename', entry.filename));
+      el.entryMeta.appendChild(metaRow('status', statusBadge(entry.status)));
+      el.entryMeta.appendChild(metaRow('processing_time_ms', entry.processing_time_ms ?? '-'));
+      el.entryMeta.appendChild(metaRow('reason', entry.reason ?? '-'));
+      el.entryMeta.appendChild(metaRow('error', entry.error ?? '-'));
+
+      el.prompt.textContent = entry.prompt || '(no prompt saved)';
+      el.output.textContent = JSON.stringify(entry.vlm_output ?? {}, null, 2) || '{}';
+
+      if (entry.filename) {
+        el.img.src = frameUrl(entry.filename);
+        el.img.alt = entry.filename;
+      } else {
+        el.img.removeAttribute('src');
+        el.img.alt = 'No filename';
+      }
+
+      el.prev.disabled = state.index <= 0;
+      el.next.disabled = state.index >= state.data.vlm_io.length - 1;
+    }
+
+    function renderNotes() {
+      el.notes.innerHTML = '';
+      const notes = state.data?.task_notes || [];
+      if (!notes.length) {
+        const p = document.createElement('div');
+        p.className = 'hint';
+        p.textContent = 'No task notes.';
+        el.notes.appendChild(p);
+        return;
+      }
+      notes.forEach((n) => {
+        const card = document.createElement('div');
+        card.className = 'note';
+        const t = document.createElement('time');
+        t.textContent = n.timestamp || '';
+        const c = document.createElement('div');
+        c.textContent = n.content || '';
+        card.appendChild(t);
+        card.appendChild(c);
+        el.notes.appendChild(card);
+      });
+    }
+
+    function renderAll() {
+      renderMetadata();
+      renderEntry();
+      renderNotes();
+    }
+
+    function loadJsonText(text) {
+      let data;
+      try { data = JSON.parse(text); }
+      catch (e) { alert(`Invalid JSON: ${e.message}`); return; }
+
+      if (!data || !Array.isArray(data.vlm_io)) {
+        alert('JSON missing "vlm_io" array.');
+        return;
+      }
+      state.data = data;
+      state.index = 0;
+      renderAll();
+    }
+
+    async function loadJsonFromUrl(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Failed to fetch ${url} (${res.status})`);
+      const text = await res.text();
+      loadJsonText(text);
+      return url;
+    }
+
+    function listJsonFilesFromDirHtml(html) {
+      const matches = [...html.matchAll(/href="([^"]+\.json)"/g)];
+      return matches.map((m) => m[1]).filter((f) => !f.startsWith('/'));
+    }
+
+    async function loadLatestForDataset(dataset) {
+      const dirUrl = '../outputs/frame_sequence_experiment/';
+      const res = await fetch(dirUrl);
+      if (!res.ok) throw new Error(`Could not list outputs directory (${res.status})`);
+      const html = await res.text();
+      const allJson = listJsonFilesFromDirHtml(html);
+      const prefix = `${dataset}_`;
+      const candidates = allJson.filter((f) => f.startsWith(prefix));
+      if (!candidates.length) {
+        throw new Error(`No output JSON found for dataset "${dataset}"`);
+      }
+      candidates.sort();
+      const latest = candidates[candidates.length - 1];
+      const url = dirUrl + latest;
+      await loadJsonFromUrl(url);
+      return latest;
+    }
+
+    el.file.addEventListener('change', () => {
+      const f = el.file.files?.[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () => loadJsonText(String(r.result || ''));
+      r.readAsText(f);
+    });
+    el.loadLatestBtn.addEventListener('click', async () => {
+      const dataset = (el.datasetName.value || '').trim();
+      if (!dataset) return;
+      el.loadMsg.textContent = 'Loading...';
+      try {
+        const loaded = await loadLatestForDataset(dataset);
+        el.loadMsg.textContent = `Loaded ${loaded}`;
+      } catch (e) {
+        el.loadMsg.textContent = e.message || String(e);
+      }
+    });
+
+    el.prev.addEventListener('click', () => { state.index = clampIndex(state.index - 1); renderEntry(); });
+    el.next.addEventListener('click', () => { state.index = clampIndex(state.index + 1); renderEntry(); });
+    el.idxInput.addEventListener('change', () => {
+      state.index = clampIndex(Number(el.idxInput.value || 0));
+      renderEntry();
+    });
+    el.jumpStatus.addEventListener('change', () => {
+      const wanted = el.jumpStatus.value;
+      if (!wanted || !state.data?.vlm_io?.length) return;
+      const i = state.data.vlm_io.findIndex((e) => e.status === wanted);
+      if (i >= 0) {
+        state.index = i;
+        renderEntry();
+      }
+      el.jumpStatus.value = '';
+    });
+    el.framesBase.addEventListener('change', renderEntry);
+
+    // URL params:
+    //   ?dataset=house_tour  -> auto-load latest matching output
+    //   ?file=house_tour_count_chairs_YYYYMMDD_HHMMSS.json -> load exact file
+    (async () => {
+      const params = new URLSearchParams(window.location.search);
+      const dataset = params.get('dataset');
+      const file = params.get('file');
+      if (dataset) el.datasetName.value = dataset;
+
+      try {
+        if (file) {
+          await loadJsonFromUrl(`../outputs/frame_sequence_experiment/${file}`);
+          el.loadMsg.textContent = `Loaded ${file}`;
+        } else if (dataset) {
+          const loaded = await loadLatestForDataset(dataset);
+          el.loadMsg.textContent = `Loaded ${loaded}`;
+        }
+      } catch (e) {
+        el.loadMsg.textContent = e.message || String(e);
+      }
+    })();
+  </script>
+</body>
+</html>

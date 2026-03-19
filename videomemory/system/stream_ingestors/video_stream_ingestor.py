@@ -75,9 +75,9 @@ class VideoStreamIngestor:
         self._frames_skipped: int = 0  # Total frames skipped (lifetime)
         self._consecutive_skips: int = 0  # Frames skipped since last VLM call (for UI)
         
-        # # Rate limiting: track last request time (max 10 requests per minute = 6 seconds between requests)
-        # self._last_request_time: float = 0.0
-        # self._min_request_interval: float = 0.1  # 600 requests per minute max
+        # Frame capture failure tracking (for network stream reconnection)
+        self._consecutive_capture_failures: int = 0
+        self._max_capture_failures: int = 30 if isinstance(camera_source, str) else 10
         
         # Store model provider (already initialized in __init__)
         self._model_provider = model_provider
@@ -229,6 +229,114 @@ class VideoStreamIngestor:
                 break  # Blocked = caught up to live
         return self._camera.retrieve()
 
+    def _frame_capture(self) -> Optional[Any]:
+        """Capture, validate, and resize a single frame from the camera.
+
+        Synchronous — reads directly from the cv2.VideoCapture handle.
+        The capture loop calls this via asyncio.to_thread().
+
+        Returns the processed frame (resized to target resolution), or None
+        if no valid frame could be read.
+        """
+        ret, current_frame = self._read_latest_frame()
+        if not ret:
+            self._consecutive_capture_failures += 1
+            return None
+
+        self._consecutive_capture_failures = 0
+
+        if current_frame is None or current_frame.size == 0:
+            logger.debug(f"Invalid frame from camera source={self.camera_source}")
+            return None
+
+        if current_frame.shape[1] != self._target_resolution[0] or current_frame.shape[0] != self._target_resolution[1]:
+            current_frame = cv2.resize(current_frame, self._target_resolution, interpolation=cv2.INTER_LINEAR)
+
+        if current_frame.size > 0:
+            self._latest_frame = current_frame.copy()
+
+        return current_frame
+
+    def _VLM_processing(self, frame) -> Optional[Dict[str, Any]]:
+        """Run VLM processing on a single frame: dedup, prompt, inference, result handling.
+
+        Synchronous — calls the model provider's _sync_generate_content directly.
+        Reusable from both the live capture loop (via asyncio.to_thread) and
+        offline scripts (called directly).
+
+        Args:
+            frame: OpenCV frame (already resized to target resolution), or None.
+
+        Returns:
+            Results dict with task_updates, processing_time_ms, prompt, and frame
+            if VLM was called and returned results. None if skipped (no frame,
+            no tasks, duplicate frame, or inference error).
+        """
+        if frame is None or not self._tasks_list:
+            return None
+
+        self._process_loop_ticks += 1
+
+        if self._process_loop_ticks % 100 == 0:
+            frame_mean = frame.mean()
+            logger.debug(
+                f"Camera index={self.camera_index}: frame shape={frame.shape}, "
+                f"mean={frame_mean:.2f}, min={frame.min()}, max={frame.max()}"
+            )
+
+        if self._is_frame_duplicate(frame):
+            self._frames_skipped += 1
+            self._consecutive_skips += 1
+            if self._frames_skipped % 100 == 1:
+                logger.info(
+                    "Skipping duplicate frames [camera=%s]: %d total skipped (diff < %.1f). "
+                    "If the scene is static, the model won't be called.",
+                    self.camera_index,
+                    self._frames_skipped,
+                    self._frame_diff_threshold,
+                )
+            return None
+
+        prompt = self._build_prompt()
+        image_base64 = self._frame_to_base64(frame)
+        if not image_base64:
+            return None
+
+        t0 = time.time()
+        if self._total_output_count == 0:
+            logger.info("First VLM inference attempt [camera=%s] (base_url from provider env)", self.camera_index)
+
+        try:
+            response: VideoIngestorOutput = self._model_provider._sync_generate_content(
+                image_base64=image_base64,
+                prompt=prompt,
+                response_model=VideoIngestorOutput,
+            )
+            results = response.model_dump()
+        except Exception as e:
+            import httpx
+            if isinstance(e, (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
+                logger.warning(
+                    "LLM inference network error (will skip this frame) [camera=%s]: %s: %s.",
+                    self.camera_index, type(e).__name__, e,
+                )
+            else:
+                logger.error(f"LLM inference error [camera={self.camera_index}]: {e}", exc_info=True)
+            results = None
+
+        self._last_processed_frame = frame.copy()
+        self._consecutive_skips = 0
+
+        if results:
+            results["processing_time_ms"] = round((time.time() - t0) * 1000)
+            results["frame"] = frame.copy()
+            results["prompt"] = prompt
+            self._output_history.append(results)
+            self._total_output_count += 1
+            self._process_ml_results(results)
+
+        return results
+
     async def _capture_loop(self):
         """Capture frames and run VLM processing in a single loop.
 
@@ -262,85 +370,22 @@ class VideoStreamIngestor:
                     break
                 await asyncio.sleep(0.1)
 
-            consecutive_failures = 0
-            max_consecutive_failures = 30 if self.is_network_stream else 10
+            self._consecutive_capture_failures = 0
 
             while self._running:
                 try:
-                    # --- Frame capture ---
-                    ret, current_frame = await asyncio.to_thread(self._read_latest_frame)
-                    if not ret:
-                        consecutive_failures += 1
-                        if self.is_network_stream and consecutive_failures >= max_consecutive_failures:
-                            logger.warning(f"Network stream {self.camera_source}: {consecutive_failures} consecutive failures, attempting reconnect...")
+                    frame = await asyncio.to_thread(self._frame_capture)
+                    if frame is None:
+                        if self.is_network_stream and self._consecutive_capture_failures >= self._max_capture_failures:
                             reopened = await self._reconnect_network_stream()
                             if reopened:
-                                consecutive_failures = 0
-                            continue
+                                self._consecutive_capture_failures = 0
                         await asyncio.sleep(0.05)
                         continue
-
-                    consecutive_failures = 0
-
-                    if current_frame is None or current_frame.size == 0:
-                        logger.debug(f"Invalid frame from camera source={self.camera_source}")
-                        continue
-
-                    if current_frame.shape[1] != self._target_resolution[0] or current_frame.shape[0] != self._target_resolution[1]:
-                        current_frame = cv2.resize(current_frame, self._target_resolution, interpolation=cv2.INTER_LINEAR)
-
-                    if current_frame.size > 0:
-                        self._latest_frame = current_frame.copy()
-
-                    # --- Skip VLM processing when there are no tasks ---
-                    if not self._tasks_list:
-                        await asyncio.sleep(0.05)
-                        continue
-
-                    # --- VLM processing ---
-                    self._process_loop_ticks += 1
-
-                    if self._process_loop_ticks % 100 == 0:
-                        frame_mean = current_frame.mean()
-                        logger.debug(
-                            f"Camera index={self.camera_index}: frame shape={current_frame.shape}, "
-                            f"mean={frame_mean:.2f}, min={current_frame.min()}, max={current_frame.max()}"
-                        )
-
-                    if self._is_frame_duplicate(current_frame):
-                        self._frames_skipped += 1
-                        self._consecutive_skips += 1
-                        if self._frames_skipped % 100 == 1:
-                            logger.info(
-                                "Skipping duplicate frames [camera=%s]: %d total skipped (diff < %.1f). "
-                                "If the scene is static, the model won't be called.",
-                                self.camera_index,
-                                self._frames_skipped,
-                                self._frame_diff_threshold,
-                            )
-                        await asyncio.sleep(0.1)
-                        continue
-
-                    prompt = self._build_prompt()
-                    t0 = time.time()
-                    if self._total_output_count == 0:
-                        logger.info("First VLM inference attempt [camera=%s] (base_url from provider env)", self.camera_index)
-                    results = await self._run_ml_inference(current_frame, prompt)
-                    self._last_processed_frame = current_frame.copy()
-                    self._consecutive_skips = 0
-
-                    if results:
-                        results["processing_time_ms"] = round((time.time() - t0) * 1000)
-                        results["frame"] = current_frame.copy()
-                        results["prompt"] = prompt
-                        self._output_history.append(results)
-                        self._total_output_count += 1
-                        await self._process_ml_results(results)
-
+                    await asyncio.to_thread(self._VLM_processing, frame)
                 except Exception as e:
                     logger.error(f"Error in capture/process loop for camera index={self.camera_index}: {e}", exc_info=True)
                     await asyncio.sleep(0.1)
-                    continue
 
             logger.info(f"Stopped capture loop for camera index={self.camera_index}")
 
@@ -511,7 +556,7 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
                 logger.error(f"LLM inference error [camera={self.camera_index}]: {e}", exc_info=True)
             return None
     
-    async def _process_ml_results(self, ml_results: Dict[str, Any]):
+    def _process_ml_results(self, ml_results: Dict[str, Any]):
         """Process ML inference results: update task notes and queue actions."""
         if not ml_results:
             return
