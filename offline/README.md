@@ -19,14 +19,11 @@ Run experiment + launch viewer in one command:
 ./offline/scripts/run_frame_sequence_experiment.sh --video_name house_tour --task "count chairs" --viewer_port 9000
 ```
 
-With model override:
-```bash
-./offline/scripts/run_frame_sequence_experiment.sh --video_name house_tour --task "count chairs" --viewer_port 9000 --model local-vllm
-```
+This script always runs with `local-vllm` for inference.
 
 ## Data preprocessing
 
 Extract frames from mp4:
 ```bash
-./offline/data/video_to_frames.sh house_tour
+./offline/scripts/video_to_frames.sh house_tour
 ```

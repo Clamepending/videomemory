@@ -96,22 +96,41 @@ def run_experiment(frame_dir_name: str, task_desc: str, model_name: str | None, 
         skipped_before = ingestor._frames_skipped
         result = ingestor._VLM_processing(frame)
 
-        if result:
+        if result is not None:
             elapsed_ms = result.get("processing_time_ms", 0)
-            updates_summary = [u["task_note"][:80] for u in result.get("task_updates", [])]
-            print(f"{label}  -> {elapsed_ms}ms  {updates_summary}")
+            task_updates = result.get("task_updates", [])
+            updates_summary = [u["task_note"][:80] for u in task_updates]
+            if task_updates:
+                print(f"{label}  -> {elapsed_ms}ms  {updates_summary}")
+            else:
+                print(f"{label}  -> {elapsed_ms}ms  model_returned_empty_updates")
             entry.update(
                 status="processed",
+                processing_kind="model_response",
+                model_called=True,
+                model_returned_empty_updates=(len(task_updates) == 0),
                 processing_time_ms=elapsed_ms,
                 prompt=result.get("prompt", ""),
-                vlm_output={"task_updates": result.get("task_updates", [])},
+                vlm_output={"task_updates": task_updates},
             )
         elif ingestor._frames_skipped > skipped_before:
             print(f"{label}  -> skipped (duplicate)")
-            entry.update(status="skipped", reason="duplicate_frame")
+            entry.update(
+                status="skipped",
+                processing_kind="programmatic_skip",
+                model_called=False,
+                model_returned_empty_updates=False,
+                reason="duplicate_frame",
+            )
         else:
             print(f"{label}  -> no VLM result")
-            entry.update(status="error", error="VLM returned no results")
+            entry.update(
+                status="error",
+                processing_kind="inference_error",
+                model_called=True,
+                model_returned_empty_updates=False,
+                error="VLM returned no results",
+            )
 
         vlm_io.append(entry)
 
@@ -128,6 +147,15 @@ def run_experiment(frame_dir_name: str, task_desc: str, model_name: str | None, 
         "dedup_threshold": ingestor._frame_diff_threshold,
         "total_frames": len(frames),
         "processed": len(processed_entries),
+        "processed_with_empty_updates": sum(
+            1 for e in processed_entries if e.get("model_returned_empty_updates") is True
+        ),
+        "processed_with_nonempty_updates": sum(
+            1 for e in processed_entries if e.get("model_returned_empty_updates") is False
+        ),
+        "programmatic_skips": sum(
+            1 for e in vlm_io if e.get("processing_kind") == "programmatic_skip"
+        ),
         "skipped": sum(1 for e in vlm_io if e["status"] == "skipped"),
         "errors": sum(1 for e in vlm_io if e["status"] == "error"),
         "total_time_s": total_elapsed_s,
