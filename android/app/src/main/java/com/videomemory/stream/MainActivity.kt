@@ -3,65 +3,73 @@ package com.videomemory.stream
 import android.Manifest
 import android.content.res.Configuration
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.YuvImage
+import android.media.Image
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
-import android.view.SurfaceHolder
+import android.util.Size
 import android.view.View
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.widget.doAfterTextChanged
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanner
-import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.pedro.common.ConnectChecker
-import com.pedro.library.rtmp.RtmpStream
 import com.videomemory.stream.databinding.ActivityMainBinding
+import java.io.ByteArrayOutputStream
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.util.Collections
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 
-class MainActivity : AppCompatActivity(), ConnectChecker {
+@ExperimentalGetImage
+class MainActivity : AppCompatActivity() {
 
-    private enum class Quality(val width: Int, val height: Int, val fps: Int, val bitrate: Int) {
-        LOW(640, 480, 10, 400_000),
-        MEDIUM(1280, 720, 15, 1_200_000),
-        HIGH(1280, 720, 30, 2_500_000)
+    private data class SnapshotEndpoint(
+        val host: String,
+        val label: String,
+        val priority: Int,
+    )
+
+    private enum class Quality(val width: Int, val height: Int) {
+        LOW(640, 480),
+        MEDIUM(1280, 720),
+        HIGH(1920, 1080),
     }
 
     private lateinit var binding: ActivityMainBinding
-    private var rtmpStream: RtmpStream? = null
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var snapshotServer: SnapshotHttpServer? = null
+    private val latestSnapshot = AtomicReference<ByteArray?>(null)
+    private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var streaming = false
     private var starting = false
+    private var pendingStartAfterPermission = false
+    private var serverUrl: String? = null
     private var selectedQuality = Quality.MEDIUM
-    private var pendingStartUrl: String? = null
-    private val qrScanner: GmsBarcodeScanner by lazy {
-        val options = GmsBarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-            .enableAutoZoom()
-            .build()
-        GmsBarcodeScanning.getClient(this, options)
-    }
+    private var lastSnapshotAtMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         requestPermissions()
-        binding.preview.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(h: SurfaceHolder) {
-                startPendingStreamIfReady()
-            }
-            override fun surfaceChanged(h: SurfaceHolder, format: Int, width: Int, height: Int) {
-                startPendingStreamIfReady()
-            }
-            override fun surfaceDestroyed(h: SurfaceHolder) {}
-        })
-        binding.btnStart.setOnClickListener { startStream() }
-        binding.btnStop.setOnClickListener { stopStream() }
-        binding.btnScanQr.setOnClickListener { scanQrCode() }
+        binding.btnStart.setOnClickListener { startServer() }
+        binding.btnStop.setOnClickListener { stopServer() }
         binding.themeToggleButton.setOnClickListener { toggleThemeMode() }
-        binding.urlInput.doAfterTextChanged { renderStreamingState() }
         binding.qualityGroup.setOnCheckedChangeListener { _, checkedId ->
             selectedQuality = when (checkedId) {
                 R.id.qualityLow -> Quality.LOW
@@ -80,129 +88,152 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     }
 
     private fun requestPermissions() {
-        val perms = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        val perms = arrayOf(Manifest.permission.CAMERA)
         if (perms.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
-            ActivityCompat.requestPermissions(this, perms, 0)
+            ActivityCompat.requestPermissions(this, perms, CAMERA_PERMISSION_REQUEST)
         }
     }
 
-    private fun startStream() {
+    private fun hasCameraPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun startServer() {
         if (streaming || starting) return
-        val url = binding.urlInput.text.toString().trim()
-        if (url.isBlank()) {
-            Toast.makeText(this, "Enter RTMP URL", Toast.LENGTH_SHORT).show()
+        if (!hasCameraPermission()) {
+            pendingStartAfterPermission = true
+            requestPermissions()
             return
         }
-        if (!isSupportedRtmpUrl(url)) {
-            Toast.makeText(this, "URL must start with rtmp:// or rtmps://", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (rtmpStream == null) {
-            val q = selectedQuality
-            rtmpStream = RtmpStream(this, this)
-            val ok = rtmpStream!!.prepareVideo(
-                width = q.width,
-                height = q.height,
-                fps = q.fps,
-                bitrate = q.bitrate,
-                rotation = 90
-            ) &&
-                rtmpStream!!.prepareAudio(48000, true, 128 * 1024)
-            if (!ok) {
-                Toast.makeText(this, "Prepare failed", Toast.LENGTH_SHORT).show()
-                rtmpStream = null
-                return
-            }
-        }
-        pendingStartUrl = url
         starting = true
+        latestSnapshot.set(null)
         renderStreamingState()
-        startPendingStreamIfReady()
+        startCameraAndServer()
     }
 
-    private fun stopStream() {
-        pendingStartUrl = null
-        starting = false
-        rtmpStream?.stopStream()
-        rtmpStream?.stopPreview()
-        streaming = false
-        renderStreamingState()
-    }
-
-    private fun scanQrCode() {
-        if (streaming || starting) return
-        qrScanner.startScan()
-            .addOnSuccessListener { barcode ->
-                val raw = barcode.rawValue?.trim().orEmpty()
-                val rtmpUrl = extractRtmpUrl(raw)
-                if (rtmpUrl == null) {
-                    Toast.makeText(this, getString(R.string.scan_qr_invalid), Toast.LENGTH_SHORT).show()
-                    return@addOnSuccessListener
+    private fun startCameraAndServer() {
+        val providerFuture = ProcessCameraProvider.getInstance(this)
+        providerFuture.addListener({
+            try {
+                cameraProvider = providerFuture.get()
+                bindCameraUseCases()
+                val server = snapshotServer ?: SnapshotHttpServer(SERVER_PORT) {
+                    latestSnapshot.get()
+                }.also {
+                    snapshotServer = it
                 }
-                binding.urlInput.setText(rtmpUrl)
-                binding.urlInput.setSelection(rtmpUrl.length)
-                Toast.makeText(this, getString(R.string.scan_qr_success), Toast.LENGTH_SHORT).show()
+                server.start()
+                serverUrl = buildServerUrlDisplay()
+                streaming = true
+                starting = false
+                renderStreamingState()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start snapshot server", e)
+                starting = false
+                serverUrl = null
+                snapshotServer?.stop()
+                snapshotServer = null
+                cameraProvider?.unbindAll()
+                Toast.makeText(this, "Failed to start the snapshot server", Toast.LENGTH_SHORT).show()
+                renderStreamingState()
             }
-            .addOnFailureListener { error ->
-                Log.e(TAG, "QR scan failed", error)
-                Toast.makeText(this, getString(R.string.scan_qr_error), Toast.LENGTH_SHORT).show()
-            }
+        }, ContextCompat.getMainExecutor(this))
     }
 
-    override fun onConnectionStarted(url: String) {}
-    override fun onConnectionSuccess() {
-        runOnUiThread { Toast.makeText(this, "Connected", Toast.LENGTH_SHORT).show() }
+    private fun bindCameraUseCases() {
+        val provider = cameraProvider ?: return
+        val quality = selectedQuality
+
+        val preview = Preview.Builder()
+            .build()
+            .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
+
+        val analysis = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setTargetResolution(Size(quality.width, quality.height))
+            .build()
+            .also {
+                it.setAnalyzer(cameraExecutor, this::analyzeFrame)
+            }
+
+        provider.unbindAll()
+        provider.bindToLifecycle(
+            this,
+            CameraSelector.DEFAULT_BACK_CAMERA,
+            preview,
+            analysis,
+        )
     }
-    override fun onConnectionFailed(reason: String) {
-        Log.e(TAG, "Connection failed: $reason")
-        runOnUiThread {
-            Toast.makeText(this, "Failed: $reason", Toast.LENGTH_LONG).show()
-            stopStream()
+
+    private fun analyzeFrame(imageProxy: ImageProxy) {
+        try {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastSnapshotAtMs < SNAPSHOT_INTERVAL_MS) return
+            val jpeg = imageProxyToJpeg(imageProxy, SNAPSHOT_JPEG_QUALITY) ?: return
+            latestSnapshot.set(jpeg)
+            lastSnapshotAtMs = now
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to encode snapshot frame", e)
+        } finally {
+            imageProxy.close()
         }
     }
-    override fun onDisconnect() {
-        runOnUiThread { if (streaming) stopStream() }
+
+    private fun stopServer() {
+        pendingStartAfterPermission = false
+        starting = false
+        streaming = false
+        serverUrl = null
+        latestSnapshot.set(null)
+        snapshotServer?.stop()
+        snapshotServer = null
+        cameraProvider?.unbindAll()
+        renderStreamingState()
     }
-    override fun onAuthError() {
-        runOnUiThread { Toast.makeText(this, "Auth error", Toast.LENGTH_SHORT).show() }
-    }
-    override fun onAuthSuccess() {}
-    override fun onNewBitrate(bitrate: Long) {}
 
     override fun onDestroy() {
-        rtmpStream?.release()
-        rtmpStream = null
+        stopServer()
+        cameraExecutor.shutdown()
         super.onDestroy()
     }
 
-    private fun extractRtmpUrl(raw: String): String? {
-        if (raw.isBlank()) return null
-        val embedded = Regex("""rtmps?://\S+""", RegexOption.IGNORE_CASE).find(raw)?.value ?: raw
-        val cleaned = embedded.trim().trimEnd('.', ',', ';', ')', ']')
-        return if (
-            cleaned.startsWith("rtmp://", ignoreCase = true) ||
-            cleaned.startsWith("rtmps://", ignoreCase = true)
-        ) {
-            cleaned
-        } else {
-            null
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != CAMERA_PERMISSION_REQUEST) return
+        val granted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+        if (!granted) {
+            pendingStartAfterPermission = false
+            Toast.makeText(this, "Camera permission is required", Toast.LENGTH_SHORT).show()
+            renderStreamingState()
+            return
+        }
+        if (pendingStartAfterPermission) {
+            pendingStartAfterPermission = false
+            startServer()
         }
     }
 
     private fun renderStreamingState() {
         val active = streaming || starting
-        val hasUrl = !binding.urlInput.text.isNullOrBlank()
-        binding.streamControlsRow.visibility = if (hasUrl || active) View.VISIBLE else View.GONE
+        binding.streamControlsRow.visibility = View.VISIBLE
         binding.btnStart.visibility = if (!active) View.VISIBLE else View.GONE
         binding.btnStop.visibility = if (active) View.VISIBLE else View.GONE
         binding.previewCard.visibility = if (active) View.VISIBLE else View.GONE
-        binding.btnStart.isEnabled = !active && hasUrl
+        binding.btnStart.isEnabled = !active
         binding.btnStop.isEnabled = active
-        binding.urlInput.isEnabled = !active
-        binding.btnScanQr.isEnabled = !active
         binding.qualityLow.isEnabled = !active
         binding.qualityMedium.isEnabled = !active
         binding.qualityHigh.isEnabled = !active
+        binding.tvServerUrl.text = when {
+            active && !serverUrl.isNullOrBlank() -> serverUrl
+            active -> getString(R.string.server_starting)
+            else -> getString(R.string.server_address_default)
+        }
         if (active) {
             binding.statusText.text = getString(R.string.status_streaming)
             binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.status_live_text))
@@ -214,9 +245,170 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         }
     }
 
-    private fun isSupportedRtmpUrl(url: String): Boolean {
-        return url.startsWith("rtmp://", ignoreCase = true) ||
-            url.startsWith("rtmps://", ignoreCase = true)
+    private fun imageProxyToJpeg(imageProxy: ImageProxy, quality: Int): ByteArray? {
+        val mediaImage = imageProxy.image ?: return null
+        val nv21 = yuv420888ToNv21(mediaImage)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, mediaImage.width, mediaImage.height, null)
+        val output = ByteArrayOutputStream()
+        val ok = yuvImage.compressToJpeg(
+            Rect(0, 0, mediaImage.width, mediaImage.height),
+            quality,
+            output,
+        )
+        if (!ok) return null
+        var jpegBytes = output.toByteArray()
+        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+        if (rotationDegrees == 0) return jpegBytes
+
+        val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size) ?: return jpegBytes
+        val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+        val rotatedBitmap = Bitmap.createBitmap(
+            bitmap,
+            0,
+            0,
+            bitmap.width,
+            bitmap.height,
+            matrix,
+            true,
+        )
+        val rotatedOutput = ByteArrayOutputStream()
+        rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, quality, rotatedOutput)
+        bitmap.recycle()
+        rotatedBitmap.recycle()
+        jpegBytes = rotatedOutput.toByteArray()
+        return jpegBytes
+    }
+
+    private fun yuv420888ToNv21(image: Image): ByteArray {
+        val ySize = image.width * image.height
+        val uvSize = image.width * image.height / 4
+        val nv21 = ByteArray(ySize + uvSize * 2)
+
+        copyPlane(image.planes[0], image.width, image.height, nv21, 0, 1)
+        copyPlane(image.planes[2], image.width / 2, image.height / 2, nv21, ySize, 2)
+        copyPlane(image.planes[1], image.width / 2, image.height / 2, nv21, ySize + 1, 2)
+        return nv21
+    }
+
+    private fun copyPlane(
+        plane: Image.Plane,
+        width: Int,
+        height: Int,
+        out: ByteArray,
+        offset: Int,
+        pixelStrideOut: Int,
+    ) {
+        val buffer = plane.buffer
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val rowData = ByteArray(rowStride)
+        var outputOffset = offset
+
+        buffer.rewind()
+        for (row in 0 until height) {
+            val bytesPerRow = if (pixelStride == 1 && pixelStrideOut == 1) {
+                width
+            } else {
+                (width - 1) * pixelStride + 1
+            }
+            buffer.get(rowData, 0, bytesPerRow)
+            var inputOffset = 0
+            for (col in 0 until width) {
+                out[outputOffset] = rowData[inputOffset]
+                outputOffset += pixelStrideOut
+                inputOffset += pixelStride
+            }
+            if (row < height - 1) {
+                val skip = rowStride - bytesPerRow
+                if (skip > 0) {
+                    buffer.position(buffer.position() + skip)
+                }
+            }
+        }
+    }
+
+    private fun buildServerUrlDisplay(): String {
+        val endpoints = findSnapshotEndpoints()
+        if (endpoints.isEmpty()) {
+            return snapshotUrlFor("127.0.0.1")
+        }
+        if (endpoints.size == 1) {
+            return snapshotUrlFor(endpoints.first().host)
+        }
+        return endpoints.joinToString("\n\n") { endpoint ->
+            "${endpoint.label}\n${snapshotUrlFor(endpoint.host)}"
+        }
+    }
+
+    private fun findSnapshotEndpoints(): List<SnapshotEndpoint> {
+        return try {
+            val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+            val bestByHost = linkedMapOf<String, SnapshotEndpoint>()
+            for (networkInterface in interfaces) {
+                if (!networkInterface.isUp || networkInterface.isLoopback) continue
+                val interfaceName = buildString {
+                    append(networkInterface.name.orEmpty().lowercase())
+                    append(' ')
+                    append(networkInterface.displayName.orEmpty().lowercase())
+                }
+                val addresses = Collections.list(networkInterface.inetAddresses)
+                for (address in addresses) {
+                    if (
+                        address !is Inet4Address ||
+                        address.isLoopbackAddress ||
+                        address.isLinkLocalAddress
+                    ) {
+                        continue
+                    }
+                    val hostAddress = address.hostAddress ?: continue
+                    val endpoint = classifySnapshotEndpoint(interfaceName, hostAddress)
+                    val existing = bestByHost[hostAddress]
+                    if (existing == null || endpoint.priority < existing.priority) {
+                        bestByHost[hostAddress] = endpoint
+                    }
+                }
+            }
+            bestByHost.values.sortedWith(
+                compareBy<SnapshotEndpoint> { it.priority }.thenBy { it.host },
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not determine device IPs", e)
+            emptyList()
+        }
+    }
+
+    private fun classifySnapshotEndpoint(interfaceName: String, hostAddress: String): SnapshotEndpoint {
+        val priorityAndLabel = when {
+            interfaceName.contains("tailscale") || isTailscaleIpv4(hostAddress) -> {
+                0 to getString(R.string.server_address_tailscale)
+            }
+            interfaceName.contains("wlan") || interfaceName.contains("wifi") -> {
+                1 to getString(R.string.server_address_wifi)
+            }
+            interfaceName.contains("eth") -> {
+                2 to getString(R.string.server_address_ethernet)
+            }
+            else -> {
+                3 to getString(R.string.server_address_other)
+            }
+        }
+        return SnapshotEndpoint(
+            host = hostAddress,
+            label = priorityAndLabel.second,
+            priority = priorityAndLabel.first,
+        )
+    }
+
+    private fun isTailscaleIpv4(hostAddress: String): Boolean {
+        val octets = hostAddress.split('.')
+        if (octets.size != 4) return false
+        val first = octets.getOrNull(0)?.toIntOrNull() ?: return false
+        val second = octets.getOrNull(1)?.toIntOrNull() ?: return false
+        return first == 100 && second in 64..127
+    }
+
+    private fun snapshotUrlFor(host: String): String {
+        return "http://$host:$SERVER_PORT/snapshot.jpg"
     }
 
     private fun toggleThemeMode() {
@@ -245,31 +437,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         )
     }
 
-    private fun startPendingStreamIfReady() {
-        if (!starting || streaming) return
-        if (!binding.preview.holder.surface.isValid) return
-        val url = pendingStartUrl ?: return
-        val stream = rtmpStream ?: return
-        try {
-            stream.startPreview(binding.preview)
-            stream.startStream(url)
-            streaming = true
-            starting = false
-            pendingStartUrl = null
-            renderStreamingState()
-        } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "Preview surface not ready yet", e)
-            binding.preview.postDelayed({ startPendingStreamIfReady() }, 120L)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start stream", e)
-            starting = false
-            pendingStartUrl = null
-            renderStreamingState()
-            Toast.makeText(this, "Failed to start stream", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     companion object {
         private const val TAG = "VideoMemoryStream"
+        private const val CAMERA_PERMISSION_REQUEST = 1001
+        private const val SERVER_PORT = 8080
+        private const val SNAPSHOT_INTERVAL_MS = 150L
+        private const val SNAPSHOT_JPEG_QUALITY = 82
     }
 }

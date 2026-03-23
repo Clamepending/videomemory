@@ -20,7 +20,6 @@ Use these stable endpoints from your external agent:
 - `GET /api/health`
 - `GET /api/devices`
 - `POST /api/devices/network`
-- `POST /api/devices/network/rtmp`
 - `DELETE /api/devices/network/{io_id}`
 - `GET /api/tasks`
 - `POST /api/tasks` (body may include optional `bot_id` for multi-bot / debug)

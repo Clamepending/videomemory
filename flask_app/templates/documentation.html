@@ -120,34 +120,10 @@
                         <td><code>http://videomemory:8765/mcp</code></td>
                     </tr>
                     <tr>
-                        <td>RTMP ingest</td>
-                        <td><code>1935/tcp</code></td>
-                        <td>Phone/camera push ingest endpoint (MediaMTX).</td>
-                        <td><code>rtmp://videomemory:1935/live/&lt;stream&gt;</code></td>
-                    </tr>
-                    <tr>
-                        <td>RTSP pull</td>
-                        <td><code>8554/tcp</code></td>
-                        <td>VideoMemory worker pull endpoint for stream processing.</td>
-                        <td><code>rtsp://videomemory:8554/live/&lt;stream&gt;</code></td>
-                    </tr>
-                    <tr>
-                        <td>SRT ingest</td>
-                        <td><code>8890/udp</code></td>
-                        <td>Low-latency/resilient ingest option.</td>
-                        <td><code>srt://videomemory:8890</code></td>
-                    </tr>
-                    <tr>
-                        <td>WebRTC/WHIP signaling</td>
-                        <td><code>8889/tcp</code></td>
-                        <td>WebRTC/WHIP ingest signaling endpoint.</td>
-                        <td><code>http://videomemory:8889/&lt;path&gt;/whip</code></td>
-                    </tr>
-                    <tr>
-                        <td>WebRTC ICE</td>
-                        <td><code>8189/udp</code></td>
-                        <td>UDP transport for WebRTC ICE/media.</td>
-                        <td><code>videomemory:8189/udp</code></td>
+                        <td>Direct camera input</td>
+                        <td><code>camera-defined</code></td>
+                        <td>VideoMemory pulls directly from the camera URL you register with <code>/api/devices/network</code>, including HTTP snapshot endpoints.</td>
+                        <td><code>http://phone:8080/snapshot.jpg</code></td>
                     </tr>
                 </tbody>
             </table>

@@ -1,53 +1,29 @@
-"""URL helpers for network streams (e.g. push URL -> RTSP pull URL)."""
+"""URL helpers for network streams."""
 
-import os
-from urllib.parse import parse_qs, urlparse, urlunparse
+from urllib.parse import urlparse
+
+
+def is_snapshot_url(url: str) -> bool:
+    """Return True if the URL looks like a single-image HTTP snapshot endpoint."""
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parsed = urlparse(url.strip())
+    except Exception:
+        return False
+    if (parsed.scheme or "").lower() not in {"http", "https"}:
+        return False
+    path = (parsed.path or "").lower()
+    query = (parsed.query or "").lower()
+    return (
+        path.endswith((".jpg", ".jpeg")) or
+        "snapshot" in path or
+        "snapshot" in query
+    )
 
 
 def get_pull_url(url: str) -> str:
-    """Return the URL to use for pulling (OpenCV/FFmpeg).
-
-    Converts common *push* ingest URLs (RTMP, SRT, WHIP/WebRTC ingest aliases)
-    into an RTSP pull URL for VideoMemory's ingestor when possible.
-    The pull host is always 127.0.0.1 because MediaMTX runs locally, even when
-    the push URL uses a public/Tailscale IP.
-    """
+    """Return the URL to use for pulling (OpenCV/FFmpeg)."""
     if not url or not isinstance(url, str):
         return url
-    u = url.strip()
-    try:
-        parsed = urlparse(u)
-        scheme = (parsed.scheme or "").lower()
-        rtsp_port = os.environ.get("VIDEOMEMORY_RTSP_PULL_PORT", "8554")
-        pull_host = os.environ.get("RTMP_INGEST_INTERNAL_HOST", "127.0.0.1").strip() or "127.0.0.1"
-        netloc = f"{pull_host}:{rtsp_port}"
-
-        if scheme == "rtmp":
-            path = parsed.path or "/live/default"
-            return urlunparse(("rtsp", netloc, path, parsed.params, parsed.query, parsed.fragment))
-
-        if scheme == "srt":
-            # MediaMTX publish URLs often encode the stream path in streamid:
-            # srt://host:8890?streamid=publish:live/stream
-            qs = parse_qs(parsed.query or "")
-            streamid = (qs.get("streamid") or [""])[0]
-            if streamid.startswith("publish:"):
-                stream_path = "/" + streamid.split("publish:", 1)[1].lstrip("/")
-                return urlunparse(("rtsp", netloc, stream_path, "", "", ""))
-            # Fallback if someone used a pathful SRT URL variant.
-            if parsed.path:
-                return urlunparse(("rtsp", netloc, parsed.path, "", "", ""))
-            return url
-
-        if scheme == "whip":
-            path = parsed.path or "/live/default"
-            return urlunparse(("rtsp", netloc, path, "", "", ""))
-
-        # Allow conversion from explicit WHIP HTTP endpoint URLs if they end with /whip.
-        if scheme in ("http", "https") and parsed.path.endswith("/whip"):
-            base_path = parsed.path[: -len("/whip")] or "/live/default"
-            return urlunparse(("rtsp", netloc, base_path, "", "", ""))
-
-        return url
-    except Exception:
-        return url
+    return url.strip()

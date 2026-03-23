@@ -88,11 +88,10 @@ class IOmanager:
             return False
     
     def add_network_camera(self, url: str, name: str = None, io_id: Optional[str] = None) -> Dict:
-        """Register a network camera (RTSP/HTTP/RTMP stream).
+        """Register a network camera (RTSP stream or HTTP snapshot/stream).
         
         Args:
-            url: The stream URL (e.g. rtsp://..., http://..., or rtmp://... for
-                 push sources like the Android app; RTMP is converted to RTSP for pulling).
+            url: The stream URL (e.g. rtsp://..., rtsps://..., http://..., https://...).
             name: Optional display name. Defaults to the URL host.
             io_id: Optional stable camera ID. If omitted, a legacy netN ID is used.
         

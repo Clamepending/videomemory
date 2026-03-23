@@ -8,7 +8,7 @@ A video monitoring system that uses vision-language models to analyse camera fee
 ./start.sh
 ```
 
-This launches MediaMTX and VideoMemory together for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
+This starts VideoMemory for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
 
 ## Docker
 
@@ -18,7 +18,7 @@ This launches MediaMTX and VideoMemory together for local development. Open http
 docker compose -f docker-compose.core.yml up --build
 ```
 
-This starts VideoMemory + MediaMTX. Open http://localhost:5050.
+This starts VideoMemory. Open http://localhost:5050.
 
 ### Core + SimpleAgent (for testing)
 
@@ -39,7 +39,6 @@ docker compose -f docker-compose.simpleagent.yml up --build
 This starts:
 - **VideoMemory** on `http://localhost:5050` (UI + API)
 - **SimpleAgent** on `http://localhost:18889` (Chat UI + API)
-- **MediaMTX** ingest ports (RTMP :1935, RTSP :8554, SRT :8890, WHIP :8889)
 
 SimpleAgent connects to VideoMemory via HTTP API at `http://videomemory:5050`.
 
@@ -53,17 +52,18 @@ VideoMemory exposes a stable HTTP API for external agents:
 
 ## Mobile camera (Android)
 
-Use your Android phone as a wireless camera: the phone pushes video via **RTMP** to MediaMTX, and VideoMemory pulls via **RTSP** from the same server.
+Use your Android phone as a wireless camera: the phone serves the latest frame over a simple **HTTP snapshot** endpoint, and VideoMemory pulls from that URL.
 
-**Architecture:** Phone (Android app) -> RTMP push -> **MediaMTX** (RTMP :1935, RTSP :8554) -> VideoMemory pulls RTSP.
+**Architecture:** Phone (Android app) -> `http://phone:8080/snapshot.jpg` -> VideoMemory pulls the latest frame when it wants one.
 
 **Setup:**
 1. Run VideoMemory (locally or via Docker).
-2. In the web app: **Devices** -> **Create RTMP camera** -> copy the RTMP URL.
-3. Paste the URL into the [Android app](android/README.md) (or scan the QR code) and tap Start.
-4. Create tasks for that device as usual.
+2. Open the [Android app](android/README.md) and tap **Start Server**.
+3. Copy the snapshot URL shown on the phone.
+4. In the web app: **Devices** -> **Add Network Camera** -> paste that URL.
+5. Create tasks for that device as usual.
 
-Phone and VideoMemory must be on the same LAN — or use [Tailscale](https://tailscale.com/download) to stream from anywhere. Install it on both devices, sign in, and `./start.sh` auto-detects your Tailscale IP.
+Phone and VideoMemory should be on the same LAN, or both connected with [Tailscale](https://tailscale.com/download) so VideoMemory can reach the phone's snapshot URL directly.
 
 ## One-click cloud deployment (Fly.io)
 
@@ -72,8 +72,8 @@ Phone and VideoMemory must be on the same LAN — or use [Tailscale](https://tai
 After deployment:
 1. Open your Fly app URL.
 2. Go to **Settings** and set `GOOGLE_API_KEY` (or another supported provider key).
-3. Go to **Devices** -> **Create RTMP camera** and copy the generated RTMP URL.
-4. Paste that URL into the Android app and start streaming.
+3. Start the Android app's snapshot server and make sure the Fly machine can reach the phone, typically via Tailscale.
+4. Go to **Devices** -> **Add Network Camera** and paste the phone's snapshot URL.
 5. Create tasks for that camera through the VideoMemory UI or API.
 
 ## Raspberry Pi Deployment
