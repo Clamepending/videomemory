@@ -51,6 +51,7 @@ def load_frames(frame_dir: Path) -> list[tuple[str, any]]:
 
 
 def run_experiment(frame_dir_name: str, task_desc: str, model_name: str | None, skip_dedup: bool):
+    print(f"Using model {model_name}")
     frame_dir = FRAMES_DIR / frame_dir_name
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 

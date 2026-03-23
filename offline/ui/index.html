@@ -304,7 +304,32 @@
 
     function renderNotes() {
       el.notes.innerHTML = '';
-      const notes = state.data?.task_notes || [];
+      const notes = [];
+      const entries = state.data?.vlm_io || [];
+      entries.forEach((entry) => {
+        const updates = entry?.vlm_output?.task_updates || [];
+        updates.forEach((u) => {
+          notes.push({
+            content: u?.task_note || '',
+            frame_index: entry?.frame_index,
+            filename: entry?.filename,
+          });
+        });
+      });
+
+      // Backward compatibility: fall back to task_notes when per-frame updates are unavailable.
+      if (!notes.length) {
+        const taskNotes = state.data?.task_notes || [];
+        taskNotes.forEach((n) => {
+          notes.push({
+            content: n?.content || '',
+            timestamp: n?.timestamp || '',
+            frame_index: null,
+            filename: null,
+          });
+        });
+      }
+
       if (!notes.length) {
         const p = document.createElement('div');
         p.className = 'hint';
@@ -316,7 +341,12 @@
         const card = document.createElement('div');
         card.className = 'note';
         const t = document.createElement('time');
-        t.textContent = n.timestamp || '';
+        const frameLabel = Number.isInteger(n.frame_index)
+          ? `frame ${n.frame_index}`
+          : 'frame ?';
+        const fileLabel = n.filename ? ` (${n.filename})` : '';
+        const tsLabel = n.timestamp ? ` - ${n.timestamp}` : '';
+        t.textContent = `${frameLabel}${fileLabel}${tsLabel}`;
         const c = document.createElement('div');
         c.textContent = n.content || '';
         card.appendChild(t);
