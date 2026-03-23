@@ -1,17 +1,17 @@
 # VideoMemory Stream (Android)
 
-Pushes your phone’s camera (and mic) to an RTMP server so VideoMemory can pull the feed via RTSP and run tasks on it.
+Runs a tiny HTTP server on your phone that always returns the latest camera frame as a JPEG.
 
 ## Requirements
 
 - Android 7+ (API 24)
-- Camera and microphone permissions
-- Same LAN as the RTMP server (MediaMTX) and VideoMemory
+- Camera permission
+- Same LAN as the VideoMemory server, or Tailscale on both devices
 
 ## Build and run
 
 1. Open the `android` folder in **Android Studio** (File → Open → select this folder).
-2. Let Gradle sync (and download the RootEncoder dependency from JitPack if needed).
+2. Let Gradle sync.
 3. Connect your phone via USB (or use an emulator); enable USB debugging.
 4. Run the app (Run → Run 'app' or the green play button).
 
@@ -26,16 +26,17 @@ gradle wrapper   # if gradlew is missing
 
 ## Usage
 
-1. **Start MediaMTX** on your server/PC (see [rtmp-server/](../rtmp-server/README.md)).
-2. In VideoMemory, go to **Devices** and click **Create RTMP camera** (optionally set a name like `front-door`).
-3. In the Android app, tap **Scan QR** and scan the code shown in VideoMemory (or copy/paste the URL manually).
-4. Tap **Start stream**. Grant camera and mic permissions if asked.
-5. Create tasks for that device as usual. Stop the stream with **Stop stream** when done.
+1. Start VideoMemory on your server or laptop.
+2. Open the Android app and tap **Start Server**.
+3. Copy the snapshot URL shown in the app.
+4. In VideoMemory, go to **Devices** and add that URL as a network camera.
+5. Create tasks for that device as usual. Stop the server from the app when you are done.
 
 ## Tech
 
-- **RootEncoder** (pedroSG94): camera capture, H.264/AAC encode, RTMP push.
-- Single screen: URL field, Start/Stop, camera preview.
+- **CameraX**: camera preview and frame capture.
+- Tiny built-in HTTP server: serves `GET /snapshot.jpg` with the latest JPEG frame.
+- Single screen: snapshot URL, Start/Stop, quality controls, camera preview.
 
 ## Play Store Readiness (Important)
 
@@ -43,9 +44,9 @@ This app is still a developer utility and needs release preparation before Play 
 
 Current code improvements in this repo:
 - `targetSdk` / `compileSdk` updated to Android 15 (API 35)
-- foreground service notification while streaming (camera + microphone)
+- direct snapshot server flow with no relay dependency
 - basic runtime permission flow improvements
 
 Before submitting to Google Play, complete the checklist in:
 
-- `/Users/mark/Desktop/projects/videomemory/android/PLAY_STORE_CHECKLIST.md`
+- `PLAY_STORE_CHECKLIST.md`

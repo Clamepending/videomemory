@@ -3,14 +3,9 @@
 
 import asyncio
 import hashlib
-import ipaddress
 import os
-import re
-import socket
-import subprocess
 import sys
 import threading
-import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -28,8 +23,10 @@ import cv2
 import platform
 from typing import Any, Dict, List, Optional
 import logging
+import numpy as np
 import requests
 from pydantic import BaseModel, Field
+from videomemory.system.io_manager.url_utils import is_snapshot_url
 
 flask_logger = logging.getLogger('FlaskApp')
 
@@ -399,7 +396,7 @@ def get_devices():
                 'source': device.get('source', 'local'),
             }
             if device.get('url'):
-                entry['url'] = _public_ingest_url(device['url'])
+                entry['url'] = device['url']
             by_category[category].append(entry)
         
         import logging
@@ -413,259 +410,11 @@ def get_devices():
         logger.error(f"Error in get_devices: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-def _rtmp_url_host() -> str:
-    """Host for generated RTMP URLs: env, request host, LAN IP, or placeholder."""
-    host = os.environ.get("RTMP_SERVER_HOST", "").strip()
-    if host:
-        return host.split(":")[0]
-
-    def _is_private_or_loopback(hostname: str) -> bool:
-        try:
-            ip = ipaddress.ip_address(hostname)
-            return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
-        except ValueError:
-            return hostname in {"localhost"} or hostname.startswith("127.")
-
-    def _clean_host(raw: str) -> str:
-        return (raw or "").strip().split(",")[0].strip().split(":")[0].strip("[]")
-
-    def _is_container_runtime() -> bool:
-        return os.path.exists("/.dockerenv")
-
-    # Local dev priority: prefer a directly reachable LAN IP so phones can
-    # connect on the same network even when UI is accessed through tunnels.
-    if not _is_container_runtime():
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            lan_ip = s.getsockname()[0]
-            s.close()
-            if lan_ip and not lan_ip.startswith("127."):
-                return lan_ip
-        except Exception:
-            pass
-
-    try:
-        forwarded = _clean_host(request.headers.get("X-Forwarded-Host", ""))
-        if forwarded and not _is_private_or_loopback(forwarded):
-            return forwarded
-    except Exception:
-        pass
-
-    try:
-        h = _clean_host(request.host)
-        if h and not _is_private_or_loopback(h):
-            return h
-    except Exception:
-        pass
-
-    return "YOUR_SERVER_IP"
-
-def _ingest_internal_host() -> str:
-    """Host used internally by VideoMemory workers for pull URLs in Docker."""
-    host = os.environ.get("RTMP_INGEST_INTERNAL_HOST", "").strip()
-    if host:
-        return host.split(":")[0]
-    return _rtmp_url_host()
-
-
-def _public_ingest_url(url: str) -> str:
-    """Rewrite known ingest URLs from internal host to public host for API responses."""
-    if not isinstance(url, str) or not url:
-        return url
-    parsed = urlparse(url)
-    if parsed.scheme not in {"rtmp", "srt", "whip"} or not parsed.hostname:
-        return url
-    internal_host = _ingest_internal_host()
-    public_host = _rtmp_url_host()
-    if parsed.hostname != internal_host or not public_host:
-        return url
-    netloc = parsed.netloc
-    host_port = parsed.hostname if not parsed.port else f"{parsed.hostname}:{parsed.port}"
-    replacement = public_host if not parsed.port else f"{public_host}:{parsed.port}"
-    netloc = netloc.replace(host_port, replacement, 1)
-    return parsed._replace(netloc=netloc).geturl()
-
-
-def _rtmp_port_diagnostics() -> dict:
-    """Inspect RTMP listener state and flag likely local port conflicts."""
-    diagnostics = {
-        "rtmp_port_ok": True,
-        "warning": "",
-        "listeners": [],
-    }
-    try:
-        result = subprocess.run(
-            ["lsof", "-nP", "-iTCP:1935", "-sTCP:LISTEN"],
-            capture_output=True,
-            text=True,
-            timeout=1.5,
-            check=False,
-        )
-        lines = [ln for ln in (result.stdout or "").splitlines() if ln.strip()]
-        if len(lines) <= 1:
-            diagnostics["rtmp_port_ok"] = False
-            diagnostics["warning"] = "No process is listening on RTMP port 1935. MediaMTX may not be running."
-            return diagnostics
-
-        listeners = []
-        for ln in lines[1:]:
-            parts = ln.split()
-            if len(parts) < 2:
-                continue
-            listeners.append({"command": parts[0], "pid": parts[1], "raw": ln})
-        diagnostics["listeners"] = listeners
-
-        command_names = {l["command"].lower() for l in listeners}
-        has_mediamtx = any("mediamtx" in cmd for cmd in command_names)
-        non_mediamtx = sorted({l["command"] for l in listeners if "mediamtx" not in l["command"].lower()})
-        if not has_mediamtx:
-            diagnostics["rtmp_port_ok"] = False
-            diagnostics["warning"] = "MediaMTX is not listening on RTMP port 1935."
-        elif non_mediamtx:
-            diagnostics["rtmp_port_ok"] = False
-            diagnostics["warning"] = (
-                "RTMP port 1935 is also used by: "
-                + ", ".join(non_mediamtx)
-                + ". This can cause handshake failures from phones."
-            )
-    except Exception:
-        # Keep diagnostics best-effort; don't block RTMP URL generation.
-        pass
-    return diagnostics
-
-
-def _stream_key_from_name(name: str) -> str:
-    """Build a safe stream key segment from a user-provided name."""
-    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
-    return slug[:48] if slug else ""
-
-
-def _generated_stream_key(data: dict) -> tuple[str, str]:
-    """Return (stream_key, display_name) from request payload."""
-    requested_device_name = (data.get('device_name') or '').strip()
-    requested_name = (data.get('name') or '').strip()
-    provided_name = requested_device_name or requested_name
-    if requested_device_name and " " in requested_device_name:
-        raise ValueError("device_name cannot contain spaces")
-    if requested_device_name and not re.match(r"^[A-Za-z0-9_-]+$", requested_device_name):
-        raise ValueError("device_name can only contain letters, numbers, underscore, or dash")
-    stream_name = _stream_key_from_name(provided_name)
-    if stream_name:
-        stream_key = f"live/{stream_name}"
-        display_name = provided_name
-    else:
-        stream_key = f"live/phone_{uuid.uuid4().hex[:8]}"
-        display_name = f"Network Camera ({stream_key.split('/')[-1]})"
-    return stream_key, display_name
-
-
-@app.route('/api/devices/network/rtmp', methods=['POST'])
-def create_rtmp_camera():
-    """Create a network camera with a generated RTMP URL for the Android app to push to."""
-    try:
-        data = request.get_json(silent=True) or {}
-        public_host = _rtmp_url_host()
-        internal_host = _ingest_internal_host()
-        try:
-            stream_key, name = _generated_stream_key(data)
-        except ValueError as ve:
-            return jsonify({"status": "error", "error": str(ve)}), 400
-        if name.startswith("Network Camera "):
-            name = f"RTMP Camera ({stream_key.split('/')[-1]})"
-        public_url = f"rtmp://{public_host}:1935/{stream_key}"
-        ingest_url = f"rtmp://{internal_host}:1935/{stream_key}"
-        requested_device_name = (data.get('device_name') or '').strip()
-        preferred_io_id = requested_device_name or stream_key.split('/')[-1]
-        camera_info = io_manager.add_network_camera(ingest_url, name, io_id=preferred_io_id)
-        stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
-        device_out = dict(camera_info)
-        if device_out.get("url"):
-            device_out["url"] = _public_ingest_url(device_out["url"])
-        return jsonify({
-            "status": "success",
-            "device": device_out,
-            "rtmp_url": public_url,
-            "rtsp_pull_url": stream_info.get("pull_url"),
-            "diagnostics": _rtmp_port_diagnostics(),
-        })
-    except Exception as e:
-        flask_logger.error(f"Error creating RTMP camera: {e}", exc_info=True)
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-
-@app.route('/api/devices/network/srt', methods=['POST'])
-def create_srt_camera():
-    """Create a network camera with a generated SRT publish URL (low-latency uplink)."""
-    try:
-        data = request.get_json(silent=True) or {}
-        public_host = _rtmp_url_host()
-        internal_host = _ingest_internal_host()
-        try:
-            stream_key, name = _generated_stream_key(data)
-        except ValueError as ve:
-            return jsonify({"status": "error", "error": str(ve)}), 400
-        if name.startswith("Network Camera "):
-            name = f"SRT Camera ({stream_key.split('/')[-1]})"
-
-        # MediaMTX/SRT convention: streamid encodes publish:path
-        public_srt_url = f"srt://{public_host}:8890?streamid=publish:{stream_key}"
-        ingest_srt_url = f"srt://{internal_host}:8890?streamid=publish:{stream_key}"
-        camera_info = io_manager.add_network_camera(ingest_srt_url, name)
-        stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
-        device_out = dict(camera_info)
-        if device_out.get("url"):
-            device_out["url"] = _public_ingest_url(device_out["url"])
-        return jsonify({
-            "status": "success",
-            "device": device_out,
-            "srt_url": public_srt_url,
-            "rtsp_pull_url": stream_info.get("pull_url"),
-            "notes": "Use SRT caller mode from the phone/app. VideoMemory will pull via RTSP.",
-        })
-    except Exception as e:
-        flask_logger.error(f"Error creating SRT camera: {e}", exc_info=True)
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-
-@app.route('/api/devices/network/whip', methods=['POST'])
-def create_whip_camera():
-    """Create a network camera for WebRTC/WHIP ingest (very low latency)."""
-    try:
-        data = request.get_json(silent=True) or {}
-        public_host = _rtmp_url_host()
-        internal_host = _ingest_internal_host()
-        scheme = "https" if request.is_secure else "http"
-        try:
-            stream_key, name = _generated_stream_key(data)
-        except ValueError as ve:
-            return jsonify({"status": "error", "error": str(ve)}), 400
-        if name.startswith("Network Camera "):
-            name = f"WHIP Camera ({stream_key.split('/')[-1]})"
-
-        # Store a synthetic 'whip://' source so VideoMemory derives RTSP pull cleanly.
-        stored_url = f"whip://{internal_host}:8889/{stream_key}"
-        whip_url = f"{scheme}://{public_host}:8889/{stream_key}/whip"
-        camera_info = io_manager.add_network_camera(stored_url, name)
-        stream_info = io_manager.get_stream_info(camera_info["io_id"]) or camera_info
-        device_out = dict(camera_info)
-        if device_out.get("url"):
-            device_out["url"] = _public_ingest_url(device_out["url"])
-        return jsonify({
-            "status": "success",
-            "device": device_out,
-            "whip_url": whip_url,
-            "rtsp_pull_url": stream_info.get("pull_url"),
-            "notes": "Use a WHIP-capable WebRTC publisher. For internet deployment, set proper ICE/public host config in MediaMTX.",
-        })
-    except Exception as e:
-        flask_logger.error(f"Error creating WHIP camera: {e}", exc_info=True)
-        return jsonify({"status": "error", "error": str(e)}), 500
 
 
 @app.route('/api/devices/network', methods=['POST'])
 def add_network_camera():
-    """Add a network camera (RTSP/HTTP/RTMP stream). RTMP URLs are converted to RTSP for pulling (SRS-compatible)."""
+    """Add a network camera (RTSP or HTTP snapshot/stream)."""
     data = request.get_json()
     if not data:
         return jsonify({'status': 'error', 'error': 'Request body required'}), 400
@@ -677,13 +426,13 @@ def add_network_camera():
         return jsonify({'status': 'error', 'error': 'url is required'}), 400
 
     parsed = urlparse(url)
-    allowed_schemes = {'rtsp', 'rtsps', 'http', 'https', 'rtmp', 'srt', 'whip'}
+    allowed_schemes = {'rtsp', 'rtsps', 'http', 'https'}
     if parsed.scheme.lower() not in allowed_schemes:
         return jsonify({
             'status': 'error',
-            'error': "Invalid url: scheme must be one of rtsp, rtsps, http, https, rtmp, srt, whip"
+            'error': "Invalid url: scheme must be one of rtsp, rtsps, http, https"
         }), 400
-    if parsed.scheme.lower() in {'rtsp', 'rtsps', 'http', 'https', 'rtmp', 'whip'} and not parsed.netloc:
+    if parsed.scheme.lower() in allowed_schemes and not parsed.netloc:
         return jsonify({'status': 'error', 'error': 'Invalid url: missing host'}), 400
 
     try:
@@ -712,6 +461,34 @@ def _get_network_preview_frame(url: str) -> Optional[bytes]:
     This path is used by the Devices page; fail fast so one dead stream doesn't
     stall all preview requests.
     """
+    if is_snapshot_url(url):
+        try:
+            response = requests.get(
+                url,
+                timeout=(
+                    float(os.environ.get("VIDEOMEMORY_PREVIEW_SNAPSHOT_CONNECT_TIMEOUT_S", "2.5")),
+                    float(os.environ.get("VIDEOMEMORY_PREVIEW_SNAPSHOT_READ_TIMEOUT_S", "2.5")),
+                ),
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                },
+            )
+            response.raise_for_status()
+            frame_array = cv2.imdecode(
+                np.frombuffer(response.content, dtype=np.uint8),
+                cv2.IMREAD_COLOR,
+            )
+            if frame_array is None or frame_array.size == 0:
+                return None
+            if frame_array.shape[1] > 640 or frame_array.shape[0] > 480:
+                frame_array = cv2.resize(frame_array, (640, 480), interpolation=cv2.INTER_LINEAR)
+            _, buffer = cv2.imencode('.jpg', frame_array, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            return buffer.tobytes()
+        except Exception as e:
+            flask_logger.debug(f"Error fetching snapshot preview from {url}: {e}")
+            return None
+
     cap = None
     try:
         # Favor low-latency RTSP reads for preview snapshots.
@@ -823,7 +600,7 @@ def get_device_preview_stream(io_id):
 
     def _open_preview_capture(source):
         cap = cv2.VideoCapture()
-        if isinstance(source, str) and source.startswith(("rtsp://", "rtsps://", "http://", "https://", "rtmp://", "srt://", "whip://")):
+        if isinstance(source, str) and source.startswith(("rtsp://", "rtsps://", "http://", "https://")):
             if not os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"):
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
                     "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|"
@@ -914,23 +691,26 @@ def get_device_preview_stream(io_id):
                             time.sleep(frame_delay_s)
                             continue
 
-                        if cap is None or cap_source != desired_source or not cap.isOpened():
-                            if cap is not None:
-                                cap.release()
-                            cap = _open_preview_capture(desired_source)
-                            cap_source = desired_source if cap is not None else None
+                        if isinstance(desired_source, str) and is_snapshot_url(desired_source):
+                            frame_data = _get_network_preview_frame(desired_source)
+                        else:
+                            if cap is None or cap_source != desired_source or not cap.isOpened():
+                                if cap is not None:
+                                    cap.release()
+                                cap = _open_preview_capture(desired_source)
+                                cap_source = desired_source if cap is not None else None
 
-                        if cap is not None and cap.isOpened():
-                            frame = _read_latest_frame(cap)
-                            if frame is not None:
-                                if frame.shape[1] > 640 or frame.shape[0] > 480:
-                                    frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LINEAR)
-                                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                                frame_data = buffer.tobytes()
-                            else:
-                                cap.release()
-                                cap = None
-                                cap_source = None
+                            if cap is not None and cap.isOpened():
+                                frame = _read_latest_frame(cap)
+                                if frame is not None:
+                                    if frame.shape[1] > 640 or frame.shape[0] > 480:
+                                        frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LINEAR)
+                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                    frame_data = buffer.tobytes()
+                                else:
+                                    cap.release()
+                                    cap = None
+                                    cap_source = None
 
                 if frame_data is not None:
                     _record_preview_frame(io_id)
@@ -1381,45 +1161,18 @@ def openapi_spec():
                     },
                 }
             },
-            "/api/devices/network/rtmp": {
-                "post": {
-                    "operationId": "add_camera",
-                    "summary": "Create an RTMP camera",
-                    "description": (
-                        "Creates a network camera and returns an RTMP push URL. "
-                        "Use this when setting up phone streaming. device_name must not contain spaces."
-                    ),
-                    "requestBody": {
-                        "required": True,
-                        "content": {"application/json": {"schema": {
-                            "type": "object",
-                            "required": ["device_name"],
-                            "properties": {
-                                "device_name": {
-                                    "type": "string",
-                                    "description": "Camera name and stream key suffix (letters, numbers, underscore, dash; no spaces)"
-                                },
-                            },
-                        }}},
-                    },
-                    "responses": {
-                        "200": {"description": "RTMP camera created successfully"},
-                        "400": {"description": "Validation error"},
-                    },
-                }
-            },
             "/api/devices/network": {
                 "post": {
                     "operationId": "add_network_camera",
                     "summary": "Add a network camera",
-                    "description": "Register a network camera by providing its RTSP or HTTP stream URL. The camera will appear in the device list and can be used for tasks.",
+                    "description": "Register a network camera by providing its RTSP URL, MJPEG stream URL, or HTTP snapshot URL. The camera will appear in the device list and can be used for tasks.",
                     "requestBody": {
                         "required": True,
                         "content": {"application/json": {"schema": {
                             "type": "object",
                             "required": ["url"],
                             "properties": {
-                                "url": {"type": "string", "description": "Stream URL (e.g. rtsp://..., http://..., or rtmp://server/live/key for push sources; RTMP is auto-converted to RTSP)"},
+                                "url": {"type": "string", "description": "Camera URL (e.g. rtsp://..., rtsps://..., http://camera/stream.mjpeg, or http://phone:8080/snapshot.jpg)"},
                                 "name": {"type": "string", "description": "Optional display name for the camera"},
                             },
                         }}},

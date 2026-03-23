@@ -2,9 +2,8 @@
 
 import json
 import logging
-import os
-import re
 from typing import Optional
+from urllib.parse import urlparse
 
 
 class ToolContext:
@@ -83,14 +82,15 @@ def list_input_devices_with_ids() -> dict:
         }
 
 
-def add_camera(device_name: str) -> dict:
-    """Create an RTMP camera with a caller-provided device name and return its push URL.
+def add_camera(camera_url: str, device_name: Optional[str] = None) -> dict:
+    """Register a direct network camera.
 
     Args:
-        device_name: Camera device name. Must not contain spaces.
+        camera_url: Full RTSP or HTTP(S) URL exposed by the camera or phone app.
+        device_name: Optional display name for the device.
 
     Returns:
-        dict: Status, created device metadata, and rtmp_url.
+        dict: Status and created device metadata.
     """
     if _context is None:
         return {
@@ -104,34 +104,31 @@ def add_camera(device_name: str) -> dict:
             "message": "IO manager not available in context",
         }
 
-    raw_name = (device_name or "").strip()
-    if not raw_name:
+    raw_url = (camera_url or "").strip()
+    if not raw_url:
         return {
             "status": "error",
-            "message": "device_name is required",
-        }
-    if " " in raw_name:
-        return {
-            "status": "error",
-            "message": "device_name cannot contain spaces",
-        }
-    if not re.match(r"^[A-Za-z0-9_-]+$", raw_name):
-        return {
-            "status": "error",
-            "message": "device_name can only contain letters, numbers, underscore, or dash",
+            "message": "camera_url is required",
         }
 
-    host = (os.environ.get("RTMP_SERVER_HOST", "") or "").strip()
-    host = host.split(":")[0] if host else "YOUR_SERVER_IP"
-    stream_key = f"live/{raw_name.lower()}"
-    rtmp_url = f"rtmp://{host}:1935/{stream_key}"
+    parsed = urlparse(raw_url)
+    if parsed.scheme.lower() not in {"rtsp", "rtsps", "http", "https"}:
+        return {
+            "status": "error",
+            "message": "camera_url must start with rtsp://, rtsps://, http://, or https://",
+        }
+    if not parsed.netloc:
+        return {
+            "status": "error",
+            "message": "camera_url is missing a host",
+        }
 
     try:
-        camera_info = _context.io_manager.add_network_camera(rtmp_url, raw_name, io_id=raw_name)
+        display_name = (device_name or "").strip() or None
+        camera_info = _context.io_manager.add_network_camera(raw_url, display_name)
         return {
             "status": "success",
             "device": camera_info,
-            "rtmp_url": rtmp_url,
         }
     except Exception as e:
         return {

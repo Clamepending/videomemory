@@ -11,12 +11,15 @@ from pathlib import Path
 from typing import Dict, Optional, Any, List, Tuple
 from collections import deque
 import cv2
+import httpx
+import numpy as np
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 from dotenv import load_dotenv
 
 from ..task_types import NoteEntry, Task
 from ..model_providers import BaseModelProvider, get_VLM_provider
+from ..io_manager.url_utils import is_snapshot_url
 
 # Load environment variables
 load_dotenv()
@@ -55,12 +58,14 @@ class VideoStreamIngestor:
         """
         self.camera_source = camera_source
         self.is_network_stream = isinstance(camera_source, str)
+        self.is_snapshot_source = self.is_network_stream and is_snapshot_url(camera_source)
         # Keep camera_index for backward compat in logging/session naming
         self.camera_index = camera_source
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
         self._running = False
         self._loop: Optional[asyncio.Task] = None
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
+        self._snapshot_client: Optional[httpx.Client] = None
         self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
         self._target_resolution = target_resolution # Default to 640x480
         
@@ -118,6 +123,17 @@ class VideoStreamIngestor:
     
     def _open_camera(self) -> bool:
         """Open the camera (local or network). Returns True on success."""
+        if self.is_snapshot_source:
+            if self._snapshot_client is None:
+                timeout = httpx.Timeout(
+                    connect=float(os.environ.get("VIDEOMEMORY_SNAPSHOT_CONNECT_TIMEOUT_S", "5.0")),
+                    read=float(os.environ.get("VIDEOMEMORY_SNAPSHOT_READ_TIMEOUT_S", "5.0")),
+                    write=5.0,
+                    pool=5.0,
+                )
+                self._snapshot_client = httpx.Client(timeout=timeout, follow_redirects=True)
+            return True
+
         if self.is_network_stream:
             if not os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"):
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
@@ -156,6 +172,9 @@ class VideoStreamIngestor:
         if self._camera:
             self._camera.release()
             self._camera = None
+        if self._snapshot_client is not None:
+            self._snapshot_client.close()
+            self._snapshot_client = None
 
     def _append_note_to_tasks(self, content: str):
         """Append a note to all tracked tasks."""
@@ -214,6 +233,24 @@ class VideoStreamIngestor:
         For network streams, drain any buffered frames with non-blocking grab()
         and only decode the last one.
         """
+        if self.is_snapshot_source:
+            client = self._snapshot_client
+            if client is None:
+                return False, None
+            response = client.get(
+                str(self.camera_source),
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                },
+            )
+            response.raise_for_status()
+            array = np.frombuffer(response.content, dtype=np.uint8)
+            frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
+            if frame is None or frame.size == 0:
+                return False, None
+            return True, frame
+
         if self._camera is None:
             return False, None
 
@@ -254,12 +291,14 @@ class VideoStreamIngestor:
 
             logger.info(f"Started capture loop for camera source={self.camera_source}")
 
-            # Warm up camera by reading a few frames (especially important for USB cameras)
-            for _ in range(5):
-                ret, _ = await asyncio.to_thread(self._camera.read)
-                if ret:
-                    break
-                await asyncio.sleep(0.1)
+            # Warm up local/OpenCV cameras by reading a few frames.
+            # Snapshot sources do not keep an open cv2 capture handle.
+            if self._camera is not None:
+                for _ in range(5):
+                    ret, _ = await asyncio.to_thread(self._camera.read)
+                    if ret:
+                        break
+                    await asyncio.sleep(0.1)
 
             consecutive_failures = 0
             max_consecutive_failures = 30 if self.is_network_stream else 10
