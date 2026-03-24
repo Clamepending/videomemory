@@ -1,1 +1,1 @@
-Count the number of people visible in the frame
+Count the number of people visible in the frame. Count each distinct individual separately, including those partially visible at the edges of the frame. Report the current count even if it has not changed.
