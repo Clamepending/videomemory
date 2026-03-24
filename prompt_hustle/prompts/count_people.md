@@ -1,1 +1,1 @@
-Count the number of people visible in the frame and report as 'Currently N people visible'
+Perform a visual headcount of people in the frame
