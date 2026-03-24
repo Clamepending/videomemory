@@ -1,1 +1,1 @@
-Count the people in the scene
+Count the number of people visible in the frame and report as 'Currently N people visible'
