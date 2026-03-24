@@ -16,3 +16,4 @@
 {"timestamp": "2026-03-24T03:36:02Z", "commit": "41a0f7d", "accuracy": 0.930435, "status": "discard", "description": "count humans visible", "prompt": "Count humans visible in the frame\n"}
 {"timestamp": "2026-03-24T03:42:33Z", "commit": "42cd1af", "accuracy": 0.93913, "status": "discard", "description": "number of people in view", "prompt": "Report the number of people currently in view\n"}
 {"timestamp": "2026-03-24T03:50:21Z", "commit": "75ced9e", "accuracy": 0.93913, "status": "discard", "description": "baseline with always update", "prompt": "Count the number of people visible in the frame. Always update your count.\n"}
+{"timestamp": "2026-03-24T03:58:51Z", "commit": "06ccb5f", "accuracy": 0.956522, "status": "discard", "description": "count people with zero emphasis", "prompt": "Count the number of people visible in the frame, including when the count is zero\n"}
