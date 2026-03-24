@@ -34,3 +34,4 @@
 {"timestamp": "2026-03-24T05:57:24Z", "commit": "7e7d91f", "accuracy": 0.965217, "status": "discard", "description": "surveillance style counting", "prompt": "Surveillance task: count all people visible in the current camera frame\n"}
 {"timestamp": "2026-03-24T06:05:37Z", "commit": "4ba92eb", "accuracy": 0.93913, "status": "discard", "description": "strict numerical count", "prompt": "Provide a strict numerical count of people visible in the frame\n"}
 {"timestamp": "2026-03-24T06:12:47Z", "commit": "4f74011", "accuracy": 0.965217, "status": "discard", "description": "baseline rerun for variance check", "prompt": "Count the number of people visible in the frame\n"}
+{"timestamp": "2026-03-24T06:20:23Z", "commit": "78e9374", "accuracy": 0.911504, "status": "discard", "description": "count people in scene", "prompt": "Count the people in the scene\n"}
