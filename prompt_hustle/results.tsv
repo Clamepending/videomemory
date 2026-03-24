@@ -5,3 +5,4 @@ timestamp	commit	accuracy	graded	status	description
 2026-03-24T02:05:44Z	d28745c	0.947826	115	discard	emphasize updating count on changes including to zero
 2026-03-24T02:13:53Z	16b6321	0.947826	115	discard	system prompt example wording: Keep track of number of people
 2026-03-24T02:21:37Z	1f4c8ec	0.939130	115	discard	ultra-minimal: Count people
+2026-03-24T02:29:47Z	8718cf3	0.930435	115	discard	question format: How many people
