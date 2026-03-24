@@ -31,3 +31,4 @@ timestamp	commit	accuracy	graded	status	description
 2026-03-24T05:21:37Z	c5b6f88	0.930435	115	discard	baseline plus every frame
 2026-03-24T05:31:37Z	83b1b70	0.000000	0	crash	baseline plus be precise
 2026-03-24T05:41:37Z	74f8ca0	0.000000	0	crash	specific format N people visible
+2026-03-24T05:49:23Z	e93d636	0.956522	115	discard	count with confidence
