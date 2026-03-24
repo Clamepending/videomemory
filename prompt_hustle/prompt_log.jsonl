@@ -12,3 +12,4 @@
 {"timestamp": "2026-03-24T03:07:08Z", "commit": "a9ae91b", "accuracy": 0.913043, "status": "discard", "description": "observe and count all persons", "prompt": "Observe the frame and count all persons visible, including partially visible ones\n"}
 {"timestamp": "2026-03-24T03:14:06Z", "commit": "3d07ce1", "accuracy": 0.956522, "status": "discard", "description": "track the headcount", "prompt": "Track the headcount of people visible in the frame\n"}
 {"timestamp": "2026-03-24T03:21:56Z", "commit": "f822c7a", "accuracy": 0.886957, "status": "discard", "description": "determine the number of people present", "prompt": "Determine the number of people present in the frame\n"}
+{"timestamp": "2026-03-24T03:28:59Z", "commit": "51d2be5", "accuracy": 0.93913, "status": "discard", "description": "terse: people count", "prompt": "People count in frame\n"}
