@@ -1,1 +1,1 @@
-What is the frame occupancy? Count the number of people visible.
+Count the number of people visible in the frame and report as 'Currently N people visible'
