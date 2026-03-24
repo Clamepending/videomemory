@@ -1,1 +1,2 @@
 {"timestamp": "2026-03-24T01:39:51Z", "commit": "0beffa7", "accuracy": 0.956522, "status": "keep", "description": "baseline", "prompt": "Count the number of people visible in the frame\n"}
+{"timestamp": "2026-03-24T01:48:46Z", "commit": "342c122", "accuracy": 0.93913, "status": "discard", "description": "add counting methodology and partial visibility", "prompt": "Count the number of people visible in the frame. Count each distinct individual separately, including those partially visible at the edges of the frame. Report the current count even if it has not changed."}
