@@ -21,3 +21,4 @@
 {"timestamp": "2026-03-24T04:13:36Z", "commit": "30e303a", "accuracy": 0.93913, "status": "discard", "description": "active monitoring phrasing", "prompt": "Actively monitor and report the number of people visible in the frame\n"}
 {"timestamp": "2026-03-24T04:21:21Z", "commit": "73135d9", "accuracy": 0.921739, "status": "discard", "description": "careful observation phrasing", "prompt": "Carefully observe the frame and report how many people are visible\n"}
 {"timestamp": "2026-03-24T04:28:49Z", "commit": "bb20061", "accuracy": 0.921739, "status": "discard", "description": "continuous tracking phrasing", "prompt": "Continuously track the number of people visible in the frame\n"}
+{"timestamp": "2026-03-24T04:37:14Z", "commit": "fe6724d", "accuracy": 0.93913, "status": "discard", "description": "detailed person detection", "prompt": "Detect and count every person visible in the frame, whether fully or partially in view\n"}
