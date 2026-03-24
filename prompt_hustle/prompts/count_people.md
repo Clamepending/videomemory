@@ -1,1 +1,1 @@
-Count the number of people visible in the frame and report as 'Currently N people visible'
+Report the occupancy count: how many people are in the frame?
