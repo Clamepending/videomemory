@@ -1,1 +1,1 @@
-Count the number of people visible in the frame. Always report the exact count, even if zero. Look carefully for people who may be partially occluded or at the edges.
+Count the number of people visible in the frame
