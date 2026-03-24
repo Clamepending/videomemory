@@ -1,1 +1,1 @@
-Report the number of people currently in view
+Count the number of people visible in the frame and report as 'Currently N people visible'
