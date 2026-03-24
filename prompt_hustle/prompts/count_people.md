@@ -1,1 +1,1 @@
-Count the number of people visible in the frame
+Keep track of number of people
