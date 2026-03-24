@@ -38,3 +38,4 @@ timestamp	commit	accuracy	graded	status	description
 2026-03-24T06:20:23Z	78e9374	0.911504	113	discard	count people in scene
 2026-03-24T06:28:10Z	92cf387	0.956522	115	discard	tally persons in frame
 2026-03-24T06:35:32Z	5bba133	0.947826	115	discard	enumerate people visible
+2026-03-24T06:43:12Z	6cf939a	0.921739	115	discard	visual headcount
