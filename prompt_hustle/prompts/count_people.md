@@ -1,1 +1,1 @@
-Count the number of people visible in the frame by scanning from left to right
+Count the number of people visible in the frame and report as 'Currently N people visible'
