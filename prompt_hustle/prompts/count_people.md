@@ -1,1 +1,1 @@
-Count the number of people visible in the frame and report as 'Currently N people visible'
+Surveillance task: count all people visible in the current camera frame
