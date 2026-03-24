@@ -2,6 +2,7 @@
 
 import os
 import json
+import re
 import time
 import logging
 from typing import Any, Type
@@ -179,3 +180,57 @@ class OpenRouterMistralSmall31Provider(_BaseOpenRouterProvider):
         """
         super().__init__(api_key=api_key, model_name="mistralai/mistral-small-3.1-24b-instruct")
 
+
+# Paid-tier rate limiter (higher than free-tier 18 RPM)
+_openrouter_paid_rate_limiter = RateLimiter(120.0)
+
+
+class OpenRouterQwen3VL8BProvider(_BaseOpenRouterProvider):
+
+    def __init__(self, api_key=None):
+        super().__init__(api_key=api_key, model_name="qwen/qwen3-vl-8b-instruct")
+        self._rate_limiter = _openrouter_paid_rate_limiter
+
+    @staticmethod
+    def _repair_json(s):
+        import re
+        s = re.sub(r'(?<=[{,\[])\s*([a-zA-Z_]\w*)\s*:', r' "\1":', s)
+        s = re.sub(r',\s*([}\]])', r'\1', s)
+        return s
+
+    def _sync_generate_content(self, image_base64, prompt, response_model):
+        if not self.api_key:
+            raise RuntimeError("OpenRouter API key not set.")
+        self._rate_limiter.wait_if_needed()
+        with httpx.Client(timeout=60.0) as client:
+            response = client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": self._model_name,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
+                        {"type": "text", "text": prompt}
+                    ]}],
+                    "response_format": {"type": "json_object"}
+                }
+            )
+            if response.status_code == 429:
+                raise RuntimeError("Rate limit exceeded (429)")
+            response.raise_for_status()
+            result = response.json()
+            message = (result.get("choices") or [{}])[0].get("message") or {}
+            content = message.get("content")
+            if content is None:
+                tool_calls = message.get("tool_calls") or []
+                if tool_calls:
+                    content = (tool_calls[0].get("function") or {}).get("arguments")
+            if content is None:
+                raise RuntimeError("OpenRouter returned empty content.")
+            if isinstance(content, (dict, list)):
+                return response_model.model_validate(content)
+            s = str(content).strip()
+            import re
+            s = re.sub(r"<think>[\s\S]*?</think>", "", s).strip()
+            s = self._repair_json(s)
+            return response_model.model_validate_json(s)

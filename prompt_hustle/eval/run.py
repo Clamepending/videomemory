@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Evaluate VideoMemory's video ingestor against an oracle model.
 
-Runs the video ingestor on every video folder in a data split (train or
-validation), then asks an oracle model to grade each (frame, prompt, output)
-tuple on a binary rubric (0 = incorrect, 1 = correct).  Reports per-video
-and overall accuracy.
+Tasks are stored per-video in data/{split}/tasks/{video_name}/*.md.
+All tasks for a video run simultaneously in one ingestor (like the real
+system), so VLM calls = videos * frames, not tasks * videos * frames.
 
-Usage (from project root):
-    uv run python -m prompt_hustle.eval --prompt-file prompt_hustle/prompts/count_people.md
-    uv run python -m prompt_hustle.eval --prompt-file prompt_hustle/prompts/count_people.md --eval
-    uv run python -m prompt_hustle.eval --prompt-file prompt_hustle/prompts/count_people.md --eval --model gemini-2.5-flash --no-dedup
+Usage:
+    uv run python -m prompt_hustle.eval \
+        --instructions prompt_hustle/instructions.md \
+        --model qwen3-vl-8b --no-dedup
 """
 
 import argparse
@@ -28,10 +27,6 @@ EVAL_OUTPUT_DIR = OUTPUT_DIR / "eval"
 ORACLE_MODEL = "gemini-2.5-flash"
 
 
-# ---------------------------------------------------------------------------
-# Oracle grading
-# ---------------------------------------------------------------------------
-
 class GradingResult(BaseModel):
     reasoning: str = Field(..., description="Brief reasoning for the grade")
     score: int = Field(..., ge=0, le=1, description="0 for incorrect, 1 for correct")
@@ -41,17 +36,12 @@ def _build_oracle_client():
     from google import genai
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        raise RuntimeError(
-            "GOOGLE_API_KEY must be set for oracle grading. "
-            "Export it or set it via the VideoMemory settings API."
-        )
+        raise RuntimeError("GOOGLE_API_KEY must be set for oracle grading.")
     return genai.Client(api_key=api_key)
 
 
-def oracle_grade(client, image_bytes: bytes, task_description: str, vlm_output: str) -> GradingResult:
-    """Ask the oracle to grade a single VLM output against the image."""
+def oracle_grade(client, image_bytes, task_description, vlm_output):
     from google.genai import types as genai_types
-
     grading_prompt = (
         "You are an evaluator grading a vision-language model's output.\n\n"
         f"Task given to the model:\n{task_description}\n\n"
@@ -64,7 +54,6 @@ def oracle_grade(client, image_bytes: bytes, task_description: str, vlm_output: 
         "  0 - The output is incorrect or significantly misrepresents the image content.\n\n"
         "Return JSON with 'reasoning' (one sentence) and 'score' (0 or 1)."
     )
-
     image_part = genai_types.Part(
         inline_data=genai_types.Blob(data=image_bytes, mime_type="image/jpeg")
     )
@@ -82,137 +71,160 @@ def oracle_grade(client, image_bytes: bytes, task_description: str, vlm_output: 
     return GradingResult.model_validate_json(raw)
 
 
-# ---------------------------------------------------------------------------
-# Per-video evaluation
-# ---------------------------------------------------------------------------
+def load_video_tasks(tasks_dir):
+    """Load all .md task files from a directory. Returns [(name, desc), ...]."""
+    tasks = []
+    for p in sorted(tasks_dir.glob("*.md")):
+        desc = p.read_text().strip()
+        if desc:
+            tasks.append((p.stem, desc))
+    return tasks
 
-def evaluate_video(video_name, frames_dir, task_desc, model_name, skip_dedup, oracle_client):
-    print(f"\n{'=' * 60}")
-    print(f"VIDEO: {video_name}")
-    print(f"{'=' * 60}")
-
-    frames = load_frames(frames_dir / video_name)
-    print(f"  Loaded {len(frames)} frames")
-
-    ingestor, task = create_ingestor(task_desc, model_name, skip_dedup)
-
-    per_frame: list[dict] = []
-    scores: list[int] = []
-    vlm_errors = 0
-    oracle_errors = 0
-
-    for r in process_frames(ingestor, task, frames):
-        filename = r["filename"]
-        label = f"  [{r['index'] + 1}/{r['total']}] {filename}"
-
-        if r["status"] == "error":
-            per_frame.append({"filename": filename, "status": "error", "error": r["error"]})
-            vlm_errors += 1
-            print(f"{label}  VLM error ({r['error']})")
-            continue
-
-        if r["status"] == "skipped":
-            per_frame.append({"filename": filename, "status": "skipped"})
-            print(f"{label}  skipped (dup)")
-            continue
-
-        vlm_output_text = r["vlm_output"]
-        produced_update = r["produced_update"]
-
-        _, buf = cv2.imencode(".jpg", r["frame"])
-        try:
-            grade = oracle_grade(oracle_client, bytes(buf), task_desc, vlm_output_text)
-            score, reasoning = grade.score, grade.reasoning
-        except Exception as e:
-            print(f"{label}  oracle error: {e}")
-            score, reasoning = -1, f"oracle_error: {e}"
-            oracle_errors += 1
-
-        if score >= 0:
-            scores.append(score)
-
-        tag = "" if produced_update else " (carried)"
-        print(f'{label}  vlm="{vlm_output_text[:60]}"{tag}  score={score}')
-
-        per_frame.append({
-            "filename": filename, "status": "graded",
-            "vlm_output": vlm_output_text, "produced_update": produced_update,
-            "oracle_score": score, "oracle_reasoning": reasoning,
-        })
-
-    accuracy = sum(scores) / len(scores) if scores else 0.0
-    skipped = sum(1 for f in per_frame if f.get("status") == "skipped")
-    print(f"  => {video_name} accuracy: {accuracy:.2%} ({sum(scores)}/{len(scores)} graded)")
-    if vlm_errors or oracle_errors or skipped:
-        print(f"     dropped: {vlm_errors} vlm err, {oracle_errors} oracle err, {skipped} skipped")
-
-    return {
-        "video": video_name, "total_frames": len(frames),
-        "graded": len(scores), "correct": sum(scores),
-        "vlm_errors": vlm_errors, "oracle_errors": oracle_errors,
-        "skipped": skipped, "accuracy": round(accuracy, 4),
-        "per_frame": per_frame,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def run_eval(args):
-    prompt_path = Path(args.prompt_file)
-    if not prompt_path.exists():
-        sys.exit(f"Prompt file not found: {prompt_path}")
-    task_desc = prompt_path.read_text().strip()
-    if not task_desc:
-        sys.exit(f"Prompt file is empty: {prompt_path}")
+    custom_instructions = None
+    if args.instructions:
+        inst_path = Path(args.instructions)
+        if not inst_path.exists():
+            sys.exit(f"Instructions file not found: {inst_path}")
+        custom_instructions = inst_path.read_text().strip()
+        if not custom_instructions:
+            sys.exit(f"Instructions file is empty: {inst_path}")
 
     split = "validation" if args.eval else "train"
     frames_dir = DATA_DIR / split / "frames"
+    tasks_dir = DATA_DIR / split / "tasks"
     if not frames_dir.exists():
         sys.exit(f"Frames directory not found: {frames_dir}")
+    if not tasks_dir.exists():
+        sys.exit(f"Tasks directory not found: {tasks_dir}")
 
     video_dirs = sorted(p.name for p in frames_dir.iterdir() if p.is_dir())
     if not video_dirs:
         sys.exit(f"No video folders found in {frames_dir}")
 
-    print(f"Split:       {split}")
-    print(f"Prompt file: {prompt_path}")
-    print(f"Task:        {task_desc[:80]}")
-    print(f"Videos:      {video_dirs}")
-    print(f"Model:       {args.model or '(default)'}")
-    print(f"Oracle:      {ORACLE_MODEL}")
-    print(f"Dedup:       {'off' if args.no_dedup else 'on'}")
+    mode = "custom instructions" if custom_instructions else "built-in instructions"
+    print(f"Split:        {split}")
+    print(f"Videos:       {video_dirs}")
+    print(f"Model:        {args.model or '(default)'}")
+    print(f"Oracle:       {ORACLE_MODEL}")
+    print(f"Dedup:        {'off' if args.no_dedup else 'on'}")
+    print(f"Instructions: {mode}")
 
     oracle_client = _build_oracle_client()
-    results: list[dict] = []
-    all_scores: list[int] = []
+    all_video_results = []
+    grand_scores = []
+    all_task_scores = {}
 
     for video_name in video_dirs:
-        vr = evaluate_video(video_name, frames_dir, task_desc, args.model, args.no_dedup, oracle_client)
-        results.append(vr)
-        all_scores.extend(
-            f["oracle_score"] for f in vr["per_frame"] if f.get("oracle_score", -1) >= 0
-        )
+        video_tasks_dir = tasks_dir / video_name
+        if not video_tasks_dir.is_dir():
+            print(f"\nWARNING: No tasks dir for {video_name}, skipping")
+            continue
 
-    overall = sum(all_scores) / len(all_scores) if all_scores else 0.0
-    total_frames = sum(r["total_frames"] for r in results)
-    total_dropped = sum(r["vlm_errors"] + r["oracle_errors"] + r["skipped"] for r in results)
+        task_descs = load_video_tasks(video_tasks_dir)
+        if not task_descs:
+            print(f"\nWARNING: No tasks for {video_name}, skipping")
+            continue
+
+        print(f"\n{'=' * 60}")
+        print(f"VIDEO: {video_name}")
+        print(f"  Tasks: {', '.join(n for n, _ in task_descs)}")
+        print(f"{'=' * 60}")
+
+        frames = load_frames(frames_dir / video_name)
+        print(f"  Loaded {len(frames)} frames")
+
+        ingestor, tasks = create_ingestor(
+            task_descs, args.model, args.no_dedup,
+            custom_instructions=custom_instructions,
+        )
+        task_map = {t.task_number: (name, desc) for t, (name, desc) in zip(tasks, task_descs)}
+
+        per_frame = []
+        vlm_errors = 0
+
+        for r in process_frames(ingestor, tasks, frames):
+            filename = r["filename"]
+            label = f"  [{r['index'] + 1}/{r['total']}] {filename}"
+
+            if r["status"] == "error":
+                per_frame.append({"filename": filename, "status": "error", "error": r["error"]})
+                vlm_errors += 1
+                print(f"{label}  VLM error ({r['error']})")
+                continue
+
+            if r["status"] == "skipped":
+                per_frame.append({"filename": filename, "status": "skipped"})
+                print(f"{label}  skipped (dup)")
+                continue
+
+            per_task_outputs = r["per_task_outputs"]
+            _, buf = cv2.imencode(".jpg", r["frame"])
+            image_bytes = bytes(buf)
+
+            frame_grades = {}
+            for tn, (tname, tdesc) in task_map.items():
+                vlm_out = per_task_outputs.get(tn, "(no output)")
+                try:
+                    grade = oracle_grade(oracle_client, image_bytes, tdesc, vlm_out)
+                    score = grade.score
+                except Exception as e:
+                    score = -1
+
+                if score >= 0:
+                    grand_scores.append(score)
+                    all_task_scores.setdefault(tname, []).append(score)
+
+                frame_grades[tname] = {"vlm_output": vlm_out, "score": score}
+
+            summary_parts = []
+            for tname, g in frame_grades.items():
+                summary_parts.append(f"{tname}={g['score']}")
+            print(f"{label}  {' '.join(summary_parts)}")
+
+            per_frame.append({
+                "filename": filename, "status": "graded",
+                "per_task": frame_grades,
+            })
+
+        total_graded_video = sum(
+            1 for f in per_frame if f.get("status") == "graded"
+            for _ in f.get("per_task", {}).values()
+        )
+        skipped = sum(1 for f in per_frame if f.get("status") == "skipped")
+        print(f"  => {video_name}: {len(per_frame)} frames, {vlm_errors} errors, {skipped} skipped")
+
+        all_video_results.append({
+            "video": video_name,
+            "tasks": [n for n, _ in task_descs],
+            "total_frames": len(frames),
+            "vlm_errors": vlm_errors,
+            "skipped": skipped,
+            "per_frame": per_frame,
+        })
+
+    overall = sum(grand_scores) / len(grand_scores) if grand_scores else 0.0
+    total_frames = sum(r["total_frames"] for r in all_video_results)
 
     EVAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
-    safe_task = task_desc.replace(" ", "_")[:30]
-    out_path = EVAL_OUTPUT_DIR / f"eval_{split}_{safe_task}_{ts}.json"
+    out_path = EVAL_OUTPUT_DIR / f"eval_{split}_{ts}.json"
 
     output = {
-        "split": split, "task_description": task_desc,
-        "prompt_file": str(prompt_path),
+        "split": split,
         "model": args.model or "(default)", "oracle_model": ORACLE_MODEL,
         "dedup": not args.no_dedup,
+        "instructions_file": args.instructions,
         "overall_accuracy": round(overall, 4),
-        "total_frames": total_frames, "total_graded": len(all_scores),
-        "total_correct": sum(all_scores), "total_dropped": total_dropped,
-        "per_video": results,
+        "total_frames": total_frames,
+        "total_graded": len(grand_scores),
+        "total_correct": sum(grand_scores),
+        "per_task_accuracy": {
+            name: round(sum(scores) / len(scores), 4) if scores else 0.0
+            for name, scores in sorted(all_task_scores.items())
+        },
+        "per_video": all_video_results,
     }
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2)
@@ -220,28 +232,37 @@ def run_eval(args):
     print(f"\n{'=' * 60}")
     print("EVAL SUMMARY")
     print(f"{'=' * 60}")
-    for r in results:
-        print(f"  {r['video']:20s}  {r['accuracy']:.2%}  ({r['correct']}/{r['graded']})")
-    print(f"  {'OVERALL':20s}  {overall:.2%}  ({sum(all_scores)}/{len(all_scores)})")
-    if total_dropped:
-        print(f"  WARNING: {total_dropped}/{total_frames} frames not graded")
+    for name, scores in sorted(all_task_scores.items()):
+        acc = sum(scores) / len(scores) if scores else 0.0
+        print(f"  {name:30s}  {acc:.2%}  ({sum(scores)}/{len(scores)})")
+    print(f"  {'OVERALL':30s}  {overall:.2%}  ({sum(grand_scores)}/{len(grand_scores)})")
     print(f"{'=' * 60}")
     print(f"Results saved to {out_path}")
 
     print(f"\n---")
     print(f"overall_accuracy: {overall:.6f}")
-    print(f"total_graded:     {len(all_scores)}")
-    print(f"total_correct:    {sum(all_scores)}")
+    print(f"total_graded:     {len(grand_scores)}")
+    print(f"total_correct:    {sum(grand_scores)}")
     print(f"total_frames:     {total_frames}")
-    print(f"dropped_frames:   {total_dropped}")
+    for name, scores in sorted(all_task_scores.items()):
+        acc = sum(scores) / len(scores) if scores else 0.0
+        print(f"task_{name}: {acc:.6f}")
 
     return overall
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate VideoMemory video ingestor with oracle grading")
-    parser.add_argument("--prompt-file", required=True, help="Path to the task description markdown file")
-    parser.add_argument("--eval", action="store_true", help="Use the validation split instead of train")
+    parser = argparse.ArgumentParser(
+        description="Evaluate VideoMemory video ingestor with oracle grading",
+    )
+    parser.add_argument(
+        "--instructions",
+        help="Path to universal instructions markdown file (agent-tunable).",
+    )
+    parser.add_argument(
+        "--eval", action="store_true",
+        help="Use the validation split instead of train",
+    )
     parser.add_argument("--model", default=None, help="Model name for the video ingestor")
     parser.add_argument("--no-dedup", action="store_true", help="Disable frame deduplication")
     args = parser.parse_args()

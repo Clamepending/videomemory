@@ -28,10 +28,7 @@ from videomemory.system.stream_ingestors.video_stream_ingestor import (  # noqa:
 
 
 def load_frames(frame_dir: Path) -> list[tuple[str, object]]:
-    """Load all .jpg frames from *frame_dir*, sorted by filename.
-
-    Returns a list of (filename, cv2_image_or_None) tuples.
-    """
+    """Load all .jpg frames from *frame_dir*, sorted by filename."""
     frame_files = sorted(frame_dir.glob("*.jpg"))
     if not frame_files:
         raise FileNotFoundError(f"No .jpg files in {frame_dir}")
@@ -45,35 +42,62 @@ def load_frames(frame_dir: Path) -> list[tuple[str, object]]:
 
 
 def create_ingestor(
-    task_desc: str,
+    task_descs: list[tuple[str, str]],
     model_name: Optional[str] = None,
     skip_dedup: bool = False,
-) -> tuple[VideoStreamIngestor, Task]:
-    """Create a VideoStreamIngestor with a single task."""
+    custom_instructions: Optional[str] = None,
+) -> tuple[VideoStreamIngestor, list[Task]]:
+    """Create a VideoStreamIngestor with one or more simultaneous tasks.
+
+    Args:
+        task_descs: List of (task_name, task_description) pairs.
+        custom_instructions: If provided, replaces the built-in <instructions> block.
+
+    Returns:
+        (ingestor, tasks) where tasks is a list of Task objects matching task_descs order.
+    """
     model_provider = get_VLM_provider(model_name)
     ingestor = VideoStreamIngestor(camera_source=-1, model_provider=model_provider)
-    task = Task(task_number=0, task_desc=task_desc, task_note=[], done=False)
-    ingestor._tasks_list.append(task)
+    tasks = []
+    for i, (name, desc) in enumerate(task_descs):
+        task = Task(task_number=i, task_desc=desc, task_note=[], done=False)
+        ingestor._tasks_list.append(task)
+        tasks.append(task)
     if skip_dedup:
         ingestor._frame_diff_threshold = -1
-    return ingestor, task
+
+    if custom_instructions is not None:
+        import time as _time
+        import types
+        from videomemory.system.task_types import NoteEntry
+
+        def _patched_build_prompt(self) -> str:
+            lines = ["<tasks>"]
+            for t in self._tasks_list:
+                lines.append("<task>")
+                lines.append(f"<task_number>{t.task_number}</task_number>")
+                lines.append(f"<task_desc>{t.task_desc}</task_desc>")
+                newest = t.task_note[-1] if t.task_note else NoteEntry(content="None", timestamp=_time.time())
+                ts = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime(newest.timestamp))
+                lines.append(f'<task_newest_note timestamp="{ts}">{newest.content}</task_newest_note>')
+                lines.append("</task>")
+            lines.append("</tasks>")
+            return "\n".join(lines) + "\n\n" + custom_instructions
+
+        ingestor._build_prompt = types.MethodType(_patched_build_prompt, ingestor)
+
+    return ingestor, tasks
 
 
 def process_frames(
     ingestor: VideoStreamIngestor,
-    task: Task,
+    tasks: list[Task],
     frames: list[tuple[str, object]],
 ) -> Generator[dict, None, None]:
     """Run each frame through the ingestor, yielding a result dict per frame.
 
-    Yielded keys always present: ``index``, ``total``, ``filename``, ``frame``,
-    ``status`` (one of ``"processed"``, ``"skipped"``, ``"error"``).
-
-    Extra keys for ``status == "processed"``:
-        ``vlm_output``, ``produced_update``, ``task_updates``,
-        ``processing_time_ms``, ``prompt``.
-
-    Extra key for ``status == "error"``: ``error``.
+    For multi-task ingestors, task_updates may contain updates for different
+    task_number values. The caller is responsible for splitting per-task.
     """
     total = len(frames)
     for i, (filename, frame) in enumerate(frames):
@@ -99,19 +123,23 @@ def process_frames(
             continue
 
         task_updates = result.get("task_updates", [])
-        if task_updates:
-            vlm_output = "; ".join(u["task_note"] for u in task_updates)
-            produced_update = True
-        else:
-            vlm_output = task.task_note[-1].content if task.task_note else "(no observation yet)"
-            produced_update = False
+        per_task_outputs = {}
+        for u in task_updates:
+            tn = u.get("task_number", 0)
+            per_task_outputs[tn] = u.get("task_note", "")
+
+        for t in tasks:
+            if t.task_number not in per_task_outputs:
+                if t.task_note:
+                    per_task_outputs[t.task_number] = t.task_note[-1].content
+                else:
+                    per_task_outputs[t.task_number] = "(no observation yet)"
 
         yield {
             **base,
             "status": "processed",
-            "vlm_output": vlm_output,
-            "produced_update": produced_update,
             "task_updates": task_updates,
+            "per_task_outputs": per_task_outputs,
             "processing_time_ms": result.get("processing_time_ms", 0),
             "prompt": result.get("prompt", ""),
         }

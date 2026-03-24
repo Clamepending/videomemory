@@ -1,0 +1,1 @@
+Is there a window visible in the frame? If so, describe what can be seen through it.
