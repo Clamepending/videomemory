@@ -1,1 +1,1 @@
-Count the number of people visible in the frame and report as 'Currently N people visible'
+Watch for people and count how many are visible in the frame
