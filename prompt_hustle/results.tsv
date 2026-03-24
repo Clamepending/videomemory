@@ -49,3 +49,4 @@ timestamp	commit	accuracy	graded	status	description
 2026-03-24T07:51:23Z	8dce666	0.939130	115	discard	people detection count
 2026-03-24T07:59:51Z	6fe8a2b	0.921739	115	discard	baseline plus include partial
 2026-03-24T08:08:17Z	0af506a	0.930435	115	discard	count all individuals in view
+2026-03-24T08:16:55Z	cebcee0	0.927273	110	discard	frame occupancy

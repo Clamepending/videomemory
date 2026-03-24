@@ -48,3 +48,4 @@
 {"timestamp": "2026-03-24T07:51:23Z", "commit": "8dce666", "accuracy": 0.93913, "status": "discard", "description": "people detection count", "prompt": "Detect people in the frame and report the total count\n"}
 {"timestamp": "2026-03-24T07:59:51Z", "commit": "6fe8a2b", "accuracy": 0.921739, "status": "discard", "description": "baseline plus include partial", "prompt": "Count the number of people visible in the frame, including partially visible people\n"}
 {"timestamp": "2026-03-24T08:08:17Z", "commit": "0af506a", "accuracy": 0.930435, "status": "discard", "description": "count all individuals in view", "prompt": "Count all individuals currently in view\n"}
+{"timestamp": "2026-03-24T08:16:55Z", "commit": "cebcee0", "accuracy": 0.927273, "status": "discard", "description": "frame occupancy", "prompt": "What is the frame occupancy? Count the number of people visible.\n"}
