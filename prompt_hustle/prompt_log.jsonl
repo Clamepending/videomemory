@@ -29,3 +29,4 @@
 {"timestamp": "2026-03-24T05:13:53Z", "commit": "e2d6d64", "accuracy": 0.965217, "status": "discard", "description": "watch for people and count them", "prompt": "Watch for people and count how many are visible in the frame\n"}
 {"timestamp": "2026-03-24T05:21:37Z", "commit": "c5b6f88", "accuracy": 0.930435, "status": "discard", "description": "baseline plus every frame", "prompt": "Count the number of people visible in the frame. Report the count for every frame.\n"}
 {"timestamp": "2026-03-24T05:31:37Z", "commit": "83b1b70", "accuracy": 0.0, "status": "crash", "description": "baseline plus be precise", "prompt": "Count the number of people visible in the frame. Be precise.\n"}
+{"timestamp": "2026-03-24T05:41:37Z", "commit": "74f8ca0", "accuracy": 0.0, "status": "crash", "description": "specific format N people visible", "prompt": "Count the number of people visible in the frame. Format: N people visible.\n"}

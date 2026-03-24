@@ -30,3 +30,4 @@ timestamp	commit	accuracy	graded	status	description
 2026-03-24T05:13:53Z	e2d6d64	0.965217	115	discard	watch for people and count them
 2026-03-24T05:21:37Z	c5b6f88	0.930435	115	discard	baseline plus every frame
 2026-03-24T05:31:37Z	83b1b70	0.000000	0	crash	baseline plus be precise
+2026-03-24T05:41:37Z	74f8ca0	0.000000	0	crash	specific format N people visible
