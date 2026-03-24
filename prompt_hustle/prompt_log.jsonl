@@ -38,3 +38,4 @@
 {"timestamp": "2026-03-24T06:28:10Z", "commit": "92cf387", "accuracy": 0.956522, "status": "discard", "description": "tally persons in frame", "prompt": "Tally the number of persons in the frame\n"}
 {"timestamp": "2026-03-24T06:35:32Z", "commit": "5bba133", "accuracy": 0.947826, "status": "discard", "description": "enumerate people visible", "prompt": "Enumerate the people visible in the frame\n"}
 {"timestamp": "2026-03-24T06:43:12Z", "commit": "6cf939a", "accuracy": 0.921739, "status": "discard", "description": "visual headcount", "prompt": "Perform a visual headcount of people in the frame\n"}
+{"timestamp": "2026-03-24T06:51:35Z", "commit": "2869b2b", "accuracy": 0.895652, "status": "discard", "description": "identify and count people", "prompt": "Identify and count each person visible in the frame\n"}
