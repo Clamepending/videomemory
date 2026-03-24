@@ -19,3 +19,4 @@
 {"timestamp": "2026-03-24T03:58:51Z", "commit": "06ccb5f", "accuracy": 0.956522, "status": "discard", "description": "count people with zero emphasis", "prompt": "Count the number of people visible in the frame, including when the count is zero\n"}
 {"timestamp": "2026-03-24T04:06:19Z", "commit": "9fb405f", "accuracy": 0.930435, "status": "discard", "description": "imperative: report people count", "prompt": "Report the count of people visible in this frame\n"}
 {"timestamp": "2026-03-24T04:13:36Z", "commit": "30e303a", "accuracy": 0.93913, "status": "discard", "description": "active monitoring phrasing", "prompt": "Actively monitor and report the number of people visible in the frame\n"}
+{"timestamp": "2026-03-24T04:21:21Z", "commit": "73135d9", "accuracy": 0.921739, "status": "discard", "description": "careful observation phrasing", "prompt": "Carefully observe the frame and report how many people are visible\n"}
