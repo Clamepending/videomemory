@@ -1,1 +1,1 @@
-Count the number of people visible in the frame and report as 'Currently N people visible'
+Observe the frame and count all persons visible, including partially visible ones
