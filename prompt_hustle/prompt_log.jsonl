@@ -10,3 +10,4 @@
 {"timestamp": "2026-03-24T02:51:52Z", "commit": "d4c9f9e", "accuracy": 0.946903, "status": "discard", "description": "emphasize distinct individuals", "prompt": "Count the number of distinct people visible in the frame\n"}
 {"timestamp": "2026-03-24T02:59:30Z", "commit": "a81ba48", "accuracy": 0.947826, "status": "discard", "description": "monitor people entering and leaving", "prompt": "Monitor and count the number of people visible in the frame as they enter and leave\n"}
 {"timestamp": "2026-03-24T03:07:08Z", "commit": "a9ae91b", "accuracy": 0.913043, "status": "discard", "description": "observe and count all persons", "prompt": "Observe the frame and count all persons visible, including partially visible ones\n"}
+{"timestamp": "2026-03-24T03:14:06Z", "commit": "3d07ce1", "accuracy": 0.956522, "status": "discard", "description": "track the headcount", "prompt": "Track the headcount of people visible in the frame\n"}
