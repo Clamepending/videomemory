@@ -37,3 +37,4 @@ timestamp	commit	accuracy	graded	status	description
 2026-03-24T06:12:47Z	4f74011	0.965217	115	discard	baseline rerun for variance check
 2026-03-24T06:20:23Z	78e9374	0.911504	113	discard	count people in scene
 2026-03-24T06:28:10Z	92cf387	0.956522	115	discard	tally persons in frame
+2026-03-24T06:35:32Z	5bba133	0.947826	115	discard	enumerate people visible
