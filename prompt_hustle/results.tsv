@@ -14,3 +14,4 @@ timestamp	commit	accuracy	graded	status	description
 2026-03-24T03:14:06Z	3d07ce1	0.956522	115	discard	track the headcount
 2026-03-24T03:21:56Z	f822c7a	0.886957	115	discard	determine the number of people present
 2026-03-24T03:28:59Z	51d2be5	0.939130	115	discard	terse: people count
+2026-03-24T03:36:02Z	41a0f7d	0.930435	115	discard	count humans visible
