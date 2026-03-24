@@ -1,1 +1,1 @@
-Count the number of people visible in the frame. Update the count whenever it changes, including changes to zero.
+Count the number of people visible in the frame
