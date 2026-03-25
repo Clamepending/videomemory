@@ -27,9 +27,14 @@ EVAL_OUTPUT_DIR = OUTPUT_DIR / "eval"
 ORACLE_MODEL = "gemini-2.5-flash"
 
 
-class GradingResult(BaseModel):
+class TaskGrade(BaseModel):
+    task_name: str = Field(..., description="Name of the task being graded")
     reasoning: str = Field(..., description="Brief reasoning for the grade")
     score: int = Field(..., ge=0, le=1, description="0 for incorrect, 1 for correct")
+
+
+class BatchGradingResult(BaseModel):
+    grades: list[TaskGrade] = Field(..., description="One grade per task")
 
 
 def _build_oracle_client():
@@ -40,19 +45,33 @@ def _build_oracle_client():
     return genai.Client(api_key=api_key)
 
 
-def oracle_grade(client, image_bytes, task_description, vlm_output):
+def oracle_grade_batch(client, image_bytes, task_outputs):
+    """Grade all tasks for one frame in a single oracle call.
+
+    Args:
+        task_outputs: list of (task_name, task_description, vlm_output)
+
+    Returns:
+        dict mapping task_name -> score (0 or 1), or -1 on error.
+    """
     from google.genai import types as genai_types
+
+    task_blocks = []
+    for tname, tdesc, vlm_out in task_outputs:
+        task_blocks.append(
+            f"Task '{tname}':\n  Description: {tdesc}\n  Model output: {vlm_out}"
+        )
+
     grading_prompt = (
-        "You are an evaluator grading a vision-language model's output.\n\n"
-        f"Task given to the model:\n{task_description}\n\n"
-        f"Model's output:\n{vlm_output}\n\n"
-        "Look at the attached image and evaluate whether the model's output "
-        "is factually correct with respect to what is visible in the image "
-        "and relevant to the task.\n\n"
-        "Rubric:\n"
+        "You are an evaluator grading a vision-language model's outputs on multiple tasks.\n\n"
+        + "\n\n".join(task_blocks)
+        + "\n\nLook at the attached image. For EACH task, evaluate whether the "
+        "model's output is factually correct with respect to what is visible.\n\n"
+        "Rubric per task:\n"
         "  1 - The output accurately describes what is in the image relative to the task.\n"
         "  0 - The output is incorrect or significantly misrepresents the image content.\n\n"
-        "Return JSON with 'reasoning' (one sentence) and 'score' (0 or 1)."
+        "Return JSON with a 'grades' array containing one object per task, each with "
+        "'task_name', 'reasoning' (one sentence), and 'score' (0 or 1)."
     )
     image_part = genai_types.Part(
         inline_data=genai_types.Blob(data=image_bytes, mime_type="image/jpeg")
@@ -62,13 +81,14 @@ def oracle_grade(client, image_bytes, task_description, vlm_output):
         contents=[image_part, genai_types.Part(text=grading_prompt)],
         config=genai_types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_json_schema=GradingResult.model_json_schema(),
+            response_json_schema=BatchGradingResult.model_json_schema(),
         ),
     )
     raw = getattr(response, "text", None)
     if not raw:
         raise RuntimeError("Oracle model returned empty response.")
-    return GradingResult.model_validate_json(raw)
+    result = BatchGradingResult.model_validate_json(raw)
+    return {g.task_name: g.score for g in result.grades}
 
 
 def load_video_tasks(tasks_dir):
@@ -163,24 +183,25 @@ def run_eval(args):
             _, buf = cv2.imencode(".jpg", r["frame"])
             image_bytes = bytes(buf)
 
-            frame_grades = {}
+            batch_input = []
             for tn, (tname, tdesc) in task_map.items():
                 vlm_out = per_task_outputs.get(tn, "(no output)")
-                try:
-                    grade = oracle_grade(oracle_client, image_bytes, tdesc, vlm_out)
-                    score = grade.score
-                except Exception as e:
-                    score = -1
+                batch_input.append((tname, tdesc, vlm_out))
 
+            try:
+                scores_map = oracle_grade_batch(oracle_client, image_bytes, batch_input)
+            except Exception:
+                scores_map = {}
+
+            frame_grades = {}
+            for tname, tdesc, vlm_out in batch_input:
+                score = scores_map.get(tname, -1)
                 if score >= 0:
                     grand_scores.append(score)
                     all_task_scores.setdefault(tname, []).append(score)
-
                 frame_grades[tname] = {"vlm_output": vlm_out, "score": score}
 
-            summary_parts = []
-            for tname, g in frame_grades.items():
-                summary_parts.append(f"{tname}={g['score']}")
+            summary_parts = [f"{t}={g['score']}" for t, g in frame_grades.items()]
             print(f"{label}  {' '.join(summary_parts)}")
 
             per_frame.append({
