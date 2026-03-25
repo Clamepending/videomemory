@@ -3,3 +3,5 @@ timestamp	commit	accuracy	graded	status	description
 2026-03-25T08:14:03	536c685	0.4757	267	reverted	step1: When task_newest_note is "None", you MUST ALWAYS output at l
 2026-03-25T08:24:07	ee9ea92	0.4406	261	reverted	step2: When task_newest_note is "None", you MUST ALWAYS output at l
 2026-03-25T08:35:09	dbec2a2	0.4138	261	reverted	step3: When task_newest_note is "None", you MUST ALWAYS output at l
+2026-03-25T09:06:22	81184f7	0.6628	261	kept	targeted: anti-anchoring, broad detection, scan+evidence
+2026-03-25T09:07:22	81184f7	0.6628	261	kept	targeted: anti-anchoring, broad detection, scan+evidence
