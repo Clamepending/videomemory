@@ -1,1 +1,0 @@
-Is there any luggage, bags, or suitcases visible in the frame? Describe what you see.

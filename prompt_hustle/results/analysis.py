@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Analyse prompt_hustle experiment results.
 
-Reads results.tsv and prompt_log.jsonl and produces:
+Reads results/results.tsv and results/prompt_log.jsonl and produces:
   1. An accuracy-over-experiments plot (saved as PNG).
   2. A text summary of the prompt evolution (printed to stdout).
 
 Usage (from project root):
-    uv run python prompt_hustle/analysis.py
-    uv run python prompt_hustle/analysis.py --out prompt_hustle/progress.png
+    uv run python prompt_hustle/results/analysis.py
+    uv run python prompt_hustle/results/analysis.py --out prompt_hustle/results/progress.png
 """
 
 import argparse
@@ -22,9 +22,10 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 ROOT = Path(__file__).resolve().parent
-RESULTS_TSV = ROOT / "results.tsv"
-PROMPT_LOG = ROOT / "prompt_log.jsonl"
-DEFAULT_PNG = ROOT / "progress.png"
+RESULTS_DIR = ROOT
+RESULTS_TSV = RESULTS_DIR / "results.tsv"
+PROMPT_LOG = RESULTS_DIR / "prompt_log.jsonl"
+DEFAULT_PNG = RESULTS_DIR / "progress.png"
 
 
 def load_results(path: Path) -> list[dict]:
@@ -36,7 +37,11 @@ def load_results(path: Path) -> list[dict]:
             if len(vals) < len(header):
                 continue
             row = dict(zip(header, vals))
-            row["accuracy"] = float(row.get("accuracy", 0))
+            # Backward compatible with old "accuracy" rows.
+            train_val = row.get("train_accuracy", row.get("accuracy", 0))
+            row["train_accuracy"] = float(train_val or 0)
+            val_raw = row.get("validation_accuracy", "")
+            row["validation_accuracy"] = float(val_raw) if val_raw else None
             row["graded"] = int(row.get("graded", 0))
             if "timestamp" in row:
                 try:
@@ -77,7 +82,13 @@ def plot_accuracy(rows: list[dict], out_path: Path):
 
     fig, ax = plt.subplots(figsize=(12, 5))
 
-    colors = {"keep": "#2ecc71", "discard": "#e74c3c", "crash": "#95a5a6"}
+    colors = {
+        "keep": "#2ecc71",
+        "kept": "#2ecc71",
+        "discard": "#e74c3c",
+        "reverted": "#e74c3c",
+        "crash": "#95a5a6",
+    }
     status_labels_seen = set()
 
     if has_timestamps:
@@ -98,17 +109,19 @@ def plot_accuracy(rows: list[dict], out_path: Path):
         color = colors.get(status, "#3498db")
         label = status if status not in status_labels_seen else None
         status_labels_seen.add(status)
-        ax.scatter(x, row["accuracy"], c=color, s=60, zorder=3, label=label, edgecolors="white", linewidths=0.5)
+        ax.scatter(x, row["train_accuracy"], c=color, s=60, zorder=3, label=label, edgecolors="white", linewidths=0.5)
+        if row.get("validation_accuracy") is not None:
+            ax.scatter(x, row["validation_accuracy"], c="#8e44ad", s=28, zorder=2, alpha=0.65)
 
-        if row["accuracy"] > best_so_far:
-            best_so_far = row["accuracy"]
+        if row["train_accuracy"] > best_so_far:
+            best_so_far = row["train_accuracy"]
         best_line_x.append(x)
         best_line_y.append(best_so_far)
 
     ax.plot(best_line_x, best_line_y, color="#2c3e50", linewidth=1.5, linestyle="--", alpha=0.7, label="best so far")
 
     ax.set_ylabel("Accuracy")
-    ax.set_title("prompt_hustle — accuracy over experiments")
+    ax.set_title("prompt_hustle — train/validation accuracy over experiments")
     ax.set_ylim(-0.05, 1.05)
     ax.grid(True, alpha=0.3)
     ax.legend(loc="lower right", fontsize=9)
@@ -126,13 +139,23 @@ def print_prompt_evolution(rows: list[dict], prompt_log: dict[str, dict]):
 
     for i, row in enumerate(rows):
         status = row.get("status", "?")
-        acc = row["accuracy"]
+        train_acc = row["train_accuracy"]
+        val_acc = row.get("validation_accuracy")
         desc = row.get("description", "")
         commit = row.get("commit", "?")
         ts = row.get("timestamp", "")
 
-        marker = {"keep": "+", "discard": "x", "crash": "!!"}.get(status, "?")
-        print(f"\n[{marker}] #{i}  {ts}  {commit}  acc={acc:.4f}  ({status})")
+        marker = {
+            "keep": "+",
+            "kept": "+",
+            "discard": "x",
+            "reverted": "x",
+            "crash": "!!",
+        }.get(status, "?")
+        if val_acc is None:
+            print(f"\n[{marker}] #{i}  {ts}  {commit}  train={train_acc:.4f}  ({status})")
+        else:
+            print(f"\n[{marker}] #{i}  {ts}  {commit}  train={train_acc:.4f}  val={val_acc:.4f}  ({status})")
         print(f"    {desc}")
 
         entry = prompt_log.get(commit)
@@ -149,17 +172,17 @@ def print_prompt_evolution(rows: list[dict], prompt_log: dict[str, dict]):
 
     print("\n" + "=" * 70)
 
-    keeps = [r for r in rows if r.get("status") == "keep"]
-    discards = [r for r in rows if r.get("status") == "discard"]
+    keeps = [r for r in rows if r.get("status") in {"keep", "kept"}]
+    discards = [r for r in rows if r.get("status") in {"discard", "reverted"}]
     crashes = [r for r in rows if r.get("status") == "crash"]
-    best = max(rows, key=lambda r: r["accuracy"]) if rows else None
+    best = max(rows, key=lambda r: r["train_accuracy"]) if rows else None
 
     print(f"Total experiments: {len(rows)}")
     print(f"  Kept:      {len(keeps)}")
     print(f"  Discarded: {len(discards)}")
     print(f"  Crashed:   {len(crashes)}")
     if best:
-        print(f"  Best acc:  {best['accuracy']:.4f} ({best.get('description', '?')})")
+        print(f"  Best train acc:  {best['train_accuracy']:.4f} ({best.get('description', '?')})")
 
 
 def main():
