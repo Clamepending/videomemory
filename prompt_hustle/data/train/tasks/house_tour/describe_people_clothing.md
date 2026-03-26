@@ -1,0 +1,1 @@
+If any people are visible in the frame, describe what they are wearing. If no people are visible, report that.

@@ -185,6 +185,7 @@ class OpenRouterMistralSmall31Provider(_BaseOpenRouterProvider):
 _openrouter_paid_rate_limiter = RateLimiter(120.0)
 
 
+
 class OpenRouterQwen3VL8BProvider(_BaseOpenRouterProvider):
 
     def __init__(self, api_key=None):
@@ -193,44 +194,98 @@ class OpenRouterQwen3VL8BProvider(_BaseOpenRouterProvider):
 
     @staticmethod
     def _repair_json(s):
-        import re
-        s = re.sub(r'(?<=[{,\[])\s*([a-zA-Z_]\w*)\s*:', r' "\1":', s)
-        s = re.sub(r',\s*([}\]])', r'\1', s)
-        return s
+        """Fix common JSON issues from small VLMs: unquoted keys, trailing
+        commas, duplicate 'task_updates' keys, and truncation."""
+        import re as _re
+        # Strip thinking tags
+        s = _re.sub(r"<think>[\s\S]*?</think>", "", s).strip()
+        # Strip markdown fences
+        if s.startswith("```"):
+            slines = s.splitlines()
+            end = len(slines)
+            for j in range(len(slines) - 1, 0, -1):
+                if slines[j].strip().startswith("```"):
+                    end = j
+                    break
+            s = "\n".join(slines[1:end]).strip()
+        # Quote unquoted keys
+        s = _re.sub(r'(?<=[{,\[])\s*([a-zA-Z_]\w*)\s*:', r' "\1":', s)
+        # Remove trailing commas
+        s = _re.sub(r',\s*([}\]])', r'\1', s)
+        # Merge duplicate "task_updates" arrays into one
+        # Pattern: the model emits {"task_updates": [...], "task_updates": [...], ...}
+        arrays = _re.findall(r'"task_updates"\s*:\s*(\[.*?\])', s, _re.DOTALL)
+        if len(arrays) > 1:
+            import json as _json
+            merged = []
+            for arr_str in arrays:
+                try:
+                    items = _json.loads(arr_str)
+                    if isinstance(items, list):
+                        merged.extend(items)
+                except Exception:
+                    pass
+            if merged:
+                return _json.dumps({"task_updates": merged})
+        # Truncation repair: extract valid task_update objects via regex
+        try:
+            import json as _json
+            _json.loads(s)
+            return s
+        except Exception:
+            pass
+        import json as _json
+        pattern = _re.compile(
+            r'\{\s*"task_number"\s*:\s*(\d+)\s*,\s*'
+            r'"task_note"\s*:\s*"([^"]*?)"\s*,\s*'
+            r'"task_done"\s*:\s*(true|false)\s*\}'
+        )
+        items = []
+        for m in pattern.finditer(s):
+            items.append({
+                "task_number": int(m.group(1)),
+                "task_note": m.group(2),
+                "task_done": m.group(3) == "true",
+            })
+        if items:
+            return _json.dumps({"task_updates": items})
+        return '{"task_updates": []}'
 
     def _sync_generate_content(self, image_base64, prompt, response_model):
         if not self.api_key:
             raise RuntimeError("OpenRouter API key not set.")
         self._rate_limiter.wait_if_needed()
-        with httpx.Client(timeout=60.0) as client:
-            response = client.post(
+        with httpx.Client(timeout=120.0) as client:
+            resp = client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
                 json={
                     "model": self._model_name,
+                    "max_tokens": 4096,
                     "messages": [{"role": "user", "content": [
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
                         {"type": "text", "text": prompt}
                     ]}],
-                    "response_format": {"type": "json_object"}
-                }
+                    "response_format": {"type": "json_object"},
+                },
             )
-            if response.status_code == 429:
+            if resp.status_code == 429:
                 raise RuntimeError("Rate limit exceeded (429)")
-            response.raise_for_status()
-            result = response.json()
-            message = (result.get("choices") or [{}])[0].get("message") or {}
-            content = message.get("content")
+            resp.raise_for_status()
+            result = resp.json()
+            msg = (result.get("choices") or [{}])[0].get("message") or {}
+            content = msg.get("content")
             if content is None:
-                tool_calls = message.get("tool_calls") or []
-                if tool_calls:
-                    content = (tool_calls[0].get("function") or {}).get("arguments")
+                tc = msg.get("tool_calls") or []
+                if tc:
+                    content = (tc[0].get("function") or {}).get("arguments")
             if content is None:
                 raise RuntimeError("OpenRouter returned empty content.")
             if isinstance(content, (dict, list)):
                 return response_model.model_validate(content)
-            s = str(content).strip()
-            import re
-            s = re.sub(r"<think>[\s\S]*?</think>", "", s).strip()
-            s = self._repair_json(s)
+            s = self._repair_json(str(content))
             return response_model.model_validate_json(s)
+

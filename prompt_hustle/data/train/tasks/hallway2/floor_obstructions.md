@@ -1,0 +1,1 @@
+Are there any objects on the floor that could be obstructions or tripping hazards?

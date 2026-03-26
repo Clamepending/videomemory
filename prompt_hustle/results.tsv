@@ -5,3 +5,8 @@ timestamp	commit	accuracy	graded	status	description
 2026-03-25T08:35:09	dbec2a2	0.4138	261	reverted	step3: When task_newest_note is "None", you MUST ALWAYS output at l
 2026-03-25T09:06:22	81184f7	0.6628	261	kept	targeted: anti-anchoring, broad detection, scan+evidence
 2026-03-25T09:07:22	81184f7	0.6628	261	kept	targeted: anti-anchoring, broad detection, scan+evidence
+2026-03-25T09:07:22	81184f7	0.6628	261	kept	targeted: anti-anchoring, broad detection, scan+evidence
+2026-03-25T09:08:22	81184f7	0.6628	261	kept	targeted fixes
+2026-03-25T09:08:22	81184f7	0.6628	261	kept	targeted fixes
+2026-03-25T09:08	81184f7	0.6628	261	kept	targeted fixes
+logged
