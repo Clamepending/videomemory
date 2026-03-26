@@ -15,7 +15,7 @@ The evaluation runs many different tasks (count people, detect luggage, describe
 
 ## Setup
 
-1. Agree on a run tag (e.g. codex_mar25). Branch prompt_hustle/tag must not already exist.
+1. Agree on a run tag (e.g. codex_mar25_3pm). Branch prompt_hustle/tag must not already exist.
 2. Create the branch.
 3. Read in-scope files: program.md, instructions.md (only file you edit), data/train/tasks/<video name>/*.md (fixed test cases), eval/run.py (do not modify).
 4. Verify data exists in data/train/frames/ and data/validation/frames/.
