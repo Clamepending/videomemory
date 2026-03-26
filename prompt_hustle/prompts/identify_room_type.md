@@ -1,0 +1,1 @@
+What type of room or space is shown in the frame? Report the room type such as kitchen, hallway, office, living room, etc.

@@ -1,0 +1,1 @@
+Describe any items visible on countertops, desks, or tables in the frame

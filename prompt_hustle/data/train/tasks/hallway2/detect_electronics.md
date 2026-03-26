@@ -1,0 +1,1 @@
+Are there any electronic devices visible in the frame such as TVs, monitors, computers, or lamps? Report what you see.

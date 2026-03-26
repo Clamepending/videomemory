@@ -11,6 +11,7 @@ from .openrouter_provider import (
     OpenRouterQwen2VL7BProvider,
     OpenRouterPhi4MultimodalProvider,
     OpenRouterMistralSmall31Provider,
+    OpenRouterQwen3VL8BProvider,
 )
 from .vllm_provider import LocalVLLMProvider
 
@@ -29,6 +30,11 @@ MODEL_PROVIDER_MAP = {
     "qwen-2-vl-7b": OpenRouterQwen2VL7BProvider,
     "phi-4-multimodal": OpenRouterPhi4MultimodalProvider,
     "mistral-small-3.1": OpenRouterMistralSmall31Provider,
+    "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
+    "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
+    "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
+    "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
+    "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
     # Local vLLM (no cloud API key; uses whatever model the server is serving)
     "local-vllm": LocalVLLMProvider,
 }
