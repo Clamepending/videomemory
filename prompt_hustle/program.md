@@ -30,10 +30,10 @@ CANNOT: Modify prompts/*.md, eval/run.py, or any VideoMemory source code.
 ## Running an evaluation
 
 ```
-uv run python -m prompt_hustle.eval --instructions prompt_hustle/instructions.md --model qwen3-vl-8b --no-dedup > prompt_hustle/run.log 2>&1
+uv run python -m prompt_hustle.eval --instructions prompt_hustle/instructions.md --model qwen3-vl-8b --no-dedup > prompt_hustle/outputs/logs/run.log 2>&1
 ```
 
-Extract metrics: grep for overall_accuracy, total_graded, and task_ lines in run.log.
+Extract metrics: grep for overall_accuracy, total_graded, and task_ lines in outputs/logs/run.log.
 
 ## Logging results
 
@@ -47,8 +47,8 @@ LOOP FOREVER:
 
 1. Edit prompt_hustle/instructions.md with a new idea.
 2. Commit: git add prompt_hustle/instructions.md && git commit -m 'prompt: description'
-3. Run eval (see above). Redirect to run.log.
-4. Read results from run.log.
+3. Run eval (see above). Redirect to outputs/logs/run.log.
+4. Read results from outputs/logs/run.log.
 5. Log to results.tsv and prompt_log.jsonl, commit logs.
 6. If overall_accuracy improved, keep.
 7. If equal or worse, revert: git checkout HEAD~2 -- prompt_hustle/instructions.md && git commit -m 'revert: description'

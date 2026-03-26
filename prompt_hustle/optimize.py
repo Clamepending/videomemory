@@ -22,6 +22,7 @@ HUSTLE = PROJ / "prompt_hustle"
 INSTRUCTIONS = HUSTLE / "instructions.md"
 RESULTS_TSV = HUSTLE / "results.tsv"
 PROMPT_LOG = HUSTLE / "prompt_log.jsonl"
+LOGS_DIR = HUSTLE / "outputs" / "logs"
 
 OPTIMIZER_MODEL = "gemini-2.5-flash"
 NUM_STEPS = 10
@@ -44,9 +45,14 @@ def git(*args):
 
 def run_eval():
     """Run the eval and parse overall_accuracy + per-task accuracies."""
-    print("  Running eval (this takes ~23 min)...")
-    r = subprocess.run(EVAL_CMD, capture_output=True, text=True, cwd=str(PROJ))
-    output = r.stdout + r.stderr
+    print("  Running eval (this takes ~8 min)...")
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    log_path = LOGS_DIR / f"run_{ts}.log"
+    with open(log_path, "w") as log_f:
+        subprocess.run(EVAL_CMD, stdout=log_f, stderr=subprocess.STDOUT, cwd=str(PROJ))
+    output = log_path.read_text()
+    print(f"  Log saved to {log_path.relative_to(PROJ)}")
 
     accuracy = None
     total_graded = None
