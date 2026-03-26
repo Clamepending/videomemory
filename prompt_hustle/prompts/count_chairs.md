@@ -1,1 +1,0 @@
-Count the number of chairs visible in the frame

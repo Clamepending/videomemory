@@ -1,5 +1,5 @@
 
 /outputs
-progress.png
+results/progress.png
 run.log.best_accuracy
 batch_runner.sh

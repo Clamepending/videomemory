@@ -101,7 +101,7 @@ def load_video_tasks(tasks_dir):
     return tasks
 
 
-def run_eval(args):
+def run_eval_for_split(args, split: str, quiet: bool = False):
     custom_instructions = None
     if args.instructions:
         inst_path = Path(args.instructions)
@@ -111,7 +111,6 @@ def run_eval(args):
         if not custom_instructions:
             sys.exit(f"Instructions file is empty: {inst_path}")
 
-    split = "validation" if args.eval else "train"
     frames_dir = DATA_DIR / split / "frames"
     tasks_dir = DATA_DIR / split / "tasks"
     if not frames_dir.exists():
@@ -124,12 +123,13 @@ def run_eval(args):
         sys.exit(f"No video folders found in {frames_dir}")
 
     mode = "custom instructions" if custom_instructions else "built-in instructions"
-    print(f"Split:        {split}")
-    print(f"Videos:       {video_dirs}")
-    print(f"Model:        {args.model or '(default)'}")
-    print(f"Oracle:       {ORACLE_MODEL}")
-    print(f"Dedup:        {'off' if args.no_dedup else 'on'}")
-    print(f"Instructions: {mode}")
+    if not quiet:
+        print(f"Split:        {split}")
+        print(f"Videos:       {video_dirs}")
+        print(f"Model:        {args.model or '(default)'}")
+        print(f"Oracle:       {ORACLE_MODEL}")
+        print(f"Dedup:        {'off' if args.no_dedup else 'on'}")
+        print(f"Instructions: {mode}")
 
     oracle_client = _build_oracle_client()
     all_video_results = []
@@ -147,13 +147,15 @@ def run_eval(args):
             print(f"\nWARNING: No tasks for {video_name}, skipping")
             continue
 
-        print(f"\n{'=' * 60}")
-        print(f"VIDEO: {video_name}")
-        print(f"  Tasks: {', '.join(n for n, _ in task_descs)}")
-        print(f"{'=' * 60}")
+        if not quiet:
+            print(f"\n{'=' * 60}")
+            print(f"VIDEO: {video_name}")
+            print(f"  Tasks: {', '.join(n for n, _ in task_descs)}")
+            print(f"{'=' * 60}")
 
         frames = load_frames(frames_dir / video_name)
-        print(f"  Loaded {len(frames)} frames")
+        if not quiet:
+            print(f"  Loaded {len(frames)} frames")
 
         ingestor, tasks = create_ingestor(
             task_descs, args.model, args.no_dedup,
@@ -171,12 +173,14 @@ def run_eval(args):
             if r["status"] == "error":
                 per_frame.append({"filename": filename, "status": "error", "error": r["error"]})
                 vlm_errors += 1
-                print(f"{label}  VLM error ({r['error']})")
+                if not quiet:
+                    print(f"{label}  VLM error ({r['error']})")
                 continue
 
             if r["status"] == "skipped":
                 per_frame.append({"filename": filename, "status": "skipped"})
-                print(f"{label}  skipped (dup)")
+                if not quiet:
+                    print(f"{label}  skipped (dup)")
                 continue
 
             per_task_outputs = r["per_task_outputs"]
@@ -202,19 +206,17 @@ def run_eval(args):
                 frame_grades[tname] = {"vlm_output": vlm_out, "score": score}
 
             summary_parts = [f"{t}={g['score']}" for t, g in frame_grades.items()]
-            print(f"{label}  {' '.join(summary_parts)}")
+            if not quiet:
+                print(f"{label}  {' '.join(summary_parts)}")
 
             per_frame.append({
                 "filename": filename, "status": "graded",
                 "per_task": frame_grades,
             })
 
-        total_graded_video = sum(
-            1 for f in per_frame if f.get("status") == "graded"
-            for _ in f.get("per_task", {}).values()
-        )
         skipped = sum(1 for f in per_frame if f.get("status") == "skipped")
-        print(f"  => {video_name}: {len(per_frame)} frames, {vlm_errors} errors, {skipped} skipped")
+        if not quiet:
+            print(f"  => {video_name}: {len(per_frame)} frames, {vlm_errors} errors, {skipped} skipped")
 
         all_video_results.append({
             "video": video_name,
@@ -250,26 +252,38 @@ def run_eval(args):
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2)
 
-    print(f"\n{'=' * 60}")
-    print("EVAL SUMMARY")
-    print(f"{'=' * 60}")
-    for name, scores in sorted(all_task_scores.items()):
-        acc = sum(scores) / len(scores) if scores else 0.0
-        print(f"  {name:30s}  {acc:.2%}  ({sum(scores)}/{len(scores)})")
-    print(f"  {'OVERALL':30s}  {overall:.2%}  ({sum(grand_scores)}/{len(grand_scores)})")
-    print(f"{'=' * 60}")
-    print(f"Results saved to {out_path}")
+    if not quiet:
+        print(f"\n{'=' * 60}")
+        print("EVAL SUMMARY")
+        print(f"{'=' * 60}")
+        for name, scores in sorted(all_task_scores.items()):
+            acc = sum(scores) / len(scores) if scores else 0.0
+            print(f"  {name:30s}  {acc:.2%}  ({sum(scores)}/{len(scores)})")
+        print(f"  {'OVERALL':30s}  {overall:.2%}  ({sum(grand_scores)}/{len(grand_scores)})")
+        print(f"{'=' * 60}")
+        print(f"Results saved to {out_path}")
 
-    print(f"\n---")
-    print(f"overall_accuracy: {overall:.6f}")
-    print(f"total_graded:     {len(grand_scores)}")
-    print(f"total_correct:    {sum(grand_scores)}")
-    print(f"total_frames:     {total_frames}")
-    for name, scores in sorted(all_task_scores.items()):
-        acc = sum(scores) / len(scores) if scores else 0.0
-        print(f"task_{name}: {acc:.6f}")
+        print(f"\n---")
+        print(f"overall_accuracy: {overall:.6f}")
+        print(f"total_graded:     {len(grand_scores)}")
+        print(f"total_correct:    {sum(grand_scores)}")
+        print(f"total_frames:     {total_frames}")
+        for name, scores in sorted(all_task_scores.items()):
+            acc = sum(scores) / len(scores) if scores else 0.0
+            print(f"task_{name}: {acc:.6f}")
 
-    return overall
+    return {
+        "split": split,
+        "overall_accuracy": overall,
+        "total_graded": len(grand_scores),
+        "total_correct": sum(grand_scores),
+        "total_frames": total_frames,
+        "per_task_accuracy": {
+            name: (sum(scores) / len(scores) if scores else 0.0)
+            for name, scores in sorted(all_task_scores.items())
+        },
+        "out_path": str(out_path),
+    }
 
 
 def main():
@@ -287,7 +301,17 @@ def main():
     parser.add_argument("--model", default=None, help="Model name for the video ingestor")
     parser.add_argument("--no-dedup", action="store_true", help="Disable frame deduplication")
     args = parser.parse_args()
-    run_eval(args)
+    if args.eval:
+        run_eval_for_split(args, split="validation", quiet=False)
+        return
+
+    run_eval_for_split(args, split="train", quiet=False)
+    val_result = run_eval_for_split(args, split="validation", quiet=True)
+    print("\n---")
+    print(f"validation_overall_accuracy: {val_result['overall_accuracy']:.6f}")
+    print(f"validation_total_graded:     {val_result['total_graded']}")
+    print(f"validation_total_correct:    {val_result['total_correct']}")
+    print(f"validation_total_frames:     {val_result['total_frames']}")
 
 
 if __name__ == "__main__":
