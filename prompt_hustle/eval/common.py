@@ -112,15 +112,13 @@ def process_frames(
             frame = cv2.resize(frame, target, interpolation=cv2.INTER_LINEAR)
             base["frame"] = frame
 
-        skipped_before = ingestor._frames_skipped
         result = ingestor._VLM_processing(frame)
 
         if result is None:
-            if ingestor._frames_skipped > skipped_before:
-                yield {**base, "status": "skipped"}
-            else:
-                yield {**base, "status": "error", "error": "no VLM result"}
+            yield {**base, "status": "error", "error": "no VLM result"}
             continue
+
+        status = "skipped" if result.get("skipped") else "processed"
 
         task_updates = result.get("task_updates", [])
         per_task_outputs = {}
@@ -137,7 +135,7 @@ def process_frames(
 
         yield {
             **base,
-            "status": "processed",
+            "status": status,
             "task_updates": task_updates,
             "per_task_outputs": per_task_outputs,
             "processing_time_ms": result.get("processing_time_ms", 0),

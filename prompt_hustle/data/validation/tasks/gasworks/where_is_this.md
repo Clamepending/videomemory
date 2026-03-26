@@ -1,0 +1,1 @@
+Describe the exact location where this video was taken. Name the state, city, and park name.

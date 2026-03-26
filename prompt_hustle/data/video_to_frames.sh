@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Extract every Nth frame from all .mp4 files under offline/data/mp4/<name>/.
-# Output: offline/data/frames/<name>/<video_stem>_000001.jpg, ...
+# Extract every Nth frame from all .mp4 files under:
+#   prompt_hustle/data/{train,validation}/mp4/<name>/
+# Output:
+#   prompt_hustle/data/{train,validation}/frames/<name>/<video_stem>_000001.jpg, ...
 #
 # Usage (every_n defaults to 30; max_frames caps output frames per video, optional):
-#   ./offline/scripts/video_to_frames.sh <every_n> <folder_name> [max_frames]
-#   ./offline/scripts/video_to_frames.sh <folder_name> [every_n] [max_frames]
+#   ./prompt_hustle/data/video_to_frames.sh <every_n> <folder_name> [max_frames]
+#   ./prompt_hustle/data/video_to_frames.sh <folder_name> [every_n] [max_frames]
 #
 # Examples:
-#   ./offline/scripts/video_to_frames.sh house_tour
-#   ./offline/scripts/video_to_frames.sh 60 house_tour
-#   ./offline/scripts/video_to_frames.sh house_tour 500          # every 30, max 500 frames
-#   ./offline/scripts/video_to_frames.sh house_tour 60 500       # every 60, max 500
-#   ./offline/scripts/video_to_frames.sh 60 house_tour 500
+#   ./prompt_hustle/data/video_to_frames.sh house_tour
+#   ./prompt_hustle/data/video_to_frames.sh 60 house_tour
+#   ./prompt_hustle/data/video_to_frames.sh house_tour 500          # every 30, max 500 frames
+#   ./prompt_hustle/data/video_to_frames.sh house_tour 60 500       # every 60, max 500
+#   ./prompt_hustle/data/video_to_frames.sh 60 house_tour 500
 
 set -euo pipefail
 
@@ -37,28 +39,39 @@ if [[ -n "$MAX" ]]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SRC="$REPO_ROOT/offline/data/mp4/$NAME"
-DST="$REPO_ROOT/offline/data/frames/$NAME"
+DATA_ROOT="$REPO_ROOT/prompt_hustle/data"
 
-[[ -d "$SRC" ]] || die "missing directory: $SRC"
 command -v ffmpeg >/dev/null || die "ffmpeg not in PATH"
 
 shopt -s nullglob
-videos=("$SRC"/*.mp4)
-(( ${#videos[@]} > 0 )) || die "no .mp4 in $SRC"
-
-mkdir -p "$DST"
 
 FF_EXTRA=()
 [[ -n "$MAX" ]] && FF_EXTRA+=(-frames:v "$MAX")
 
-for v in "${videos[@]}"; do
-  stem="$(basename "${v%.mp4}")"
-  ffmpeg -hide_banner -loglevel error -stats -y -i "$v" \
-    -vf "select=not(mod(n\\,$EVERY)),setpts=N/FRAME_RATE/TB" \
-    -vsync vfr -q:v 2 \
-    "${FF_EXTRA[@]}" \
-    "$DST/${stem}_%06d.jpg"
+processed_any=0
+for split in train validation; do
+  SRC="$DATA_ROOT/$split/mp4/$NAME"
+  DST="$DATA_ROOT/$split/frames/$NAME"
+
+  if [[ ! -d "$SRC" ]]; then
+    continue
+  fi
+
+  videos=("$SRC"/*.mp4)
+  (( ${#videos[@]} > 0 )) || die "no .mp4 in $SRC"
+
+  mkdir -p "$DST"
+  for v in "${videos[@]}"; do
+    stem="$(basename "${v%.mp4}")"
+    ffmpeg -hide_banner -loglevel error -stats -y -i "$v" \
+      -vf "select=not(mod(n\\,$EVERY)),setpts=N/FRAME_RATE/TB" \
+      -vsync vfr -q:v 2 \
+      "${FF_EXTRA[@]}" \
+      "$DST/${stem}_%06d.jpg"
+  done
+
+  processed_any=1
+  echo "done: $DST"
 done
 
-echo "done: $DST"
+(( processed_any > 0 )) || die "missing mp4 directories for '$NAME' under $DATA_ROOT/{train,validation}/mp4"

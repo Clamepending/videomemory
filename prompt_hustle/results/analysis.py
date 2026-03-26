@@ -22,10 +22,13 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 ROOT = Path(__file__).resolve().parent
+PROMPT_HUSTLE_ROOT = ROOT.parent
 RESULTS_DIR = ROOT
 RESULTS_TSV = RESULTS_DIR / "results.tsv"
 PROMPT_LOG = RESULTS_DIR / "prompt_log.jsonl"
+EVAL_DIR = PROMPT_HUSTLE_ROOT / "outputs" / "eval"
 DEFAULT_PNG = RESULTS_DIR / "progress.png"
+DEFAULT_TIMING_PNG = RESULTS_DIR / "timing.png"
 
 
 def load_results(path: Path) -> list[dict]:
@@ -71,6 +74,71 @@ def load_prompt_log(path: Path) -> dict[str, dict]:
             except json.JSONDecodeError:
                 continue
     return entries
+
+
+def load_latest_eval() -> dict | None:
+    """Load the most recent eval JSON from outputs/eval/."""
+    if not EVAL_DIR.exists():
+        return None
+    files = sorted(EVAL_DIR.glob("eval_*.json"))
+    if not files:
+        return None
+    with open(files[-1]) as f:
+        return json.load(f)
+
+
+def _extract_frame_times(eval_data: dict) -> dict[str, dict[str, list[float]]]:
+    """Extract per-frame timing from eval JSON.
+
+    Returns {split: {"ingestor": [ms, ...], "oracle": [ms, ...]}}.
+    """
+    out = {}
+    for split_name, split_data in eval_data.get("splits", {}).items():
+        ingestor_times, oracle_times = [], []
+        for video in split_data.get("per_video", []):
+            for frame in video.get("per_frame", []):
+                if "video_ingestor_processing_time_ms" in frame:
+                    ingestor_times.append(frame["video_ingestor_processing_time_ms"])
+                    oracle_times.append(frame.get("oracle_grading_time_ms", 0))
+        if ingestor_times:
+            out[split_name] = {"ingestor": ingestor_times, "oracle": oracle_times}
+    return out
+
+
+def plot_timing(eval_data: dict, out_path: Path):
+    """Plot per-frame oracle grading and video ingestor times by split."""
+    times_by_split = _extract_frame_times(eval_data)
+    if not times_by_split:
+        print("No timing data found in eval results.")
+        return
+
+    splits = list(times_by_split.keys())
+    fig, axes = plt.subplots(len(splits), 1, figsize=(12, 4 * len(splits)), squeeze=False)
+
+    for ax, split in zip(axes[:, 0], splits):
+        data = times_by_split[split]
+        xs = range(len(data["ingestor"]))
+        ax.plot(xs, data["ingestor"], color="#3498db", linewidth=1, alpha=0.8, label="Video ingestor")
+        ax.plot(xs, data["oracle"], color="#e67e22", linewidth=1, alpha=0.8, label="Oracle grader")
+        ax.set_ylabel("Time (ms)")
+        ax.set_xlabel("Frame #")
+        ax.set_title(f"{split} — per-frame processing time")
+        ax.legend(loc="upper right", fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+        avg_i = sum(data["ingestor"]) / len(data["ingestor"])
+        avg_o = sum(data["oracle"]) / len(data["oracle"])
+        ax.axhline(avg_i, color="#3498db", linestyle="--", alpha=0.5, linewidth=0.8)
+        ax.axhline(avg_o, color="#e67e22", linestyle="--", alpha=0.5, linewidth=0.8)
+        ax.annotate(f"avg {avg_i:.0f}ms", xy=(len(data["ingestor"]) - 1, avg_i),
+                    fontsize=8, color="#3498db", va="bottom")
+        ax.annotate(f"avg {avg_o:.0f}ms", xy=(len(data["oracle"]) - 1, avg_o),
+                    fontsize=8, color="#e67e22", va="bottom")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    print(f"Timing plot saved to {out_path}")
+    plt.close(fig)
 
 
 def plot_accuracy(rows: list[dict], out_path: Path):
@@ -188,22 +256,26 @@ def print_prompt_evolution(rows: list[dict], prompt_log: dict[str, dict]):
 def main():
     parser = argparse.ArgumentParser(description="Analyse prompt_hustle experiments")
     parser.add_argument("--out", default=str(DEFAULT_PNG), help="Path to save the accuracy plot PNG")
+    parser.add_argument("--timing-out", default=str(DEFAULT_TIMING_PNG), help="Path to save the timing plot PNG")
     args = parser.parse_args()
 
-    if not RESULTS_TSV.exists():
-        print(f"No results file found at {RESULTS_TSV}")
-        print("Run some experiments first!")
-        return
+    if RESULTS_TSV.exists():
+        rows = load_results(RESULTS_TSV)
+        prompt_log = load_prompt_log(PROMPT_LOG)
+        print(f"Loaded {len(rows)} experiments from {RESULTS_TSV}")
+        if prompt_log:
+            print(f"Loaded {len(prompt_log)} prompt snapshots from {PROMPT_LOG}")
+        plot_accuracy(rows, Path(args.out))
+        print_prompt_evolution(rows, prompt_log)
+    else:
+        print(f"No results TSV at {RESULTS_TSV}, skipping accuracy plot.")
 
-    rows = load_results(RESULTS_TSV)
-    prompt_log = load_prompt_log(PROMPT_LOG)
-
-    print(f"Loaded {len(rows)} experiments from {RESULTS_TSV}")
-    if prompt_log:
-        print(f"Loaded {len(prompt_log)} prompt snapshots from {PROMPT_LOG}")
-
-    plot_accuracy(rows, Path(args.out))
-    print_prompt_evolution(rows, prompt_log)
+    eval_data = load_latest_eval()
+    if eval_data:
+        print(f"Loaded latest eval from {EVAL_DIR}")
+        plot_timing(eval_data, Path(args.timing_out))
+    else:
+        print(f"No eval JSONs in {EVAL_DIR}, skipping timing plot.")
 
 
 if __name__ == "__main__":
