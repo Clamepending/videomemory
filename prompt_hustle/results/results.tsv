@@ -12,3 +12,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-27T04:26:33	ab6d5ad7	0.7273	0.8095	N/A	reverted	114059	37171	iter11: meticulous scan + clothing example
 2026-03-27T04:38:38	bfe4ee27	0.7491	0.8333	N/A	reverted	98921	35185	iter12: minor wording tweaks to electronics/floor examples
 2026-03-27T04:52:49	ebb12ac1	0.6326	0.5772	N/A	reverted	103641	32135	iter13: task-type observation guidelines
+2026-03-27T05:05:37	9e303031	0.7725	0.8651	N/A	reverted	114322	31921	iter14: add items_on_surfaces example + be specific
