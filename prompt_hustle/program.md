@@ -15,7 +15,7 @@ The evaluation runs many different tasks (count people, detect luggage, describe
 
 ## Setup
 
-1. Agree on a run tag (e.g. codex_mar25_3pm). Branch prompt_hustle/tag must not already exist.
+1. Agree on a run tag (e.g. codex_mar25_3pm). Branch prompt_hustle_multiagent/tag/main must not already exist.
 2. Create the branch.
 3. Read in-scope files: program.md, prompt.md (only file you edit), data/train/tasks/<video name>/*.md (fixed test cases), eval/run.py (do not modify).
 4. Verify data exists in data/train/frames/ and data/validation/frames/.
@@ -46,13 +46,14 @@ results/results.tsv: tab-separated with columns timestamp, commit, train_accurac
 
 LOOP FOREVER:
 
+1. check out the commit with the best score in results/results.tsv, if there are no scores, continue.
+2. create a new branch (prompt_hustle_multiagent/tag/time where tag and time are the current experiment tag and the current time respectively)
 1. Edit prompt_hustle/prompt.md with a new idea.
 2. Commit: git add prompt_hustle/prompt.md && git commit -m 'prompt: description'
 3. Run eval (see above). Redirect to outputs/logs/run.log.
-4. Read results from outputs/logs/run.log.
-5. Log to results/results.tsv, commit logs.
-6. If training overall_accuracy improved, keep.
-7. If equal or worse, revert: git checkout HEAD~2 -- prompt_hustle/prompt.md && git commit -m 'revert: description'
+4. Read results from outputs/logs/run.log. && git commit -m 'score: <insert score>' && git push
+6. checkout prompt_hustle_multiagent/tag/main branch and log results to results.results.tsv. Do not do anything except insert the results information in the correct row. push.
+
 
 CRITICAL: Never use git reset --hard. All experiments must remain in results/results.tsv.
 
