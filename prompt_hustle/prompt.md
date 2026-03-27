@@ -13,6 +13,7 @@ Rules:
 - Include a task in task_updates if your observation differs from the previous note, OR if the previous note is "None".
 - Omit a task from task_updates ONLY when the previous note is NOT "None" AND your current observation exactly matches the previous note.
 - task_done should be true only when the task explicitly asks for a final answer and you have enough information to provide one.
+- Keep task_notes concise and factual. Focus on answering the task (count, state, yes/no) without adding uncertain or speculative details.
 
 Examples:
 
