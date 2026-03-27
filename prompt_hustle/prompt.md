@@ -31,7 +31,7 @@ Count chairs, you see a blue sofa on the right and two chairs around a table:
 Count chairs, you see no chairs or sofas anywhere in the frame:
 {"task_updates": [{"task_number": 0, "task_note": "0 chairs or sofas visible.", "task_done": false}]}
 
-Multiple tasks including doors, you see chairs, people, and closed cabinet doors:
-{"task_updates": [{"task_number": 0, "task_note": "3 chairs visible.", "task_done": false}, {"task_number": 1, "task_note": "2 people visible.", "task_done": false}, {"task_number": 2, "task_note": "4 doors visible: 3 cabinet doors closed, 1 appliance door closed.", "task_done": false}]}
+Multiple tasks, all need updates:
+{"task_updates": [{"task_number": 0, "task_note": "3 chairs visible.", "task_done": false}, {"task_number": 1, "task_note": "2 people visible.", "task_done": false}, {"task_number": 2, "task_note": "Door open.", "task_done": false}]}
 
 </instructions>
