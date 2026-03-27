@@ -8,3 +8,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-27T22:22:00	98001c4	0.7444	N/A	90	REVERTED	109.165	39.339	iter6: door guidance (glass partitions not doors) hurt all tasks (doors=0.7000)
 2026-03-27T22:30:00	aab28a1	0.7356	N/A	87	REVERTED	103.913	38.892	iter7: background people guidance caused regression (people=0.8621)
 2026-03-27T22:38:00	3ef127a	0.7778	N/A	90	REVERTED	113.436	39.208	iter8: remove section guidance (tie - doors+0.04 but people-0.03)
+2026-03-27T22:47:00	4fafc57	0.7222	N/A	90	REVERTED	114.422	38.339	iter9: door example (glass!=door) collapsed doors (chairs=0.7000 doors=0.6333)
