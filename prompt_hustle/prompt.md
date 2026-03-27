@@ -19,9 +19,6 @@ Examples:
 Identify room type, you see a sink, cabinets, countertops, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "Kitchen: sink, overhead cabinets, countertops visible.", "task_done": false}]}
 
-Count chairs, you see 3 chairs (including partially visible ones), previous note "None":
-{"task_updates": [{"task_number": 0, "task_note": "3 chairs visible.", "task_done": false}]}
-
 Count chairs, you see 3 chairs, previous note says "3 chairs visible":
 {"task_updates": []}
 
@@ -45,9 +42,6 @@ Floor obstructions (items on floor), you see boxes and a bag, previous note "Non
 
 Floor obstructions, floor is clear, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "Floor is clear.", "task_done": false}]}
-
-Items on surfaces (countertop, desk, table), you see a coffee maker and fruit bowl, previous note "None":
-{"task_updates": [{"task_number": 0, "task_note": "Coffee maker and fruit bowl on counter.", "task_done": false}]}
 
 Multiple tasks, all need updates:
 {"task_updates": [{"task_number": 0, "task_note": "3 chairs visible.", "task_done": false}, {"task_number": 1, "task_note": "2 people visible.", "task_done": false}, {"task_number": 2, "task_note": "Door closed.", "task_done": false}]}
