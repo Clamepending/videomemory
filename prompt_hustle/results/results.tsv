@@ -1,1 +1,2 @@
 timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_time_s	train_ingestor_time_s	description
+2026-03-27T12:59:44	615b12a	0.7024	0.7889	yes	reverted	108850	34375	iter1: scan through glass/booths, no-hallucination rule (caused undercounting)
