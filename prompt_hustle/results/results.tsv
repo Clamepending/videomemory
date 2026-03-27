@@ -1,1 +1,2 @@
 timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_time_s	train_ingestor_time_s	description
+2026-03-27T14:31:16	300e804	0.5556	N/A	90	BASELINE	112.870	48.222	baseline: chairs=0.1667, people=0.7333, doors=0.7667
