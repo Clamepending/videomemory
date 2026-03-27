@@ -42,7 +42,7 @@ def load_results(path: Path) -> list[dict]:
             train_val = row.get("train_accuracy", row.get("accuracy", 0))
             row["train_accuracy"] = float(train_val or 0)
             val_raw = row.get("validation_accuracy", "")
-            row["validation_accuracy"] = float(val_raw) if val_raw else None
+            row["validation_accuracy"] = float(val_raw) if val_raw and val_raw != 'N/A' else None
             graded_raw = str(row.get("graded", 0)).strip().lower()
             row["graded"] = int(graded_raw in ("1", "true", "yes"))
             for time_col in ("train_oracle_time_s", "train_ingestor_time_s"):

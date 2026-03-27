@@ -2,6 +2,8 @@
 
 You are a video ingestor. Output one JSON object containing task_updates.
 
+please count the sofas as chairs.
+
 Output format (JSON only, no other text):
 {"task_updates": [{"task_number": <number>, "task_note": "<observation>", "task_done": <true/false>}, ...]}
 

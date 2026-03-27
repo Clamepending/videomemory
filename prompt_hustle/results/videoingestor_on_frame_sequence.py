@@ -17,6 +17,7 @@ Usage (from project root):
 import argparse
 import json
 import os
+import socket
 import sys
 import time
 import webbrowser
@@ -445,6 +446,20 @@ def start_visualizer(
     port: int,
 ):
     """Launch a local HTTP server with the comparison visualiser."""
+    def find_available_port(start_port: int) -> int:
+        """Find an available port starting from start_port."""
+        port = start_port
+        while True:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("127.0.0.1", port))
+                    return port
+                except OSError:
+                    port += 1
+                    if port > start_port + 100:  # Don't search too far
+                        raise RuntimeError(f"No available ports found near {start_port}")
+
+    port = find_available_port(port)
     combined = json.dumps({
         "video_name": prompt1_data["video_name"],
         "total_frames": len(prompt1_data["frames"]),
@@ -504,13 +519,33 @@ def start_visualizer(
 # Main
 # ---------------------------------------------------------------------------
 
+def load_existing_results(prompt1_stem: str, prompt2_stem: str) -> tuple[dict, dict]:
+    """Load existing results from JSON files."""
+    out_dir1 = RESULTS_OUTPUT_DIR / prompt1_stem
+    out_dir2 = RESULTS_OUTPUT_DIR / prompt2_stem
+    json_path1 = out_dir1 / "captions.json"
+    json_path2 = out_dir2 / "captions.json"
+    
+    if not json_path1.exists():
+        sys.exit(f"Results file not found: {json_path1}")
+    if not json_path2.exists():
+        sys.exit(f"Results file not found: {json_path2}")
+    
+    with open(json_path1) as f:
+        data1 = json.load(f)
+    with open(json_path2) as f:
+        data2 = json.load(f)
+    
+    return data1, data2
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run VideoIngestor with two prompts and compare side by side",
     )
     parser.add_argument(
         "video_name",
-        help="Video directory name under data/{split}/frames/",
+        nargs="?",
+        help="Video directory name under data/{split}/frames/ (required unless --load-existing)",
     )
     parser.add_argument(
         "--prompt1",
@@ -537,85 +572,103 @@ def main():
         "--no-visualizer", action="store_true",
         help="Skip launching the browser visualiser",
     )
+    parser.add_argument(
+        "--load-existing", action="store_true",
+        help="Load existing results instead of recomputing",
+    )
     parser.add_argument("--port", type=int, default=8765, help="Visualiser port")
     args = parser.parse_args()
 
+    if not args.load_existing and not args.video_name:
+        parser.error("video_name is required unless --load-existing is specified")
+
     prompt1_path = Path(args.prompt1)
     prompt2_path = Path(args.prompt2)
-    for p in (prompt1_path, prompt2_path):
-        if not p.exists():
-            sys.exit(f"Prompt file not found: {p}")
+    prompt1_stem = prompt1_path.stem
+    prompt2_stem = prompt2_path.stem
 
-    frames_dir = DATA_DIR / args.split / "frames" / args.video_name
-    tasks_dir = DATA_DIR / args.split / "tasks" / args.video_name
-    if not frames_dir.exists():
-        sys.exit(f"Frames directory not found: {frames_dir}")
-    if not tasks_dir.is_dir():
-        sys.exit(f"Tasks directory not found: {tasks_dir}")
+    if args.load_existing:
+        print(f"Loading existing results for {prompt1_stem} and {prompt2_stem}")
+        all_results = {}
+        data1, data2 = load_existing_results(prompt1_stem, prompt2_stem)
+        all_results[prompt1_stem] = data1
+        all_results[prompt2_stem] = data2
+        frames_dir = DATA_DIR / data1.get("split", "train") / "frames" / data1["video_name"]
+    else:
+        for p in (prompt1_path, prompt2_path):
+            if not p.exists():
+                sys.exit(f"Prompt file not found: {p}")
 
-    task_descs = load_video_tasks(tasks_dir)
-    if not task_descs:
-        sys.exit(f"No task .md files found in {tasks_dir}")
+        frames_dir = DATA_DIR / args.split / "frames" / args.video_name
+        tasks_dir = DATA_DIR / args.split / "tasks" / args.video_name
+        if not frames_dir.exists():
+            sys.exit(f"Frames directory not found: {frames_dir}")
+        if not tasks_dir.is_dir():
+            sys.exit(f"Tasks directory not found: {tasks_dir}")
 
-    oracle_client = None
-    if not args.no_oracle:
-        try:
-            oracle_client = build_oracle_client()
-            print(f"Oracle:  {ORACLE_MODEL}")
-        except RuntimeError as e:
-            print(f"Warning: oracle disabled — {e}")
+        task_descs = load_video_tasks(tasks_dir)
+        if not task_descs:
+            sys.exit(f"No task .md files found in {tasks_dir}")
 
-    frames = load_frames(frames_dir)
-    print(f"Video:   {args.video_name} ({args.split})")
-    print(f"Frames:  {len(frames)}")
-    print(f"Tasks:   {len(task_descs)}")
-    print(f"Model:   {args.model or 'default (from .env)'}")
-    print(f"Prompt1: {prompt1_path}")
-    print(f"Prompt2: {prompt2_path}")
-    print()
+        oracle_client = None
+        if not args.no_oracle:
+            try:
+                oracle_client = build_oracle_client()
+                print(f"Oracle:  {ORACLE_MODEL}")
+            except RuntimeError as e:
+                print(f"Warning: oracle disabled — {e}")
 
-    all_results: dict[str, dict] = {}
-    for prompt_path in (prompt1_path, prompt2_path):
-        stem = prompt_path.stem
-        print(f"{'=' * 60}")
-        print(f"Running: {stem}  ({prompt_path})")
-        print(f"{'=' * 60}")
-
-        t0 = time.time()
-        frame_results = run_ingestor_with_prompt(
-            prompt_path, args.model, task_descs, frames,
-            oracle_client=oracle_client,
-        )
-        elapsed = round(time.time() - t0, 1)
-        processed = sum(1 for f in frame_results if f["status"] == "processed")
-        print(f"  Done in {elapsed}s — {processed}/{len(frame_results)} processed")
-
-        if oracle_client:
-            graded = [f for f in frame_results if f.get("oracle_grades")]
-            if graded:
-                all_scores = [
-                    g["score"]
-                    for f in graded
-                    for g in f["oracle_grades"].values()
-                ]
-                acc = sum(all_scores) / len(all_scores) if all_scores else 0
-                print(f"  Oracle accuracy: {acc:.2%} ({sum(all_scores)}/{len(all_scores)})")
-
-        out_dir = RESULTS_OUTPUT_DIR / stem
-        save_captions_md(out_dir / "captions.md", args.video_name, prompt_path, frame_results)
-
-        result_data = {
-            "video_name": args.video_name,
-            "split": args.split,
-            "prompt_file": str(prompt_path),
-            "prompt_stem": stem,
-            "model": args.model,
-            "tasks": [{"name": n, "description": d} for n, d in task_descs],
-            "frames": frame_results,
-        }
-        save_captions_json(out_dir / "captions.json", result_data)
-        all_results[stem] = result_data
+        frames = load_frames(frames_dir)
+        print(f"Video:   {args.video_name} ({args.split})")
+        print(f"Frames:  {len(frames)}")
+        print(f"Tasks:   {len(task_descs)}")
+        print(f"Model:   {args.model or 'default (from .env)'}")
+        print(f"Prompt1: {prompt1_path}")
+        print(f"Prompt2: {prompt2_path}")
         print()
+
+        all_results: dict[str, dict] = {}
+        for prompt_path in (prompt1_path, prompt2_path):
+            stem = prompt_path.stem
+            print(f"{'=' * 60}")
+            print(f"Running: {stem}  ({prompt_path})")
+            print(f"{'=' * 60}")
+
+            t0 = time.time()
+            frame_results = run_ingestor_with_prompt(
+                prompt_path, args.model, task_descs, frames,
+                oracle_client=oracle_client,
+            )
+            elapsed = round(time.time() - t0, 1)
+            processed = sum(1 for f in frame_results if f["status"] == "processed")
+            print(f"  Done in {elapsed}s — {processed}/{len(frame_results)} processed")
+
+            if oracle_client:
+                graded = [f for f in frame_results if f.get("oracle_grades")]
+                if graded:
+                    all_scores = [
+                        g["score"]
+                        for f in graded
+                        for g in f["oracle_grades"].values()
+                    ]
+                    acc = sum(all_scores) / len(all_scores) if all_scores else 0
+                    print(f"  Oracle accuracy: {acc:.2%} ({sum(all_scores)}/{len(all_scores)})")
+
+            out_dir = RESULTS_OUTPUT_DIR / stem
+            save_captions_md(out_dir / "captions.md", args.video_name, prompt_path, frame_results)
+
+            result_data = {
+                "video_name": args.video_name,
+                "split": args.split,
+                "prompt_file": str(prompt_path),
+                "prompt_stem": stem,
+                "model": args.model,
+                "tasks": [{"name": n, "description": d} for n, d in task_descs],
+                "frames": frame_results,
+            }
+            save_captions_json(out_dir / "captions.json", result_data)
+            all_results[stem] = result_data
+            print()
 
     stems = list(all_results.keys())
     if not args.no_visualizer and len(stems) >= 2:
