@@ -28,9 +28,6 @@ Count people, previous note says "2 people visible", you now see 1 person:
 Count chairs, you see 4 chairs, previous note says "3 chairs visible":
 {"task_updates": [{"task_number": 0, "task_note": "4 chairs visible (was 3).", "task_done": false}]}
 
-Count chairs, you see 0 chairs (only sofas/built-in seating), previous note "None":
-{"task_updates": [{"task_number": 0, "task_note": "0 chairs visible.", "task_done": false}]}
-
 Door state, you see a door that is closed, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "Door is closed.", "task_done": false}]}
 
