@@ -11,3 +11,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-27T22:47:00	4fafc57	0.7222	N/A	90	REVERTED	114.422	38.339	iter9: door example (glass!=door) collapsed doors (chairs=0.7000 doors=0.6333)
 2026-03-27T22:56:00	f7a9a95	0.7667	N/A	90	REVERTED	115.490	33.420	iter10: study pod example hurt people (chairs=0.6667 people=0.8333 doors=0.8000)
 2026-03-27T23:07:00	23c796c	0.6556	N/A	90	REVERTED	148.395	36.654	iter11: background person example major regression (chairs=0.5667 doors=0.6000)
+2026-03-27T23:16:00	e0dc96f	0.7556	N/A	90	REVERTED	96.480	35.299	iter12: elevated booth to top-level CRITICAL (doors=0.8667 but chairs=0.5333)
