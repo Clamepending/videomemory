@@ -31,10 +31,6 @@ MODEL_PROVIDER_MAP = {
     "phi-4-multimodal": OpenRouterPhi4MultimodalProvider,
     "mistral-small-3.1": OpenRouterMistralSmall31Provider,
     "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
-    "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
-    "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
-    "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
-    "qwen3-vl-8b": OpenRouterQwen3VL8BProvider,
     # Local vLLM (no cloud API key; uses whatever model the server is serving)
     "local-vllm": LocalVLLMProvider,
 }

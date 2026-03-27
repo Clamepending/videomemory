@@ -15,7 +15,7 @@ The evaluation runs many different tasks (count people, detect luggage, describe
 
 ## Setup
 
-1. Agree on a run tag (e.g. codex_mar25). Branch prompt_hustle/tag must not already exist.
+1. Agree on a run tag (e.g. codex_mar25_3pm). Branch prompt_hustle/tag must not already exist.
 2. Create the branch.
 3. Read in-scope files: program.md, instructions.md (only file you edit), data/train/tasks/<video name>/*.md (fixed test cases), eval/run.py (do not modify).
 4. Verify data exists in data/train/frames/ and data/validation/frames/.
@@ -30,7 +30,7 @@ CANNOT: Modify prompts/*.md, eval/run.py, or any VideoMemory source code.
 ## Running an evaluation
 
 ```
-uv run python -m prompt_hustle.eval --instructions prompt_hustle/instructions.md --model qwen3-vl-8b --no-dedup > prompt_hustle/outputs/logs/run.log 2>&1
+uv run python -m prompt_hustle.eval --instructions prompt_hustle/instructions.md > prompt_hustle/outputs/logs/run.log 2>&1
 ```
 
 Extract metrics from outputs/logs/run.log:

@@ -332,7 +332,9 @@ class VideoStreamIngestor:
                     self._frames_skipped,
                     self._frame_diff_threshold,
                 )
-            return None
+            output = {**self._output_history[-1], "skipped": True}
+            self._output_history.append(output)
+            return output
 
         prompt = self._build_prompt()
         image_base64 = self._frame_to_base64(frame)
