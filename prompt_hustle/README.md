@@ -58,3 +58,8 @@ Extract frames from mp4:
 ```bash
 ./offline/scripts/video_to_frames.sh house_tour
 ```
+
+## Visualize a prompt comparison
+```bash
+uv run python -m prompt_hustle.results.videoingestor_on_frame_sequence house_tour
+```
