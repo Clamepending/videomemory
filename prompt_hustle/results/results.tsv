@@ -2,3 +2,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-27T14:31:16	300e804	0.5556	N/A	90	BASELINE	112.870	48.222	baseline: chairs=0.1667, people=0.7333, doors=0.7667
 2026-03-27T21:35:09	1f0c3f7	0.7444	N/A	90	KEPT	102.263	43.102	iter1: sofas=chairs, glass booths, avoid floor mat FPs (chairs=0.6333, people=0.7667, doors=0.8333)
 2026-03-27T21:42:00	c1fe3d2	0.5444	N/A	90	REVERTED	147.549	35.686	iter2: booth doors+sectional counting caused regression (chairs=0.3667, doors=0.5667)
+2026-03-27T21:52:00	a885881	0.7778	N/A	90	KEPT	103.794	38.953	iter3: critical glass booth scanning + people in booths (chairs=0.6667, people=0.9000, doors=0.7667)
