@@ -18,3 +18,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-27T23:52:00	cfd5126	0.6778	N/A	90	REVERTED	129.030	32.532	iter16: keeping room-ID + adding door example major regression (train=0.6778)
 2026-03-28T00:01:00	7b23e31	0.7111	N/A	90	REVERTED	105.283	34.394	iter17: seated-person-implies-chair hallucinations (chairs=0.5000)
 2026-03-28T00:10:00	2eb35d1	0.7556	N/A	90	REVERTED	117.648	31.395	iter18: when-in-doubt update rule hurt people (chairs=0.6667 people=0.8333)
+2026-03-28T00:20:00	6ff34a8	0.7333	N/A	90	REVERTED	112.746	38.658	iter19: replace chair with door example hurt people (people=0.7667)
