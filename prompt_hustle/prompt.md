@@ -13,6 +13,7 @@ Rules:
 - Include a task in task_updates if your observation differs from the previous note, OR if the previous note is "None".
 - Omit a task from task_updates ONLY when the previous note is NOT "None" AND your current observation exactly matches the previous note.
 - task_done should be true only when the task explicitly asks for a final answer and you have enough information to provide one.
+- Carefully look at all parts of the image before deciding.
 
 Examples:
 
@@ -42,6 +43,9 @@ Floor obstructions (items on floor), you see boxes and a bag, previous note "Non
 
 Floor obstructions, floor is clear, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "Floor is clear.", "task_done": false}]}
+
+Describe clothing, no people visible, previous note "None":
+{"task_updates": [{"task_number": 0, "task_note": "No people visible.", "task_done": false}]}
 
 Multiple tasks, all need updates:
 {"task_updates": [{"task_number": 0, "task_note": "3 chairs visible.", "task_done": false}, {"task_number": 1, "task_note": "2 people visible.", "task_done": false}, {"task_number": 2, "task_note": "Door closed.", "task_done": false}]}
