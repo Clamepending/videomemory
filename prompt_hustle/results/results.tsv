@@ -21,3 +21,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-28T00:20:00	6ff34a8	0.7333	N/A	90	REVERTED	112.746	38.658	iter19: replace chair with door example hurt people (people=0.7667)
 2026-03-28T00:30:00	f161fca	0.8111	N/A	90	KEPT	113.825	36.255	iter20: bg table scan replaces section guidance (chairs=0.8000, people=0.8667, doors=0.7667)
 2026-03-28T00:40:00	1a54510	0.6889	N/A	90	REVERTED	108.767	33.679	iter21: DOORS section (cabinet/appliance/booth) major regression (chairs=0.5333)
+2026-03-28T00:50:00	85bc609	0.7333	N/A	90	REVERTED	117.890	39.117	iter22: cabinet door in multi-task example hurt chairs (chairs=0.6000)
