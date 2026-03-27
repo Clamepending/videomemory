@@ -1,10 +1,1 @@
 timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_time_s	train_ingestor_time_s	description
-2026-03-27T12:59:44	615b12a	0.7024	0.7889	yes	reverted	108850	34375	iter1: scan through glass/booths, no-hallucination rule (caused undercounting)
-2026-03-27T13:15:00	157d4ad	0.7586	0.8667	yes	reverted	117525	31812	iter2: scan through glass/booths + booth examples (still below baseline)
-2026-03-27T13:30:00	7de0706	0.7556	0.8000	yes	reverted	129872	34656	iter3: conciseness rule caused undercounting regression
-2026-03-27T13:45:00	6ae6ef5	0.6333	0.7778	yes	reverted	113204	34265	iter4: booth glass door example major regression (teach wrong door behavior)
-2026-03-27T14:00:00	5cd9c5c	0.7586	0.7356	yes	reverted	124072	31345	iter5: 0-chairs-with-sofas example (trades 3 wins for 2 losses on sofa counting)
-2026-03-27T14:15:00	aa19cf1	0.7111	0.7333	yes	reverted	123905	33411	iter6: removing irrelevant examples hurts (electronics/floor provide useful format context)
-2026-03-27T14:30:00	717510a	0.0000	0.0000	yes	reverted	0	0	iter7: Pydantic extra_forbidden blocks thoughts field (JSON schema strictly validated)
-2026-03-27T14:45:00	08596d2	0.7667	0.7667	yes	reverted	127049	33135	iter8: systematic depth scanning helps f7-8 but causes door hallucinations (closest so far)
-2026-03-27T15:00:00	60fc014	0.7931	0.7778	yes	kept	105548	37859	iter9: KEPT soft background scanning (including background areas) beats baseline
