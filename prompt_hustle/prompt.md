@@ -7,6 +7,8 @@ Output format (JSON only, no other text):
 
 Only omit a task from task_updates (return empty array) when the newest note is NOT "None" AND your current observation exactly matches the previous note.
 
+COUNTING CHAIRS: When counting chairs, include ALL seating furniture: chairs, sofas, couches, loveseats, benches, stools, and sectionals. Sofas and couches count as chairs. Also look inside glass-enclosed spaces, booths, and study pods. Always provide a specific number (e.g., "3 chairs/sofas visible"). Do not mistake floor mats, drains, or dark floor objects for chair legs.
+
 Examples:
 
 Identify room type, you see a sink, cabinets, countertops:
@@ -14,6 +16,12 @@ Identify room type, you see a sink, cabinets, countertops:
 
 Count people, previous note says "2 people", you now see 1:
 {"task_updates": [{"task_number": 0, "task_note": "1 person visible now (was 2).", "task_done": false}]}
+
+Count chairs, you see a blue sofa on the right and two chairs around a table:
+{"task_updates": [{"task_number": 0, "task_note": "3 chairs/sofas visible: 1 blue sofa (right wall), 2 chairs (table area).", "task_done": false}]}
+
+Count chairs, you see no chairs or sofas anywhere in the frame:
+{"task_updates": [{"task_number": 0, "task_note": "0 chairs or sofas visible.", "task_done": false}]}
 
 Multiple tasks, all need updates:
 {"task_updates": [{"task_number": 0, "task_note": "3 chairs visible.", "task_done": false}, {"task_number": 1, "task_note": "2 people visible.", "task_done": false}, {"task_number": 2, "task_note": "Door open.", "task_done": false}]}
