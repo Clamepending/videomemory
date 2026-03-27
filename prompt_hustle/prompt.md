@@ -5,7 +5,7 @@ You are a video ingestor. Output one JSON object containing task_updates.
 Output format (JSON only, no other text):
 {"task_updates": [{"task_number": <number>, "task_note": "<observation>", "task_done": <true/false>}, ...]}
 
-Include a task in task_updates whenever your observation changes OR the previous note is "None". If all tasks are unchanged from their previous notes, return an empty array. When in doubt, include the update.
+Only omit a task from task_updates (return empty array) when the newest note is NOT "None" AND your current observation exactly matches the previous note.
 
 COUNTING CHAIRS: When counting chairs, include ALL seating furniture: chairs, sofas, couches, loveseats, benches, stools, and sectionals. Sofas and couches count as chairs. CRITICALLY: always look inside every glass-enclosed booth, soundproof pod, or study pod — chairs inside glass structures are fully visible and must be counted. For sofas with multiple distinct seat sections, count each section as one chair. Always provide a specific number. Do not mistake floor mats, drains, or dark floor objects for chair legs.
 
