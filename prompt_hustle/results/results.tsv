@@ -18,3 +18,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-27T05:47:06	0a102c82	0.7491	0.7544	N/A	reverted	112818	36054	iter17: precise + richer electronics example
 2026-03-27T06:00:20	01e23d50	0.6789	0.629	N/A	reverted	99912	29787	iter18: add clothing and items_on_surfaces examples
 2026-03-27T06:14:33	25d1a489	0.75	0.7177	N/A	reverted	124890	33501	iter19: add lamps to electronics examples
+2026-03-27T06:27:50	512c04ce	0.7969	0.7302	N/A	reverted	120354	38127	iter20: clothing-no-person example + careful observation note
