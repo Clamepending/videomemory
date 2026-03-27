@@ -25,6 +25,7 @@ from eval.common import DATA_DIR, OUTPUT_DIR, load_frames, create_ingestor, proc
 EVAL_OUTPUT_DIR = OUTPUT_DIR / "eval"
 ORACLE_MODEL = os.getenv("ORACLE_MODEL", "gemini-2.5-flash")
 VIDEO_INGESTOR_MODEL = os.getenv("VIDEO_INGESTOR_MODEL")
+GRADING_PROMPT_TEMPLATE = (Path(__file__).resolve().parent / "grading_prompt.md").read_text()
 SPLITS = ["train", "validation"]
 
 
@@ -50,23 +51,11 @@ def oracle_grade_batch(client, image_bytes, task_outputs):
     """Grade all tasks for one frame in a single oracle call."""
     from google.genai import types as genai_types
 
-    task_blocks = []
-    for tname, tdesc, vlm_out in task_outputs:
-        task_blocks.append(
-            f"Task '{tname}':\n  Description: {tdesc}\n  Model output: {vlm_out}"
-        )
-
-    grading_prompt = (
-        "You are an evaluator grading a vision-language model's outputs on multiple tasks.\n\n"
-        + "\n\n".join(task_blocks)
-        + "\n\nLook at the attached image. For EACH task, evaluate whether the "
-        "model's output is factually correct with respect to what is visible.\n\n"
-        "Rubric per task:\n"
-        "  1 - The output accurately describes what is in the image relative to the task.\n"
-        "  0 - The output is incorrect or significantly misrepresents the image content.\n\n"
-        "Return JSON with a 'grades' array containing one object per task, each with "
-        "'task_name', 'reasoning' (one sentence), and 'score' (0 or 1)."
+    task_blocks = "\n\n".join(
+        f"Task '{tname}':\n  Description: {tdesc}\n  Model output: {vlm_out}"
+        for tname, tdesc, vlm_out in task_outputs
     )
+    grading_prompt = GRADING_PROMPT_TEMPLATE.format(task_blocks=task_blocks)
     image_part = genai_types.Part(
         inline_data=genai_types.Blob(data=image_bytes, mime_type="image/jpeg")
     )
@@ -82,7 +71,10 @@ def oracle_grade_batch(client, image_bytes, task_outputs):
     if not raw:
         raise RuntimeError("Oracle model returned empty response.")
     result = BatchGradingResult.model_validate_json(raw)
-    return {g.task_name: g.score for g in result.grades}
+    return {
+        g.task_name: {"score": g.score, "reasoning": g.reasoning}
+        for g in result.grades
+    }
 
 
 def load_video_tasks(tasks_dir):
@@ -168,18 +160,28 @@ def run_eval(args):
 
                 frame_grades = {}
                 for tname, _, vlm_out in batch_input:
-                    score = scores_map.get(tname, -1)
+                    grade = scores_map.get(tname)
+                    score = grade["score"] if grade else -1
+                    reasoning = grade["reasoning"] if grade else ""
                     if score >= 0:
                         all_scores.append(score)
                         task_scores.setdefault(tname, []).append(score)
-                    frame_grades[tname] = {"vlm_output": vlm_out, "score": score}
+                    frame_grades[tname] = {"vlm_output": vlm_out, "score": score, "reasoning": reasoning}
 
+                correct = sum(1 for g in frame_grades.values() if g["score"] == 1)
+                total_tasks = sum(1 for g in frame_grades.values() if g["score"] >= 0)
                 print(
                     f"[eval] split={split} video={video_name} frame={frame_index}/{len(frames)} "
                     f"status={result['status']} vlm_ms={result['processing_time_ms']} "
-                    f"oracle_ms={oracle_grading_time_ms}",
+                    f"oracle_ms={oracle_grading_time_ms} score={correct}/{total_tasks}",
                     flush=True,
                 )
+                for tname, g in frame_grades.items():
+                    icon = "\u2705" if g["score"] == 1 else "\u274c" if g["score"] == 0 else "?"
+                    print(
+                        f"  {icon} {tname}: {g['score']}  {g['reasoning']}",
+                        flush=True,
+                    )
 
                 per_frame.append({"filename": result["filename"], "status": result["status"], "per_task": frame_grades, "video_ingestor_processing_time_ms": result["processing_time_ms"], "oracle_grading_time_ms": oracle_grading_time_ms})
 
@@ -215,7 +217,19 @@ def run_eval(args):
     }
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2)
-    print(f"\nResults: {out_path}", flush=True)
+    print(f"\nResults JSON: {out_path}", flush=True)
+
+    for split_name, split_data in results_by_split.items():
+        acc = split_data["overall_accuracy"]
+        graded = split_data["total_graded"]
+        correct = split_data["total_correct"]
+        ingestor_t = split_data.get("total_video_ingestor_processing_time_s", 0)
+        oracle_t = split_data.get("total_oracle_grading_time_s", 0)
+        print(f"\n[{split_name}] overall_accuracy={acc:.4f}  graded={graded}  correct={correct}"
+              f"  ingestor_time_ms={ingestor_t}  oracle_time_ms={oracle_t}", flush=True)
+        for task_name, task_acc in split_data.get("per_task_accuracy", {}).items():
+            print(f"  {task_name}: {task_acc:.4f}", flush=True)
+
     return output
 
 

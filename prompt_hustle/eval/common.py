@@ -112,7 +112,11 @@ def process_frames(
             frame = cv2.resize(frame, target, interpolation=cv2.INTER_LINEAR)
             base["frame"] = frame
 
-        result = ingestor._VLM_processing(frame)
+        try:
+            result = ingestor._VLM_processing(frame)
+        except Exception as exc:
+            yield {**base, "status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            continue
 
         if result is None:
             yield {**base, "status": "error", "error": "no VLM result"}
