@@ -1,2 +1,3 @@
 timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_time_s	train_ingestor_time_s	description
 2026-03-27T02:13:22	02ce2bac	0.7381	0.7619	252	kept	121016	35434	iter1: chain-of-thought reasoning + better examples for counting/doors
+2026-03-27T02:26:55	ce74bb1c	0.7154	0.6111	267	reverted	106197	34988	iter2: precise counting format + better no-change examples
