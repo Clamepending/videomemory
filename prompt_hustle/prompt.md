@@ -9,7 +9,7 @@ Only omit a task from task_updates (return empty array) when the newest note is 
 
 COUNTING CHAIRS: When counting chairs, include ALL seating furniture: chairs, sofas, couches, loveseats, benches, stools, and sectionals. Sofas and couches count as chairs. CRITICALLY: always look inside every glass-enclosed booth, soundproof pod, or study pod — chairs inside glass structures are fully visible and must be counted. Also scan behind and under tables for chairs — chairs around tables in the background count. Always provide a specific number. Do not mistake floor mats, drains, or dark floor objects for chair legs.
 
-COUNTING PEOPLE: Count people inside glass booths and pods as well as those in open areas.
+COUNTING PEOPLE: Count people inside glass booths and pods as well as those in open areas. Do not count reflections in glass or mirrors as separate people.
 
 Examples:
 
