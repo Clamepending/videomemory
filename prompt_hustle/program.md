@@ -17,44 +17,42 @@ The evaluation runs many different tasks (count people, detect luggage, describe
 
 1. Agree on a run tag (e.g. codex_mar25_3pm). Branch prompt_hustle/tag must not already exist.
 2. Create the branch.
-3. Read in-scope files: program.md, instructions.md (only file you edit), data/train/tasks/<video name>/*.md (fixed test cases), eval/run.py (do not modify).
+3. Read in-scope files: program.md, prompt.md (only file you edit), data/train/tasks/<video name>/*.md (fixed test cases), eval/run.py (do not modify).
 4. Verify data exists in data/train/frames/ and data/validation/frames/.
-5. Initialize results/results.tsv and results/prompt_log.jsonl.
+5. Initialize results/results.tsv.
 
 ## What you CAN and CANNOT do
 
-CAN: Modify prompt_hustle/instructions.md. This content replaces the instructions block in the VLM prompt.
+CAN: Modify prompt_hustle/prompt.md. This content replaces the instructions block in the VLM prompt.
 
-CANNOT: Modify prompts/*.md, eval/run.py, or any VideoMemory source code.
+CANNOT: Modify prompts/*.md, eval/run.py, .env, or any VideoMemory source code.
 
 ## Running an evaluation
 
 ```
-uv run python -m prompt_hustle.eval --instructions prompt_hustle/instructions.md > prompt_hustle/outputs/logs/run.log 2>&1
+uv run python -m eval --instructions prompt.md > outputs/logs/run.log 2>&1
 ```
 
-Extract metrics from outputs/logs/run.log:
+Run from the `prompt_hustle/` directory. Extract metrics from outputs/logs/run.log:
 - Use `overall_accuracy` as the optimization target (training metric only).
 - Record `validation_overall_accuracy` for human tracking only (do not consider this at all. This is just for another agent).
 - Do not use validation accuracy to decide keep/revert.
 
 ## Logging results
 
-results/results.tsv: tab-separated with columns timestamp, commit, train_accuracy, validation_accuracy, graded, status, description.
-
-results/prompt_log.jsonl: one JSON line per experiment with full instructions.md text as the prompt field.
+results/results.tsv: tab-separated with columns timestamp, commit, train_accuracy, validation_accuracy, graded, status, train_oracle_time_s, train_ingestor_time_s, description.
 
 ## The experiment loop
 
 LOOP FOREVER:
 
-1. Edit prompt_hustle/instructions.md with a new idea.
-2. Commit: git add prompt_hustle/instructions.md && git commit -m 'prompt: description'
+1. Edit prompt_hustle/prompt.md with a new idea.
+2. Commit: git add prompt_hustle/prompt.md && git commit -m 'prompt: description'
 3. Run eval (see above). Redirect to outputs/logs/run.log.
 4. Read results from outputs/logs/run.log.
-5. Log to results/results.tsv and results/prompt_log.jsonl, commit logs.
+5. Log to results/results.tsv, commit logs.
 6. If training overall_accuracy improved, keep.
-7. If equal or worse, revert: git checkout HEAD~2 -- prompt_hustle/instructions.md && git commit -m 'revert: description'
+7. If equal or worse, revert: git checkout HEAD~2 -- prompt_hustle/prompt.md && git commit -m 'revert: description'
 
 CRITICAL: Never use git reset --hard. All experiments must remain in results/results.tsv.
 

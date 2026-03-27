@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Analyse prompt_hustle experiment results.
 
-Reads results/results.tsv and results/prompt_log.jsonl and produces:
+Reads results/results.tsv and produces:
   1. An accuracy-over-experiments plot (saved as PNG).
   2. A text summary of the prompt evolution (printed to stdout).
 
@@ -12,7 +12,6 @@ Usage (from project root):
 
 import argparse
 import json
-import textwrap
 from datetime import datetime
 from pathlib import Path
 
@@ -25,7 +24,6 @@ ROOT = Path(__file__).resolve().parent
 PROMPT_HUSTLE_ROOT = ROOT.parent
 RESULTS_DIR = ROOT
 RESULTS_TSV = RESULTS_DIR / "results.tsv"
-PROMPT_LOG = RESULTS_DIR / "prompt_log.jsonl"
 EVAL_DIR = PROMPT_HUSTLE_ROOT / "outputs" / "eval"
 DEFAULT_PNG = RESULTS_DIR / "progress.png"
 DEFAULT_TIMING_PNG = RESULTS_DIR / "timing.png"
@@ -47,6 +45,9 @@ def load_results(path: Path) -> list[dict]:
             row["validation_accuracy"] = float(val_raw) if val_raw else None
             graded_raw = str(row.get("graded", 0)).strip().lower()
             row["graded"] = int(graded_raw in ("1", "true", "yes"))
+            for time_col in ("train_oracle_time_s", "train_ingestor_time_s"):
+                raw = row.get(time_col, "")
+                row[time_col] = float(raw) if raw else None
             if "timestamp" in row:
                 try:
                     row["_dt"] = datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00"))
@@ -56,25 +57,6 @@ def load_results(path: Path) -> list[dict]:
                 row["_dt"] = None
             rows.append(row)
     return rows
-
-
-def load_prompt_log(path: Path) -> dict[str, dict]:
-    """Return a dict keyed by commit hash with full prompt text."""
-    entries = {}
-    if not path.exists():
-        return entries
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                key = obj.get("commit", "")
-                entries[key] = obj
-            except json.JSONDecodeError:
-                continue
-    return entries
 
 
 def load_latest_eval() -> dict | None:
@@ -201,7 +183,7 @@ def plot_accuracy(rows: list[dict], out_path: Path):
     plt.close(fig)
 
 
-def print_prompt_evolution(rows: list[dict], prompt_log: dict[str, dict]):
+def print_prompt_evolution(rows: list[dict]):
     print("\n" + "=" * 70)
     print("PROMPT EVOLUTION")
     print("=" * 70)
@@ -213,6 +195,8 @@ def print_prompt_evolution(rows: list[dict], prompt_log: dict[str, dict]):
         desc = row.get("description", "")
         commit = row.get("commit", "?")
         ts = row.get("timestamp", "")
+        oracle_t = row.get("train_oracle_time_s")
+        ingestor_t = row.get("train_ingestor_time_s")
 
         marker = {
             "keep": "+",
@@ -221,23 +205,17 @@ def print_prompt_evolution(rows: list[dict], prompt_log: dict[str, dict]):
             "reverted": "x",
             "crash": "!!",
         }.get(status, "?")
-        if val_acc is None:
-            print(f"\n[{marker}] #{i}  {ts}  {commit}  train={train_acc:.4f}  ({status})")
-        else:
-            print(f"\n[{marker}] #{i}  {ts}  {commit}  train={train_acc:.4f}  val={val_acc:.4f}  ({status})")
+        acc_str = f"train={train_acc:.4f}"
+        if val_acc is not None:
+            acc_str += f"  val={val_acc:.4f}"
+        time_parts = []
+        if oracle_t is not None:
+            time_parts.append(f"oracle={oracle_t:.1f}s")
+        if ingestor_t is not None:
+            time_parts.append(f"ingestor={ingestor_t:.1f}s")
+        time_str = f"  {' '.join(time_parts)}" if time_parts else ""
+        print(f"\n[{marker}] #{i}  {ts}  {commit}  {acc_str}{time_str}  ({status})")
         print(f"    {desc}")
-
-        entry = prompt_log.get(commit)
-        if entry and "prompt" in entry:
-            prompt_text = entry["prompt"]
-            if isinstance(prompt_text, str):
-                try:
-                    prompt_text = json.loads(prompt_text)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            wrapped = textwrap.indent(prompt_text.strip(), "    | ")
-            print(f"    prompt text:")
-            print(wrapped)
 
     print("\n" + "=" * 70)
 
@@ -262,12 +240,9 @@ def main():
 
     if RESULTS_TSV.exists():
         rows = load_results(RESULTS_TSV)
-        prompt_log = load_prompt_log(PROMPT_LOG)
         print(f"Loaded {len(rows)} experiments from {RESULTS_TSV}")
-        if prompt_log:
-            print(f"Loaded {len(prompt_log)} prompt snapshots from {PROMPT_LOG}")
         plot_accuracy(rows, Path(args.out))
-        print_prompt_evolution(rows, prompt_log)
+        print_prompt_evolution(rows)
     else:
         print(f"No results TSV at {RESULTS_TSV}, skipping accuracy plot.")
 

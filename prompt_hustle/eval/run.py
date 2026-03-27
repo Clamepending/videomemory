@@ -5,9 +5,9 @@ Tasks are stored per-video in data/{split}/tasks/{video_name}/*.md.
 All tasks for a video run simultaneously in one ingestor (like the real
 system), so VLM calls = videos * frames, not tasks * videos * frames.
 
-Usage:
-    uv run python -m prompt_hustle.eval \
-        --instructions prompt_hustle/instructions.md --no-dedup
+Usage (from the prompt_hustle/ directory):
+    uv run python -m eval \
+        --instructions prompt.md --no-dedup
 """
 
 import argparse

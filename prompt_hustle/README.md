@@ -10,7 +10,7 @@ Structure:
 - `outputs/frame_sequence_experiment/`: JSON experiment results
 - `outputs/eval/`: JSON evaluation results
 - `outputs/logs/`: run logs
-- `results/`: experiment artifacts (`results.tsv`, `prompt_log.jsonl`, `analysis.py`, `progress.png`)
+- `results/`: experiment artifacts (`results.tsv`, `progress.png`)
 - `scripts/video_to_frames.sh`: helper to extract frames from videos
 
 ## Experiments
