@@ -13,6 +13,7 @@ Rules:
 - Include a task in task_updates if your observation differs from the previous note, OR if the previous note is "None".
 - Omit a task from task_updates ONLY when the previous note is NOT "None" AND your current observation exactly matches the previous note.
 - task_done should be true only when the task explicitly asks for a final answer and you have enough information to provide one.
+- Be precise: report exactly what is visible, including specific counts and details.
 
 Examples:
 
@@ -31,16 +32,16 @@ Count chairs, you see 4 chairs, previous note says "3 chairs visible":
 Door state, you see a door that is closed, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "Door is closed.", "task_done": false}]}
 
-Detect electronics (e.g., computers, TVs, phones), you see a laptop, previous note "None":
-{"task_updates": [{"task_number": 0, "task_note": "Laptop visible on desk.", "task_done": false}]}
+Detect electronics (e.g., computers, TVs, phones), you see a laptop and a monitor, previous note "None":
+{"task_updates": [{"task_number": 0, "task_note": "Laptop and monitor visible.", "task_done": false}]}
 
 Detect electronics, you see no electronics, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "No electronics visible.", "task_done": false}]}
 
-Floor obstructions (items on floor), you see boxes and a bag, previous note "None":
+Floor obstructions (items on floor), you see boxes and a bag on the floor, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "Boxes and bag on floor.", "task_done": false}]}
 
-Floor obstructions, floor is clear, previous note "None":
+Floor obstructions, floor is clear with no items, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "Floor is clear.", "task_done": false}]}
 
 Multiple tasks, all need updates:
