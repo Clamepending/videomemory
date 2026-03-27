@@ -10,3 +10,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-27T03:59:53	ff1ced00	0.6705	0.6984	N/A	reverted	104198	31986	iter9: add count_chairs and items_on_surfaces examples
 2026-03-27T04:13:15	a63a7d4a	0.6929	0.746	N/A	reverted	N/A	N/A	iter10: minimal prompt without step structure
 2026-03-27T04:26:33	ab6d5ad7	0.7273	0.8095	N/A	reverted	114059	37171	iter11: meticulous scan + clothing example
+2026-03-27T04:38:38	bfe4ee27	0.7491	0.8333	N/A	reverted	98921	35185	iter12: minor wording tweaks to electronics/floor examples
