@@ -24,3 +24,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-28T00:50:00	85bc609	0.7333	N/A	90	REVERTED	117.890	39.117	iter22: cabinet door in multi-task example hurt chairs (chairs=0.6000)
 2026-03-28T01:00:00	e01025b	0.7889	N/A	90	REVERTED	124.596	39.693	iter23: reflection guidance hurt chairs (chairs=0.7000 doors=0.8000)
 2026-03-28T01:09:00	c092d3c	0.7333	N/A	90	REVERTED	122.744	36.602	iter24: broader scan (whole frame/walls) caused hallucinations (chairs=0.7000)
+2026-03-28T01:18:00	12a223b	0.7356	N/A	87	REVERTED	105.672	34.228	iter25: analyst role too conservative/conservative updating (chairs=0.5862)
