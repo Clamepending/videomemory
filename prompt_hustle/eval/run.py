@@ -71,7 +71,10 @@ def oracle_grade_batch(client, image_bytes, task_outputs):
     if not raw:
         raise RuntimeError("Oracle model returned empty response.")
     result = BatchGradingResult.model_validate_json(raw)
-    return {g.task_name: g.score for g in result.grades}
+    return {
+        g.task_name: {"score": g.score, "reasoning": g.reasoning}
+        for g in result.grades
+    }
 
 
 def load_video_tasks(tasks_dir):
@@ -157,18 +160,28 @@ def run_eval(args):
 
                 frame_grades = {}
                 for tname, _, vlm_out in batch_input:
-                    score = scores_map.get(tname, -1)
+                    grade = scores_map.get(tname)
+                    score = grade["score"] if grade else -1
+                    reasoning = grade["reasoning"] if grade else ""
                     if score >= 0:
                         all_scores.append(score)
                         task_scores.setdefault(tname, []).append(score)
-                    frame_grades[tname] = {"vlm_output": vlm_out, "score": score}
+                    frame_grades[tname] = {"vlm_output": vlm_out, "score": score, "reasoning": reasoning}
 
-                # print(
-                #     f"[eval] split={split} video={video_name} frame={frame_index}/{len(frames)} "
-                #     f"status={result['status']} vlm_ms={result['processing_time_ms']} "
-                #     f"oracle_ms={oracle_grading_time_ms}",
-                #     flush=True,
-                # )
+                correct = sum(1 for g in frame_grades.values() if g["score"] == 1)
+                total_tasks = sum(1 for g in frame_grades.values() if g["score"] >= 0)
+                print(
+                    f"[eval] split={split} video={video_name} frame={frame_index}/{len(frames)} "
+                    f"status={result['status']} vlm_ms={result['processing_time_ms']} "
+                    f"oracle_ms={oracle_grading_time_ms} score={correct}/{total_tasks}",
+                    flush=True,
+                )
+                for tname, g in frame_grades.items():
+                    icon = "\u2705" if g["score"] == 1 else "\u274c" if g["score"] == 0 else "?"
+                    print(
+                        f"  {icon} {tname}: {g['score']}  {g['reasoning']}",
+                        flush=True,
+                    )
 
                 per_frame.append({"filename": result["filename"], "status": result["status"], "per_task": frame_grades, "video_ingestor_processing_time_ms": result["processing_time_ms"], "oracle_grading_time_ms": oracle_grading_time_ms})
 
