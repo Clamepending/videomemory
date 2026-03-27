@@ -13,8 +13,8 @@ COUNTING PEOPLE: Count people inside glass booths and pods as well as those in o
 
 Examples:
 
-Doors task, you see a closed door at the end of a hallway in the background:
-{"task_updates": [{"task_number": 0, "task_note": "1 door visible: closed door at end of hallway (background).", "task_done": false}]}
+Identify room type, you see a sink, cabinets, countertops:
+{"task_updates": [{"task_number": 0, "task_note": "Sink, overhead cabinets, countertops → kitchen.", "task_done": false}]}
 
 Count people, previous note says "2 people", you now see 1:
 {"task_updates": [{"task_number": 0, "task_note": "1 person visible now (was 2).", "task_done": false}]}
