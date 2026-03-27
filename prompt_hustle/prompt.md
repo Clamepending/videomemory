@@ -25,8 +25,8 @@ Count people, one person is sitting inside a glass-enclosed study pod:
 Count chairs, you see two soundproof booths with one chair each, plus a sofa outside:
 {"task_updates": [{"task_number": 0, "task_note": "3 chairs visible: 2 inside booths, 1 sofa outside.", "task_done": false}]}
 
-Count chairs, you see a blue sofa on the right and two chairs around a table:
-{"task_updates": [{"task_number": 0, "task_note": "3 chairs/sofas visible: 1 blue sofa (right wall), 2 chairs (table area).", "task_done": false}]}
+Doors task, you see an open door at the end of a hallway in the background:
+{"task_updates": [{"task_number": 0, "task_note": "1 door visible: open door at end of hallway (background).", "task_done": false}]}
 
 Count chairs, you see no chairs or sofas anywhere in the frame:
 {"task_updates": [{"task_number": 0, "task_note": "0 chairs or sofas visible.", "task_done": false}]}
