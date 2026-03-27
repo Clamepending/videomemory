@@ -117,7 +117,7 @@ def run_eval(args):
         if not video_dirs:
             continue
 
-        print(f"\n--- {split} ({len(video_dirs)} videos) ---")
+        print(f"\n--- {split} ({len(video_dirs)} videos) ---", flush=True)
         all_scores, task_scores, video_results = [], {}, []
 
         for video_name in video_dirs:
@@ -127,6 +127,10 @@ def run_eval(args):
                 continue
 
             frames = load_frames(frames_dir / video_name)
+            print(
+                f"[eval] split={split} video={video_name} tasks={len(task_descs)} frames={len(frames)}",
+                flush=True,
+            )
             ingestor, tasks = create_ingestor(
                 task_descs, VIDEO_INGESTOR_MODEL,
                 custom_instructions=custom_instructions,
@@ -134,8 +138,13 @@ def run_eval(args):
             task_map = {t.task_number: (name, desc) for t, (name, desc) in zip(tasks, task_descs)}
 
             per_frame = []
-            for result in process_frames(ingestor, tasks, frames):
+            for frame_index, result in enumerate(process_frames(ingestor, tasks, frames), start=1):
                 if result["status"] == "error":
+                    print(
+                        f"[eval] split={split} video={video_name} frame={frame_index}/{len(frames)} "
+                        f"status=error reason={result.get('error', 'unknown')}",
+                        flush=True,
+                    )
                     per_frame.append({"filename": result["filename"], "status": "error"})
                     continue
 
@@ -148,8 +157,14 @@ def run_eval(args):
                     t0 = time.time()
                     scores_map = oracle_grade_batch(oracle_client, bytes(buf), batch_input)
                     oracle_grading_time_ms = round((time.time() - t0) * 1000)
-                except Exception:
+                except Exception as e:
                     scores_map = {}
+                    oracle_grading_time_ms = -1
+                    print(
+                        f"[eval] split={split} video={video_name} frame={frame_index}/{len(frames)} "
+                        f"oracle_error={type(e).__name__}: {e}",
+                        flush=True,
+                    )
 
                 frame_grades = {}
                 for tname, _, vlm_out in batch_input:
@@ -158,6 +173,13 @@ def run_eval(args):
                         all_scores.append(score)
                         task_scores.setdefault(tname, []).append(score)
                     frame_grades[tname] = {"vlm_output": vlm_out, "score": score}
+
+                print(
+                    f"[eval] split={split} video={video_name} frame={frame_index}/{len(frames)} "
+                    f"status={result['status']} vlm_ms={result['processing_time_ms']} "
+                    f"oracle_ms={oracle_grading_time_ms}",
+                    flush=True,
+                )
 
                 per_frame.append({"filename": result["filename"], "status": result["status"], "per_task": frame_grades, "video_ingestor_processing_time_ms": result["processing_time_ms"], "oracle_grading_time_ms": oracle_grading_time_ms})
 
@@ -179,8 +201,8 @@ def run_eval(args):
             "total_correct": sum(all_scores),
             "per_task_accuracy": per_task_acc,
             "per_video": video_results,
-            "total_video_ingestor_processing_time_s": sum(f["video_ingestor_processing_time_ms"] for f in per_frame),
-            "total_oracle_grading_time_s": sum(f["oracle_grading_time_ms"] for f in per_frame),
+            "total_video_ingestor_processing_time_s": sum(f.get("video_ingestor_processing_time_ms", 0) for f in per_frame),
+            "total_oracle_grading_time_s": sum(f.get("oracle_grading_time_ms", 0) for f in per_frame),
         }
 
     EVAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -193,7 +215,7 @@ def run_eval(args):
     }
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2)
-    print(f"\nResults: {out_path}")
+    print(f"\nResults: {out_path}", flush=True)
     return output
 
 

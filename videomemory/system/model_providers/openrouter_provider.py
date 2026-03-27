@@ -1,11 +1,9 @@
 """OpenRouter model providers."""
 
 import os
-import json
-import re
 import time
 import logging
-from typing import Any, Type
+from typing import Type
 import httpx
 from pydantic import BaseModel
 from .base import BaseModelProvider
@@ -51,12 +49,26 @@ class _BaseOpenRouterProvider(BaseModelProvider):
         super().__init__(api_key)
         self._rate_limiter = _openrouter_rate_limiter
         self._model_name = model_name
+        self._timeout = self._build_timeout()
         
         # Initialize the OpenRouter provider
         if not self.api_key:
             logger.warning("OPENROUTER_API_KEY not found. OpenRouter provider will fail.")
         else:
+            # Keep parity with providers that materialize a client during init so
+            # VideoStreamIngestor does not treat this provider as uninitialized.
+            self._client = object()
             logger.info(f"Initialized OpenRouter provider for {self._model_name}")
+
+    @staticmethod
+    def _build_timeout() -> httpx.Timeout:
+        """Build a bounded timeout so slow upstream responses fail predictably."""
+        total = float(os.getenv("VIDEOMEMORY_OPENROUTER_TIMEOUT_S", "45.0"))
+        connect = float(os.getenv("VIDEOMEMORY_OPENROUTER_CONNECT_TIMEOUT_S", min(total, 10.0)))
+        read = float(os.getenv("VIDEOMEMORY_OPENROUTER_READ_TIMEOUT_S", total))
+        write = float(os.getenv("VIDEOMEMORY_OPENROUTER_WRITE_TIMEOUT_S", min(total, 10.0)))
+        pool = float(os.getenv("VIDEOMEMORY_OPENROUTER_POOL_TIMEOUT_S", min(total, 10.0)))
+        return httpx.Timeout(connect=connect, read=read, write=write, pool=pool)
     
     def _sync_generate_content(self, image_base64: str, prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate content using OpenRouter API.
@@ -85,7 +97,7 @@ class _BaseOpenRouterProvider(BaseModelProvider):
             },
         }
         
-        with httpx.Client(timeout=20.0) as client:
+        with httpx.Client(timeout=self._timeout) as client:
             response = client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
@@ -255,7 +267,7 @@ class OpenRouterQwen3VL8BProvider(_BaseOpenRouterProvider):
         if not self.api_key:
             raise RuntimeError("OpenRouter API key not set.")
         self._rate_limiter.wait_if_needed()
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=self._timeout) as client:
             resp = client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
@@ -289,3 +301,10 @@ class OpenRouterQwen3VL8BProvider(_BaseOpenRouterProvider):
             s = self._repair_json(str(content))
             return response_model.model_validate_json(s)
 
+
+class OpenRouterCustomModelProvider(OpenRouterQwen3VL8BProvider):
+    """Provider for arbitrary OpenRouter model IDs supplied at runtime."""
+
+    def __init__(self, model_name: str, api_key=None):
+        super().__init__(api_key=api_key)
+        self._model_name = model_name

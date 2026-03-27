@@ -12,6 +12,7 @@ from .openrouter_provider import (
     OpenRouterPhi4MultimodalProvider,
     OpenRouterMistralSmall31Provider,
     OpenRouterQwen3VL8BProvider,
+    OpenRouterCustomModelProvider,
 )
 from .vllm_provider import LocalVLLMProvider
 
@@ -57,6 +58,9 @@ def get_VLM_provider(model_name: Optional[str] = None) -> BaseModelProvider:
     model_name = model_name.lower().strip()
     
     if model_name not in MODEL_PROVIDER_MAP:
+        if "/" in model_name:
+            logger.info(f"Creating OpenRouter custom model provider: {model_name}")
+            return OpenRouterCustomModelProvider(model_name=model_name)
         available_models = ", ".join(MODEL_PROVIDER_MAP.keys())
         error_msg = (
             f"Unknown model name: '{model_name}'. "
