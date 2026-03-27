@@ -20,7 +20,7 @@ from pathlib import Path
 import cv2
 from pydantic import BaseModel, Field
 
-from .common import DATA_DIR, OUTPUT_DIR, load_frames, create_ingestor, process_frames
+from eval.common import DATA_DIR, OUTPUT_DIR, load_frames, create_ingestor, process_frames
 
 EVAL_OUTPUT_DIR = OUTPUT_DIR / "eval"
 ORACLE_MODEL = os.getenv("ORACLE_MODEL", "gemini-2.5-flash")
@@ -128,7 +128,7 @@ def run_eval(args):
 
             frames = load_frames(frames_dir / video_name)
             ingestor, tasks = create_ingestor(
-                task_descs, VIDEO_INGESTOR_MODEL, args.no_dedup,
+                task_descs, VIDEO_INGESTOR_MODEL,
                 custom_instructions=custom_instructions,
             )
             task_map = {t.task_number: (name, desc) for t, (name, desc) in zip(tasks, task_descs)}
@@ -188,7 +188,6 @@ def run_eval(args):
     output = {
         "model": VIDEO_INGESTOR_MODEL,
         "oracle_model": ORACLE_MODEL,
-        "dedup": not args.no_dedup,
         "instructions_file": args.instructions,
         "splits": results_by_split,
     }
@@ -201,7 +200,6 @@ def run_eval(args):
 def main():
     parser = argparse.ArgumentParser(description="Eval VideoMemory video ingestor")
     parser.add_argument("--instructions", help="Path to instructions markdown file")
-    parser.add_argument("--no-dedup", action="store_true", help="Disable frame deduplication")
     run_eval(parser.parse_args())
 
 if __name__ == "__main__":

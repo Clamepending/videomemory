@@ -30,7 +30,7 @@ CANNOT: Modify prompts/*.md, eval/run.py, or any VideoMemory source code.
 ## Running an evaluation
 
 ```
-uv run python -m prompt_hustle.eval --instructions prompt_hustle/instructions.md --model qwen3-vl-8b --no-dedup > prompt_hustle/outputs/logs/run.log 2>&1
+uv run python -m prompt_hustle.eval --instructions prompt_hustle/instructions.md > prompt_hustle/outputs/logs/run.log 2>&1
 ```
 
 Extract metrics from outputs/logs/run.log:
