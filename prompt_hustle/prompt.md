@@ -11,8 +11,6 @@ COUNTING CHAIRS: When counting chairs, include ALL seating furniture: chairs, so
 
 COUNTING PEOPLE: Count people inside glass booths and pods as well as those in open areas.
 
-DOORS: Report ALL visible doors: room doors, hallway doors, glass booth/pod doors, and cabinet/appliance doors (refrigerator, dishwasher, cabinets). If you see a type of door, report it.
-
 Examples:
 
 Identify room type, you see a sink, cabinets, countertops:
