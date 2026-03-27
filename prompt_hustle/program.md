@@ -1,6 +1,6 @@
 # prompt_hustle
 
-Autonomous prompt engineering for VideoMemory video ingestor.
+Autonomous prompt engineering for VideoMemory video ingestor. Multi-agent safe.
 
 ## Context
 
@@ -15,11 +15,11 @@ The evaluation runs many different tasks (count people, detect luggage, describe
 
 ## Setup
 
-1. Agree on a run tag (e.g. codex_mar25_3pm). Branch prompt_hustle_multiagent/tag/main must not already exist.
-2. Create the branch.
-3. Read in-scope files: program.md, prompt.md (only file you edit), data/train/tasks/<video name>/*.md (fixed test cases), eval/run.py (do not modify).
-4. Verify data exists in data/train/frames/ and data/validation/frames/.
-5. Initialize results/results.tsv.
+1. Agree on a run tag (e.g. `mar27`). The shared branch is `prompt_hustle_multiagent/<tag>/main`.
+2. Generate a random 4-character agent ID (e.g. `a3f2`). This identifies your work branches.
+3. Create or checkout the shared branch `prompt_hustle_multiagent/<tag>/main`. If it doesn't exist, create it and initialize `results/results.tsv` with the header row.
+4. Read in-scope files: program.md, prompt.md (only file you edit), data/train/tasks/<video name>/*.md (fixed test cases), eval/run.py (do not modify).
+5. Verify data exists in data/train/frames/ and data/validation/frames/.
 
 ## What you CAN and CANNOT do
 
@@ -40,20 +40,51 @@ Run from the `prompt_hustle/` directory. Extract metrics from outputs/logs/run.l
 
 ## Logging results
 
-results/results.tsv: tab-separated with columns timestamp, commit, train_accuracy, validation_accuracy, graded, status, train_oracle_time_s, train_ingestor_time_s, description.
+results/results.tsv: tab-separated with columns: timestamp, branch, train_accuracy, validation_accuracy, graded, status, train_oracle_time_s, train_ingestor_time_s, description.
+
+The `branch` column holds the full branch name of the experiment (e.g. `prompt_hustle_multiagent/mar27/a3f2_1430`). Any agent can `git checkout <branch>` to retrieve that prompt.
 
 ## The experiment loop
 
 LOOP FOREVER:
 
-1. check out the commit with the best score in results/results.tsv, if there are no scores, continue.
-2. create a new branch (prompt_hustle_multiagent/tag/time where tag and time are the current experiment tag and the current time respectively)
-1. Edit prompt_hustle/prompt.md with a new idea.
-2. Commit: git add prompt_hustle/prompt.md && git commit -m 'prompt: description'
-3. Run eval (see above). Redirect to outputs/logs/run.log.
-4. Read results from outputs/logs/run.log. && git commit -m 'score: <insert score>' && git push
-6. checkout prompt_hustle_multiagent/tag/main branch and log results to results.results.tsv. Do not do anything except insert the results information in the correct row. push.
+### 1. Find the best starting point
 
+- `git checkout prompt_hustle_multiagent/<tag>/main && git pull`
+- Parse `results/results.tsv`. Find the row with the highest `train_accuracy`.
+- If rows exist: `git checkout <best_branch>` to start from the best-known prompt.
+- If no rows (header only): stay on the main branch and use the current prompt.md as-is.
+
+### 2. Create your experiment branch
+
+- `git checkout -b prompt_hustle_multiagent/<tag>/<agent_id>_<HHMM>`
+  (use current time for `<HHMM>`, e.g. `prompt_hustle_multiagent/mar27/a3f2_1430`)
+
+### 3. Edit and commit
+
+- Edit `prompt_hustle/prompt.md` with a new idea.
+- `git add prompt_hustle/prompt.md && git commit -m 'prompt: <description>'`
+
+### 4. Run eval
+
+- Run eval (see above). Redirect to `outputs/logs/run.log`.
+- Read results from `outputs/logs/run.log`.
+- `git add -A && git commit -m 'score: <train_accuracy>'`
+- `git push -u origin HEAD`
+
+### 5. Log results to the shared branch (atomic append with retry)
+
+```
+git checkout prompt_hustle_multiagent/<tag>/main
+RETRY up to 5 times:
+  git pull --rebase origin prompt_hustle_multiagent/<tag>/main
+  append one row to results/results.tsv  (do NOT touch any other rows)
+  git add results/results.tsv
+  git commit -m 'result: <branch> <train_accuracy>'
+  git push  →  if success, break; else continue retry
+```
+
+Only append your single result row. Never edit or remove existing rows.
 
 CRITICAL: Never use git reset --hard. All experiments must remain in results/results.tsv.
 
