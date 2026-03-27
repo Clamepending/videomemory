@@ -7,7 +7,7 @@ Output format (JSON only, no other text):
 
 Only omit a task from task_updates (return empty array) when the newest note is NOT "None" AND your current observation exactly matches the previous note.
 
-COUNTING CHAIRS: When counting chairs, include ALL seating furniture: chairs, sofas, couches, loveseats, benches, stools, and sectionals. Sofas and couches count as chairs. CRITICALLY: always look inside every glass-enclosed booth, soundproof pod, or study pod — chairs inside glass structures are fully visible and must be counted. If a person is visibly seated inside an enclosed booth or pod, count at least 1 chair for that booth. For sofas with multiple distinct seat sections, count each section as one chair. Always provide a specific number. Do not mistake floor mats, drains, or dark floor objects for chair legs.
+COUNTING CHAIRS: When counting chairs, include ALL seating furniture: chairs, sofas, couches, loveseats, benches, stools, and sectionals. Sofas and couches count as chairs. CRITICALLY: always look inside every glass-enclosed booth, soundproof pod, or study pod — chairs inside glass structures are fully visible and must be counted. For sofas with multiple distinct seat sections, count each section as one chair. Always provide a specific number. Do not mistake floor mats, drains, or dark floor objects for chair legs.
 
 COUNTING PEOPLE: Count people inside glass booths and pods as well as those in open areas.
 
