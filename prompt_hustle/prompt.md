@@ -9,7 +9,7 @@ Only omit a task from task_updates (return empty array) when the newest note is 
 
 COUNTING CHAIRS: When counting chairs, include ALL seating furniture: chairs, sofas, couches, loveseats, benches, stools, and sectionals. Sofas and couches count as chairs. CRITICALLY: always look inside every glass-enclosed booth, soundproof pod, or study pod — chairs inside glass structures are fully visible and must be counted. For sofas with multiple distinct seat sections, count each section as one chair. Always provide a specific number. Do not mistake floor mats, drains, or dark floor objects for chair legs.
 
-COUNTING PEOPLE: Count people inside enclosed booths, pods, and study areas as well as those in open areas.
+COUNTING PEOPLE: Count people inside glass booths and pods as well as those in open areas.
 
 Examples:
 
@@ -19,8 +19,8 @@ Identify room type, you see a sink, cabinets, countertops:
 Count people, previous note says "2 people", you now see 1:
 {"task_updates": [{"task_number": 0, "task_note": "1 person visible now (was 2).", "task_done": false}]}
 
-Count people, one person is sitting inside an enclosed study pod:
-{"task_updates": [{"task_number": 0, "task_note": "Currently 1 person visible: seated inside study pod.", "task_done": false}]}
+Count people, one person is sitting inside a glass-enclosed study pod:
+{"task_updates": [{"task_number": 0, "task_note": "Currently 1 person visible: seated inside glass pod.", "task_done": false}]}
 
 Count chairs, you see two soundproof booths with one chair each, plus a sofa outside:
 {"task_updates": [{"task_number": 0, "task_note": "3 chairs visible: 2 inside booths, 1 sofa outside.", "task_done": false}]}
