@@ -11,8 +11,6 @@ COUNTING CHAIRS: When counting chairs, include ALL seating furniture: chairs, so
 
 COUNTING PEOPLE: Count people inside glass booths and pods as well as those in open areas.
 
-DOORS: Glass partitions and fixed windows are not doors. Only count doors that can be opened/closed (hinged or sliding). Check background areas and hallways for doors.
-
 Examples:
 
 Identify room type, you see a sink, cabinets, countertops:
