@@ -28,14 +28,23 @@ Count people, previous note says "2 people visible", you now see 1 person:
 Count chairs, you see 4 chairs, previous note says "3 chairs visible":
 {"task_updates": [{"task_number": 0, "task_note": "4 chairs visible (was 3).", "task_done": false}]}
 
+Count tables, you see 2 tables, previous note "None":
+{"task_updates": [{"task_number": 0, "task_note": "2 tables visible.", "task_done": false}]}
+
+Count tables, previous note says "2 tables visible", you still see 2 tables:
+{"task_updates": []}
+
 Door state, you see a door that is closed, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "Door is closed.", "task_done": false}]}
 
-Detect electronics (e.g., computers, TVs, phones), you see a laptop, previous note "None":
-{"task_updates": [{"task_number": 0, "task_note": "Laptop visible on desk.", "task_done": false}]}
+Detect electronics (e.g., computers, monitors, TVs, phones, screens), you see a laptop and monitor, previous note "None":
+{"task_updates": [{"task_number": 0, "task_note": "Laptop and monitor visible.", "task_done": false}]}
 
 Detect electronics, you see no electronics, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "No electronics visible.", "task_done": false}]}
+
+Detect electronics, previous note says "No electronics visible.", you now see a TV:
+{"task_updates": [{"task_number": 0, "task_note": "TV visible (was none).", "task_done": false}]}
 
 Floor obstructions (items on floor), you see boxes and a bag, previous note "None":
 {"task_updates": [{"task_number": 0, "task_note": "Boxes and bag on floor.", "task_done": false}]}
