@@ -22,6 +22,9 @@ Count people, previous note says "2 people", you now see 1:
 Count people, one person is sitting inside a glass-enclosed study pod:
 {"task_updates": [{"task_number": 0, "task_note": "Currently 1 person visible: seated inside glass pod.", "task_done": false}]}
 
+Count people, you see one person sitting at a table visible in the background:
+{"task_updates": [{"task_number": 0, "task_note": "Currently 1 person visible: seated at background table.", "task_done": false}]}
+
 Count chairs, you see two soundproof booths with one chair each, plus a sofa outside:
 {"task_updates": [{"task_number": 0, "task_note": "3 chairs visible: 2 inside booths, 1 sofa outside.", "task_done": false}]}
 
