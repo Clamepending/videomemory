@@ -5,3 +5,4 @@ timestamp	commit	train_accuracy	validation_accuracy	graded	status	train_oracle_t
 2026-03-27T21:52:00	a885881	0.7778	N/A	90	KEPT	103.794	38.953	iter3: critical glass booth scanning + people in booths (chairs=0.6667, people=0.9000, doors=0.7667)
 2026-03-27T22:03:00	d706d5d	0.7000	N/A	90	REVERTED	123.731	41.612	iter4: sofa section counting caused regression (chairs=0.5000)
 2026-03-27T22:14:00	7e58824	0.7333	N/A	90	REVERTED	98.686	37.326	iter5: removing glass keyword hurt chairs+people despite fixing doors (doors=0.8667)
+2026-03-27T22:22:00	98001c4	0.7444	N/A	90	REVERTED	109.165	39.339	iter6: door guidance (glass partitions not doors) hurt all tasks (doors=0.7000)
