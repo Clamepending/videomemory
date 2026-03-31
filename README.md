@@ -26,7 +26,10 @@ What it does:
 - installs the OpenClaw helper, skill, and webhook transform
 - merges the OpenClaw hook config
 
-After that, use OpenClaw normally and ask it to create monitoring tasks.
+After that, use OpenClaw normally. It should be able to:
+- create/list/edit/stop/delete VideoMemory tasks
+- answer one-off camera questions like `what do you see on camera?`
+- use trigger/action splits for `when X happens, do Y`
 
 ### I already have OpenClaw in Docker
 
@@ -57,11 +60,22 @@ docker compose -f docker-compose.real-openclaw.yml up -d --build
 Then open:
 - VideoMemory: `http://localhost:5050/devices`
 - OpenClaw: `http://localhost:18889/`
+- Demo camera: `http://localhost:18081/snapshot.jpg`
 
 Gateway token:
 
 ```text
 openclaw-real-dev-token
+```
+
+Try these in OpenClaw after it starts:
+
+```text
+what do you see on camera
+```
+
+```text
+when you see a red marker, notify me
 ```
 
 ## Docker
@@ -74,29 +88,38 @@ docker compose -f docker-compose.core.yml up --build
 
 This starts VideoMemory. Open http://localhost:5050.
 
-### Core + OpenClaw (for testing)
+### Bundled real OpenClaw + VideoMemory
 
-Clone [SimpleAgent](https://github.com/Clamepending/simpleagent) as a sibling directory:
-
-```bash
-cd ..
-git clone https://github.com/Clamepending/simpleagent.git
-cd videomemory
-```
-
-Then launch both services:
+Launch both services:
 
 ```bash
-docker compose -f docker-compose.openclaw.yml up --build
+docker compose -f docker-compose.real-openclaw.yml up -d --build
 ```
 
 This starts:
 - **VideoMemory** on `http://localhost:5050` (UI + API)
-- **OpenClaw** on `http://localhost:18789` (Chat UI + API)
-- **Demo Camera** on `http://localhost:18080/snapshot.jpg` (for red-marker testing)
+- **OpenClaw** on `http://localhost:18889` (real OpenClaw UI + gateway)
+- **Demo Camera** on `http://localhost:18081/snapshot.jpg`
 
 OpenClaw connects to VideoMemory via plain HTTP API at `http://videomemory:5050`.
 It should fetch the skill from `http://videomemory:5050/openclaw/skill.md` before making task/device calls.
+
+Gateway token:
+
+```text
+openclaw-real-dev-token
+```
+
+### Legacy stand-in stack
+
+If you specifically want the older SimpleAgent-backed stand-in stack for debugging:
+
+1. Clone [SimpleAgent](https://github.com/Clamepending/simpleagent) as a sibling directory.
+2. Run:
+
+```bash
+docker compose -f docker-compose.openclaw.yml up --build
+```
 
 ## Integration
 
@@ -106,99 +129,6 @@ VideoMemory exposes a stable HTTP API for external agents:
 - OpenClaw skill: [docs/openclaw-skill.md](docs/openclaw-skill.md)
 - Agent guide: [AGENTS.md](AGENTS.md)
 - OpenAPI spec: `GET /openapi.json`
-
-## Human Setup
-
-### VM or host OpenClaw: one command
-
-If OpenClaw runs directly on a VM or host machine and that machine has Docker access, this one command installs VideoMemory, starts it if needed, installs the OpenClaw integration, and configures OpenClaw:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/openclaw-bootstrap.sh)
-```
-
-### Docker OpenClaw: one host command, then one chat message
-
-First start VideoMemory on the host:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/install-videomemory.sh)
-```
-
-Then send this exact message to your OpenClaw:
-
-```text
-Please install and onboard VideoMemory by running VIDEOMEMORY_BASE=http://host.docker.internal:5050 bash <(curl -fsSL http://host.docker.internal:5050/openclaw/bootstrap.sh). Then use VideoMemory from http://host.docker.internal:5050/openclaw/skill.md and use the videomemory task helper for any "when X happens, do Y" request.
-```
-
-If you just want the simple repo handoff, this still works too:
-
-```text
-please download and run the videomemory system via this link: https://github.com/Clamepending/videomemory
-```
-
-If you do not already have an OpenClaw container, start from the official image:
-
-- Docker image: [`alpine/openclaw:latest`](https://hub.docker.com/r/alpine/openclaw)
-
-On Linux, make sure the OpenClaw container can reach the host at `host.docker.internal`. The usual Docker flag is:
-
-```bash
---add-host=host.docker.internal:host-gateway
-```
-
-## Agent Setup
-
-These instructions assume the reader is OpenClaw and that it is onboarding itself to VideoMemory.
-
-### If OpenClaw is on the same VM/host as Docker
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/openclaw-bootstrap.sh)
-```
-
-This one command should:
-- clone or reuse the VideoMemory repo
-- start `docker-compose.core.yml` if VideoMemory is not already running
-- install the helper, webhook transform, and local skill into `~/.openclaw`
-- merge the VideoMemory hook mapping into `~/.openclaw/openclaw.json`
-- copy model API keys from the shell environment into VideoMemory settings when present
-
-### If OpenClaw is itself running inside Docker
-
-1. Ask the human to start VideoMemory on the host:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/install-videomemory.sh)
-```
-
-2. Then run this from OpenClaw:
-
-```bash
-VIDEOMEMORY_BASE=http://host.docker.internal:5050 bash <(curl -fsSL http://host.docker.internal:5050/openclaw/bootstrap.sh)
-```
-
-3. When you need the skill URL from inside that container, use:
-
-```bash
-curl -fsSL http://host.docker.internal:5050/openclaw/skill.md
-```
-
-If `host.docker.internal` does not resolve, ask the human to relaunch the OpenClaw container with `--add-host=host.docker.internal:host-gateway`.
-
-### General rules
-
-1. Do not use `web_fetch` for `localhost`, `127.0.0.1`, `host.docker.internal`, or `videomemory` URLs. Use `curl` through shell/exec instead.
-2. Verify VideoMemory before creating tasks:
-
-```bash
-curl -fsSL "$VIDEOMEMORY_BASE/api/health"
-curl -fsSL "$VIDEOMEMORY_BASE/api/devices"
-```
-
-3. Create tasks with `bot_id: "openclaw"` so webhook wakeups can be traced cleanly.
-4. Use the `videomemory-task-helper` for any "when X happens, do Y" request so VideoMemory only stores the trigger condition.
-5. Expect VideoMemory to wake OpenClaw at `/hooks/videomemory-alert` when a monitored task note changes.
 
 ## Mobile camera (Android)
 
