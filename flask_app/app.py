@@ -185,6 +185,13 @@ def openclaw_task_helper():
     helper_path = Path(__file__).parent.parent / 'docs' / 'openclaw-videomemory-task-helper.mjs'
     return send_file(helper_path, mimetype='text/javascript')
 
+
+@app.route('/openclaw/bootstrap.sh')
+def openclaw_bootstrap():
+    """Serve the one-shot bootstrap script for existing OpenClaw installs."""
+    script_path = Path(__file__).parent.parent / 'docs' / 'openclaw-bootstrap.sh'
+    return send_file(script_path, mimetype='text/x-shellscript')
+
 @app.route('/device/<io_id>/debug')
 def device_debug(io_id):
     """Render the ingestor debug page for a device."""

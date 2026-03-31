@@ -25,6 +25,29 @@ Start by fetching this skill:
 curl -fsSL http://videomemory:5050/openclaw/skill.md
 ```
 
+## One-shot bootstrap
+
+If OpenClaw's `exec` environment has `git`, `node`, and Docker access, it can bootstrap VideoMemory and the integration in one shell step:
+
+```bash
+bash <(curl -fsSL http://videomemory:5050/openclaw/bootstrap.sh)
+```
+
+If VideoMemory is not running yet, use the repo copy of the script after cloning the repo:
+
+```bash
+git clone https://github.com/Clamepending/videomemory.git
+cd videomemory
+bash docs/openclaw-bootstrap.sh
+```
+
+What this bootstrap does:
+- clones or reuses the VideoMemory repo
+- launches `docker-compose.core.yml` if VideoMemory is not already reachable
+- installs the OpenClaw helper, hook transform, and local skill
+- merges the VideoMemory webhook mapping into `~/.openclaw/openclaw.json`
+- copies any model API keys present in the shell environment into VideoMemory settings
+
 If OpenClaw needs to handle "watch for X, then do Y" requests, install the helper once:
 
 ```bash
@@ -43,6 +66,7 @@ curl -fsSL http://videomemory:5050/openclaw/videomemory-task-helper.mjs \
 - When the user explicitly wants a task erased, call `DELETE /api/task/{task_id}`.
 - If there is exactly one available camera, use it unless the user asked for a different one.
 - Do not put follow-up actions like jokes, Telegram sends, or texting instructions directly into VideoMemory's `task_description` when OpenClaw should perform that action later.
+- If Docker is unavailable in the OpenClaw execution environment, the bootstrap can still install the integration pieces, but it cannot launch a new VideoMemory container by itself.
 
 ## Basic checks
 
