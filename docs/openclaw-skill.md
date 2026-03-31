@@ -99,6 +99,32 @@ List devices:
 curl -fsSL http://videomemory:5050/api/devices
 ```
 
+## One-off camera questions
+
+For prompts like `what do you see on camera`, `describe the current frame`, `is anyone visible`, or `what color is the marker`, use VideoMemory's one-off frame analysis endpoint instead of downloading the snapshot and using a generic image tool.
+
+First list devices and pick the camera `io_id`, then call:
+
+```bash
+curl -fsSL -X POST http://videomemory:5050/api/caption_frame \
+  -H 'Content-Type: application/json' \
+  -d '{"io_id":"net0","prompt":"Describe what is visible in this camera frame in detail."}'
+```
+
+For targeted checks, change only the prompt text. Examples:
+
+```bash
+curl -fsSL -X POST http://videomemory:5050/api/caption_frame \
+  -H 'Content-Type: application/json' \
+  -d '{"io_id":"net0","prompt":"Are any people visible? If so, count them and describe where they are."}'
+
+curl -fsSL -X POST http://videomemory:5050/api/caption_frame \
+  -H 'Content-Type: application/json' \
+  -d '{"io_id":"net0","prompt":"Describe the colored shapes and whether a red marker is visible."}'
+```
+
+Prefer `/api/caption_frame` for one-off camera descriptions. Only fall back to raw snapshot download plus another tool if `/api/caption_frame` is unavailable or returns an error.
+
 ## Cameras
 
 Add a network camera:
@@ -226,6 +252,7 @@ curl -fsSL -X PUT http://videomemory:5050/api/settings/VIDEO_INGESTOR_MODEL \
 5. Check `/api/health`.
 6. Call `/api/devices`.
 7. If no suitable camera exists, add one with `/api/devices/network`.
-8. If the user wants record-only monitoring, use `/api/tasks` directly with a neutral condition-only description.
-9. If the user wants "when X happens, do Y", use `videomemory-task-helper.mjs` so OpenClaw keeps `do Y` locally and VideoMemory only sees `watch for X`.
-10. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.
+8. If the user asks a one-off camera question, call `/api/caption_frame`.
+9. If the user wants record-only monitoring, use `/api/tasks` directly with a neutral condition-only description.
+10. If the user wants "when X happens, do Y", use `videomemory-task-helper.mjs` so OpenClaw keeps `do Y` locally and VideoMemory only sees `watch for X`.
+11. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.
