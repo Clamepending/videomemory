@@ -114,10 +114,10 @@
                         <td><code>http://videomemory:5050/api/health</code></td>
                     </tr>
                     <tr>
-                        <td>VideoMemory MCP</td>
-                        <td><code>8765/tcp</code></td>
-                        <td>MCP endpoint for tool calls (including one-off <code>analyze_feed</code>).</td>
-                        <td><code>http://videomemory:8765/mcp</code></td>
+                        <td>OpenClaw Skill</td>
+                        <td><code>5050/tcp</code></td>
+                        <td>Markdown skill file with curl-ready HTTP examples for OpenClaw.</td>
+                        <td><code>http://videomemory:5050/openclaw/skill.md</code></td>
                     </tr>
                     <tr>
                         <td>Direct camera input</td>
@@ -151,10 +151,10 @@
                         <td><code>http://localhost:5050/</code></td>
                     </tr>
                     <tr>
-                        <td>VideoMemory MCP</td>
-                        <td><code>8765</code></td>
-                        <td>MCP HTTP server.</td>
-                        <td><code>http://localhost:8765/mcp</code></td>
+                        <td>OpenClaw Skill</td>
+                        <td><code>5050</code></td>
+                        <td>Markdown skill endpoint for curl-based agent integration.</td>
+                        <td><code>http://localhost:5050/openclaw/skill.md</code></td>
                     </tr>
                     <tr>
                         <td>External Agent Gateway (optional)</td>
@@ -173,7 +173,7 @@
                 <li>Typical payload includes <code>task_id</code>, <code>io_id</code>, <code>task_description</code>, and <code>note</code>.</li>
                 <li>If token auth is enabled, VideoMemory sends <code>Authorization: Bearer &lt;token&gt;</code>.</li>
                 <li>Configure values from <code>Settings -&gt; External Agent Integration</code>.</li>
-                <li>Use the <strong>Events</strong> tab to inspect recent MCP calls and tool results while debugging agent communication.</li>
+                <li>Use the OpenClaw skill endpoint to see the recommended curl workflow while debugging agent communication.</li>
             </ul>
         </div>
 
@@ -183,7 +183,8 @@
                 <li>In the bundled OpenClaw stack, VideoMemory sends alerts to <code>http://openclaw:18789/hooks/videomemory-alert</code>.</li>
                 <li>OpenClaw UI/Gateway is available on host port <code>18789</code> at <code>http://localhost:18789/</code>.</li>
                 <li>You can test the OpenClaw hook path from host via <code>http://localhost:18789/hooks/videomemory-alert</code>.</li>
-                <li>OpenClaw can call VideoMemory tools over MCP at <code>http://videomemory:8765/mcp</code> (container) or <code>http://localhost:8765/mcp</code> (host).</li>
+                <li>OpenClaw should fetch the skill from <code>http://videomemory:5050/openclaw/skill.md</code> and use the documented HTTP endpoints with <code>curl</code>.</li>
+                <li>If OpenClaw is running in a separate Docker container and VideoMemory is on the host, use <code>http://host.docker.internal:5050/openclaw/skill.md</code> instead.</li>
             </ul>
         </div>
     </div>

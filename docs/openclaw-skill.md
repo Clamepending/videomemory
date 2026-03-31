@@ -10,13 +10,15 @@ Use this skill when OpenClaw needs to manage VideoMemory over plain HTTP instead
 ## Local URL rules
 
 - Inside the bundled Docker stack, the canonical VideoMemory base URL is `http://videomemory:5050`.
-- If the user pastes `http://localhost:5050/...` or `http://127.0.0.1:5050/...` while OpenClaw is running in Docker, rewrite it to `http://videomemory:5050/...` before calling anything.
+- If OpenClaw is running in its own Docker container while VideoMemory is running on the host, the canonical VideoMemory base URL is `http://host.docker.internal:5050`.
+- If the user pastes `http://localhost:5050/...` or `http://127.0.0.1:5050/...` while OpenClaw is running in Docker, first rewrite it to `http://host.docker.internal:5050/...`. If that host alias is unavailable but a shared Docker service name exists, retry with `http://videomemory:5050/...`.
 - Do not ask the user to paste the skill contents just because the URL is private or local.
 - Do not use `web_fetch` for private/local VideoMemory URLs. Use `curl` through the shell instead.
 
 ## Base URLs
 
 - Inside the Docker network: `http://videomemory:5050`
+- From a Dockerized OpenClaw to a host-run VideoMemory: `http://host.docker.internal:5050`
 - From the host machine: `http://localhost:5050`
 
 Start by fetching this skill:
@@ -25,15 +27,27 @@ Start by fetching this skill:
 curl -fsSL http://videomemory:5050/openclaw/skill.md
 ```
 
+If OpenClaw is in Docker and VideoMemory is on the host:
+
+```bash
+curl -fsSL http://host.docker.internal:5050/openclaw/skill.md
+```
+
 ## One-shot bootstrap
 
 If OpenClaw's `exec` environment has `git`, `node`, and Docker access, it can bootstrap VideoMemory and the integration in one shell step:
 
 ```bash
-bash <(curl -fsSL http://videomemory:5050/openclaw/bootstrap.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
 ```
 
-If VideoMemory is not running yet, use the repo copy of the script after cloning the repo:
+If OpenClaw is in Docker and the human already started VideoMemory on the host, bootstrap against the host alias:
+
+```bash
+VIDEOMEMORY_BASE=http://host.docker.internal:5050 bash <(curl -fsSL http://host.docker.internal:5050/openclaw/bootstrap.sh)
+```
+
+If VideoMemory is not running yet and you already cloned the repo, use the repo copy of the script:
 
 ```bash
 git clone https://github.com/Clamepending/videomemory.git
@@ -67,6 +81,7 @@ curl -fsSL http://videomemory:5050/openclaw/videomemory-task-helper.mjs \
 - If there is exactly one available camera, use it unless the user asked for a different one.
 - Do not put follow-up actions like jokes, Telegram sends, or texting instructions directly into VideoMemory's `task_description` when OpenClaw should perform that action later.
 - If Docker is unavailable in the OpenClaw execution environment, the bootstrap can still install the integration pieces, but it cannot launch a new VideoMemory container by itself.
+- On Linux, `host.docker.internal` may require the OpenClaw container to be started with `--add-host=host.docker.internal:host-gateway`.
 
 ## Basic checks
 
@@ -202,11 +217,13 @@ curl -fsSL -X PUT http://videomemory:5050/api/settings/VIDEO_INGESTOR_MODEL \
 
 ## Suggested OpenClaw workflow
 
-1. Normalize any pasted local URL to `http://videomemory:5050/...` when running in Docker.
-2. Fetch this skill with `curl`.
-3. Check `/api/health`.
-4. Call `/api/devices`.
-5. If no suitable camera exists, add one with `/api/devices/network`.
-6. If the user wants record-only monitoring, use `/api/tasks` directly with a neutral condition-only description.
-7. If the user wants "when X happens, do Y", use `videomemory-task-helper.mjs` so OpenClaw keeps `do Y` locally and VideoMemory only sees `watch for X`.
-8. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.
+1. If Docker access is available on the same VM/host, run the raw GitHub bootstrap script.
+2. If OpenClaw is in Docker and VideoMemory is already running on the host, run the served bootstrap script with `VIDEOMEMORY_BASE=http://host.docker.internal:5050`.
+3. Normalize any pasted local URL to the reachable Docker-safe base before calling it.
+4. Fetch this skill with `curl`.
+5. Check `/api/health`.
+6. Call `/api/devices`.
+7. If no suitable camera exists, add one with `/api/devices/network`.
+8. If the user wants record-only monitoring, use `/api/tasks` directly with a neutral condition-only description.
+9. If the user wants "when X happens, do Y", use `videomemory-task-helper.mjs` so OpenClaw keeps `do Y` locally and VideoMemory only sees `watch for X`.
+10. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.

@@ -1,6 +1,6 @@
 # VideoMemory Core <-> Agent Contract
 
-This document defines the integration contract between **VideoMemory Core** and any external agent service (e.g. SimpleAgent).
+This document defines the integration contract between **VideoMemory Core** and any external agent service (e.g. OpenClaw).
 
 ## Scope and boundary
 
@@ -33,6 +33,7 @@ Use these stable endpoints from your external agent:
 Machine-readable schema:
 
 - `GET /openapi.json`
+- `GET /openclaw/skill.md` for a curl-oriented OpenClaw skill document
 
 Error shape:
 
@@ -46,6 +47,8 @@ Error shape:
 ## Docker Compose stacks
 
 - Core only: `docker compose -f docker-compose.core.yml up --build`
-- Core + SimpleAgent: `docker compose -f docker-compose.simpleagent.yml up --build`
+- Core + OpenClaw: `docker compose -f docker-compose.openclaw.yml up --build`
 
-SimpleAgent connects to VideoMemory via plain HTTP API at `http://videomemory:5050`.
+OpenClaw connects to VideoMemory via plain HTTP API.
+In the bundled stack it should fetch `http://videomemory:5050/openclaw/skill.md` and use the documented HTTP endpoints with `curl`.
+If OpenClaw is in Docker and VideoMemory is running on the host, use `http://host.docker.internal:5050/openclaw/skill.md` instead.

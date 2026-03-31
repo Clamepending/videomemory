@@ -192,6 +192,13 @@ def openclaw_bootstrap():
     script_path = Path(__file__).parent.parent / 'docs' / 'openclaw-bootstrap.sh'
     return send_file(script_path, mimetype='text/x-shellscript')
 
+
+@app.route('/openclaw/install-videomemory.sh')
+def openclaw_install_videomemory():
+    """Serve the host-side VideoMemory installer used before Dockerized OpenClaw onboarding."""
+    script_path = Path(__file__).parent.parent / 'docs' / 'install-videomemory.sh'
+    return send_file(script_path, mimetype='text/x-shellscript')
+
 @app.route('/device/<io_id>/debug')
 def device_debug(io_id):
     """Render the ingestor debug page for a device."""

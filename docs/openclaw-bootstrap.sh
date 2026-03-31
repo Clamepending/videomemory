@@ -15,7 +15,7 @@ REPO_URL="${VIDEOMEMORY_REPO_URL:-https://github.com/Clamepending/videomemory.gi
 REPO_REF="${VIDEOMEMORY_REPO_REF:-main}"
 REPO_DIR="${VIDEOMEMORY_REPO_DIR:-$HOME/videomemory}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
-VIDEOMEMORY_BASE="${VIDEOMEMORY_BASE:-http://127.0.0.1:5050}"
+VIDEOMEMORY_BASE="${VIDEOMEMORY_BASE:-}"
 BOT_ID="${VIDEOMEMORY_OPENCLAW_BOT_ID:-openclaw}"
 SKIP_START=0
 SKIP_KEYS=0
@@ -116,6 +116,29 @@ ensure_repo() {
 
 healthcheck() {
   "$CURL_BIN" -fsS "$VIDEOMEMORY_BASE/api/health" >/dev/null 2>&1
+}
+
+pick_videomemory_base() {
+  if [ -n "$VIDEOMEMORY_BASE" ]; then
+    log "Using configured VideoMemory base $VIDEOMEMORY_BASE"
+    return 0
+  fi
+
+  for candidate in \
+    "http://127.0.0.1:5050" \
+    "http://localhost:5050" \
+    "http://host.docker.internal:5050" \
+    "http://videomemory:5050"
+  do
+    if "$CURL_BIN" -fsS "$candidate/api/health" >/dev/null 2>&1; then
+      VIDEOMEMORY_BASE="$candidate"
+      log "Detected VideoMemory at $VIDEOMEMORY_BASE"
+      return 0
+    fi
+  done
+
+  VIDEOMEMORY_BASE="http://127.0.0.1:5050"
+  log "VideoMemory not yet reachable; defaulting bootstrap target to $VIDEOMEMORY_BASE"
 }
 
 start_videomemory_if_needed() {
@@ -355,6 +378,7 @@ sync_model_keys() {
   done
 }
 
+pick_videomemory_base
 start_videomemory_if_needed
 install_openclaw_files
 merge_openclaw_config
