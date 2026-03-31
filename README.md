@@ -10,6 +10,60 @@ A video monitoring system that uses vision-language models to analyse camera fee
 
 This starts VideoMemory for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
 
+## OpenClaw Quickstart
+
+### I already have OpenClaw on a VM, server, or computer
+
+Run this on the same machine where OpenClaw runs:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/openclaw-bootstrap.sh)
+```
+
+What it does:
+- clones or reuses VideoMemory
+- starts VideoMemory in Docker if needed
+- installs the OpenClaw helper, skill, and webhook transform
+- merges the OpenClaw hook config
+
+After that, use OpenClaw normally and ask it to create monitoring tasks.
+
+### I already have OpenClaw in Docker
+
+1. Start VideoMemory on the host:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/install-videomemory.sh)
+```
+
+2. Send this exact message to OpenClaw:
+
+```text
+Please install and onboard VideoMemory by running VIDEOMEMORY_BASE=http://host.docker.internal:5050 bash <(curl -fsSL http://host.docker.internal:5050/openclaw/bootstrap.sh). Then use VideoMemory from http://host.docker.internal:5050/openclaw/skill.md and use the videomemory task helper for any "when X happens, do Y" request.
+```
+
+If `host.docker.internal` does not resolve on Linux, relaunch the OpenClaw container with:
+
+```bash
+--add-host=host.docker.internal:host-gateway
+```
+
+### I want both OpenClaw and VideoMemory in Docker
+
+```bash
+docker compose -f docker-compose.real-openclaw.yml up -d --build
+```
+
+Then open:
+- VideoMemory: `http://localhost:5050/devices`
+- OpenClaw: `http://localhost:18889/`
+
+Gateway token:
+
+```text
+openclaw-real-dev-token
+```
+
 ## Docker
 
 ### Core only
@@ -60,7 +114,7 @@ VideoMemory exposes a stable HTTP API for external agents:
 If OpenClaw runs directly on a VM or host machine and that machine has Docker access, this one command installs VideoMemory, starts it if needed, installs the OpenClaw integration, and configures OpenClaw:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/openclaw-bootstrap.sh)
 ```
 
 ### Docker OpenClaw: one host command, then one chat message
@@ -68,7 +122,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/mai
 First start VideoMemory on the host:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/install-videomemory.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/install-videomemory.sh)
 ```
 
 Then send this exact message to your OpenClaw:
@@ -100,7 +154,7 @@ These instructions assume the reader is OpenClaw and that it is onboarding itsel
 ### If OpenClaw is on the same VM/host as Docker
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/openclaw-bootstrap.sh)
 ```
 
 This one command should:
@@ -115,7 +169,7 @@ This one command should:
 1. Ask the human to start VideoMemory on the host:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/install-videomemory.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/install-videomemory.sh)
 ```
 
 2. Then run this from OpenClaw:
