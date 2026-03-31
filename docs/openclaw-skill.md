@@ -70,6 +70,8 @@ curl -fsSL http://videomemory:5050/openclaw/videomemory-task-helper.mjs \
   -o ~/.openclaw/hooks/bin/videomemory-task-helper.mjs
 ```
 
+The helper auto-detects the reachable VideoMemory base URL across `videomemory`, `host.docker.internal`, `127.0.0.1`, and `localhost`. You can still force a base URL with `--base-url ...` if needed.
+
 ## Ground rules
 
 - Prefer the container-internal base URL when OpenClaw is running in Docker.

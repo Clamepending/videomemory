@@ -4,7 +4,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const defaultBaseUrl = process.env.VIDEOMEMORY_BASE_URL || "http://videomemory:5050";
+const candidateBaseUrls = [
+  process.env.VIDEOMEMORY_BASE_URL,
+  process.env.VIDEOMEMORY_BASE,
+  "http://videomemory:5050",
+  "http://host.docker.internal:5050",
+  "http://127.0.0.1:5050",
+  "http://localhost:5050",
+].filter(Boolean);
 const registryPath =
   process.env.OPENCLAW_VIDEOMEMORY_REGISTRY_PATH ||
   path.join(os.homedir(), ".openclaw", "hooks", "state", "videomemory-task-actions.json");
@@ -98,6 +105,24 @@ async function requestJson(url, init = {}) {
   return payload;
 }
 
+async function resolveBaseUrl(explicitBaseUrl) {
+  const direct = cleanText(explicitBaseUrl);
+  if (direct) {
+    return direct;
+  }
+
+  for (const candidate of candidateBaseUrls) {
+    try {
+      await requestJson(`${candidate}/api/health`);
+      return candidate;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return "http://videomemory:5050";
+}
+
 async function getTask(baseUrl, taskId) {
   return requestJson(`${baseUrl}/api/task/${encodeURIComponent(taskId)}`);
 }
@@ -127,7 +152,7 @@ function removeEntry(registry, taskId) {
 }
 
 async function createTask(options) {
-  const baseUrl = cleanText(options["base-url"]) || defaultBaseUrl;
+  const baseUrl = await resolveBaseUrl(options["base-url"]);
   const ioId = requireOption(options, "io-id");
   const trigger = requireOption(options, "trigger");
   const action = requireOption(options, "action");
@@ -168,7 +193,7 @@ async function createTask(options) {
 }
 
 async function updateTask(options) {
-  const baseUrl = cleanText(options["base-url"]) || defaultBaseUrl;
+  const baseUrl = await resolveBaseUrl(options["base-url"]);
   const taskId = requireOption(options, "task-id");
   const trigger = requireOption(options, "trigger");
   const action = cleanText(options.action);
@@ -219,7 +244,7 @@ async function updateTask(options) {
 }
 
 async function stopTask(options) {
-  const baseUrl = cleanText(options["base-url"]) || defaultBaseUrl;
+  const baseUrl = await resolveBaseUrl(options["base-url"]);
   const taskId = requireOption(options, "task-id");
   const stopped = await requestJson(`${baseUrl}/api/task/${encodeURIComponent(taskId)}/stop`, {
     method: "POST",
@@ -233,7 +258,7 @@ async function stopTask(options) {
 }
 
 async function deleteTask(options) {
-  const baseUrl = cleanText(options["base-url"]) || defaultBaseUrl;
+  const baseUrl = await resolveBaseUrl(options["base-url"]);
   const taskId = requireOption(options, "task-id");
   const removed = await requestJson(`${baseUrl}/api/task/${encodeURIComponent(taskId)}`, {
     method: "DELETE",
