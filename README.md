@@ -53,6 +53,8 @@ If `host.docker.internal` does not resolve on Linux, relaunch the OpenClaw conta
 
 ### I want both OpenClaw and VideoMemory in Docker
 
+This is the bundled two-container setup for **OpenClaw + VideoMemory** (plus the demo camera helper container):
+
 ```bash
 docker compose -f docker-compose.real-openclaw.yml up -d --build
 ```
@@ -90,7 +92,7 @@ This starts VideoMemory. Open http://localhost:5050.
 
 ### Bundled real OpenClaw + VideoMemory
 
-Launch both services:
+Launch the bundled Docker setup:
 
 ```bash
 docker compose -f docker-compose.real-openclaw.yml up -d --build
