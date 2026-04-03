@@ -1,0 +1,102 @@
+{
+  "gateway": {
+    "mode": "local",
+    "port": 18789,
+    "bind": "lan",
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    },
+    "controlUi": {
+      "enabled": true,
+      "allowedOrigins": [
+        "http://127.0.0.1:18889",
+        "http://localhost:18889"
+      ],
+      "allowInsecureAuth": true
+    }
+  },
+  "logging": {
+    "level": "info",
+    "file": "/tmp/openclaw/openclaw-real.log"
+  },
+  "auth": {
+    "profiles": {
+      "anthropic:api": {
+        "provider": "anthropic",
+        "mode": "api_key"
+      },
+      "openai:api": {
+        "provider": "openai",
+        "mode": "api_key"
+      }
+    },
+    "order": {
+      "anthropic": ["anthropic:api"],
+      "openai": ["openai:api"]
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
+      "dmPolicy": "allowlist",
+      "allowFrom": ["${OPENCLAW_TELEGRAM_OWNER_ID}"]
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "~/.openclaw/workspace",
+      "userTimezone": "America/Los_Angeles",
+      "model": {
+        "primary": "anthropic/claude-sonnet-4-6",
+        "fallbacks": ["openai/gpt-5-mini"]
+      },
+      "thinkingDefault": "low",
+      "timeoutSeconds": 180
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true
+      }
+    ]
+  },
+  "tools": {
+    "profile": "coding",
+    "deny": ["web_fetch"],
+    "exec": {
+      "host": "gateway",
+      "security": "full",
+      "ask": "off"
+    }
+  },
+  "hooks": {
+    "enabled": true,
+    "token": "${OPENCLAW_HOOKS_TOKEN}",
+    "path": "/hooks",
+    "defaultSessionKey": "hook:videomemory",
+    "allowRequestSessionKey": false,
+    "allowedSessionKeyPrefixes": ["hook:"],
+    "allowedAgentIds": ["main"],
+    "transformsDir": "~/.openclaw/hooks/transforms",
+    "mappings": [
+      {
+        "id": "videomemory-alert",
+        "match": {
+          "path": "videomemory-alert"
+        },
+        "action": "agent",
+        "agentId": "main",
+        "wakeMode": "now",
+        "name": "VideoMemory",
+        "sessionKey": "hook:videomemory:{{io_id}}:{{task_id}}:{{event_id}}",
+        "messageTemplate": "A VideoMemory task update arrived.\nDevice: {{io_id}}\nTask ID: {{task_id}}\nTask description: {{task_description}}\nTask status: {{task_status}}\nTask done: {{task_done}}\nTask note: {{note}}\nEvent ID: {{event_id}}\n\nIf this detection explicitly asks for a user-facing Telegram or text notification, reply with exactly one concise alert sentence grounded only in the task description and note. Otherwise reply with exactly one concise internal acknowledgement sentence.",
+        "deliver": false,
+        "transform": {
+          "module": "videomemory-alert.mjs"
+        }
+      }
+    ]
+  }
+}

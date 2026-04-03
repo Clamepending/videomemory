@@ -1,0 +1,45 @@
+services:
+  videomemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - PORT=5050
+      - GOOGLE_API_KEY
+      - OPENAI_API_KEY
+      - OPENROUTER_API_KEY
+      - ANTHROPIC_API_KEY
+      - VIDEO_INGESTOR_MODEL=${VIDEO_INGESTOR_MODEL:-claude-sonnet-4-6}
+      - VIDEOMEMORY_OPENCLAW_WEBHOOK_URL=http://openclaw:18789/hooks/videomemory-alert
+      - VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN=${OPENCLAW_HOOKS_TOKEN:-videomemory-hook-token}
+      - VIDEOMEMORY_OPENCLAW_BOT_ID=${VIDEOMEMORY_OPENCLAW_BOT_ID:-openclaw}
+      - VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S=${VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S:-5}
+      - VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S=${VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S:-30}
+      - VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S=${VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S:-0}
+    ports:
+      - "5050:5050"
+    volumes:
+      - videomemory-real-data:/root/.local/share/videomemory
+
+  openclaw:
+    image: alpine/openclaw:latest
+    restart: unless-stopped
+    environment:
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-openclaw-real-dev-token}
+      - OPENCLAW_HOOKS_TOKEN=${OPENCLAW_HOOKS_TOKEN:-videomemory-hook-token}
+      - OPENCLAW_TELEGRAM_OWNER_ID
+      - OPENCLAW_VIDEOMEMORY_HOOK_DEDUPE_TTL_S=${OPENCLAW_VIDEOMEMORY_HOOK_DEDUPE_TTL_S:-300}
+    command: ["node", "openclaw.mjs", "gateway", "--allow-unconfigured"]
+    depends_on:
+      - videomemory
+    ports:
+      - "18889:18789"
+    volumes:
+      - ./deploy/openclaw-real-home:/home/node/.openclaw
+
+volumes:
+  videomemory-real-data:

@@ -120,7 +120,7 @@ curl -fsSL -X POST http://videomemory:5050/api/caption_frame \
 
 curl -fsSL -X POST http://videomemory:5050/api/caption_frame \
   -H 'Content-Type: application/json' \
-  -d '{"io_id":"net0","prompt":"Describe the colored shapes and whether a red marker is visible."}'
+  -d '{"io_id":"net0","prompt":"Describe what is visible in this camera frame."}'
 ```
 
 Prefer `/api/caption_frame` for one-off camera descriptions. Only fall back to raw snapshot download plus another tool if `/api/caption_frame` is unavailable or returns an error.
@@ -132,7 +132,7 @@ Add a network camera:
 ```bash
 curl -fsSL -X POST http://videomemory:5050/api/devices/network \
   -H 'Content-Type: application/json' \
-  -d '{"url":"http://demo-camera:8080/snapshot.jpg","name":"Demo Red Marker Camera"}'
+  -d '{"url":"http://camera.local:8080/snapshot.jpg","name":"Front Door Camera"}'
 ```
 
 Remove a network camera:

@@ -66,16 +66,65 @@ If `host.docker.internal` does not resolve on Linux, relaunch the OpenClaw conta
 
 ### I want both OpenClaw and VideoMemory in Docker
 
-This is the bundled two-container setup for **OpenClaw + VideoMemory** (plus the demo camera helper container):
+This is the bundled two-container setup for **OpenClaw + VideoMemory**:
 
 ```bash
+docker compose -f docker-compose.real-openclaw.yml up -d --build
+```
+
+If you want a single launch command with model setup, use the helper script:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here \
+TELEGRAM_BOT_TOKEN=your_bot_token_here \
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+bash docs/launch-openclaw-real.sh
+```
+
+If `OPENCLAW_TELEGRAM_OWNER_ID` is not set, the script will try to discover it automatically from the bot's recent Telegram updates. Send any message to your bot once before running it.
+
+To find `OPENCLAW_TELEGRAM_OWNER_ID` yourself:
+
+1. Send any message to your Telegram bot.
+2. Run:
+
+```bash
+curl -fsSL "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates"
+```
+
+3. Copy the `message.chat.id` value from the latest update. That is your `OPENCLAW_TELEGRAM_OWNER_ID`.
+
+Example explicit launch:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here \
+TELEGRAM_BOT_TOKEN=your_bot_token_here \
+OPENCLAW_TELEGRAM_OWNER_ID=123456789 \
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+bash docs/launch-openclaw-real.sh
+```
+
+You can also launch with raw `docker compose`. The bundled compose file forwards launch-time keys to both **OpenClaw** and **VideoMemory**:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here \
+VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+docker compose -f docker-compose.real-openclaw.yml up -d --build
+```
+
+Or use OpenAI for both OpenClaw and VideoMemory:
+
+```bash
+OPENAI_API_KEY=your_key_here \
+VIDEO_INGESTOR_MODEL=gpt-4o-mini \
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
 docker compose -f docker-compose.real-openclaw.yml up -d --build
 ```
 
 Then open:
 - VideoMemory: `http://localhost:5050/devices`
 - OpenClaw: `http://localhost:18889/`
-- Demo camera: `http://localhost:18081/snapshot.jpg`
 
 Gateway token:
 
@@ -83,7 +132,7 @@ Gateway token:
 openclaw-real-dev-token
 ```
 
-Try these in OpenClaw after it starts:
+After the stack starts, add your own camera in the VideoMemory Devices page, then try these in OpenClaw:
 
 ```text
 what do you see on camera
@@ -111,13 +160,57 @@ Launch the bundled Docker setup:
 docker compose -f docker-compose.real-openclaw.yml up -d --build
 ```
 
+For the easiest single-command launch, use:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here \
+TELEGRAM_BOT_TOKEN=your_bot_token_here \
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+bash docs/launch-openclaw-real.sh
+```
+
+If the Telegram owner chat id is not already set, the helper script will try to resolve it from the bot's recent updates. Send your bot one message first so it has an update to read.
+
+You can also fetch the chat id yourself:
+
+```bash
+curl -fsSL "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates"
+```
+
+Use the `message.chat.id` from the latest update as `OPENCLAW_TELEGRAM_OWNER_ID`.
+
+To inject model keys directly at launch time, without configuring them in the web UI:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here \
+VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+docker compose -f docker-compose.real-openclaw.yml up -d --build
+```
+
+To include Telegram in the raw compose launch:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here \
+TELEGRAM_BOT_TOKEN=your_bot_token_here \
+OPENCLAW_TELEGRAM_OWNER_ID=your_chat_id_here \
+VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+docker compose -f docker-compose.real-openclaw.yml up -d --build
+```
+
+The bundled compose file passes launch-time model keys into both containers:
+- **VideoMemory** uses them for `/api/caption_frame` and monitoring tasks
+- **OpenClaw** uses them for chat, tool use, and webhook wakeups
+
 This starts:
 - **VideoMemory** on `http://localhost:5050` (UI + API)
 - **OpenClaw** on `http://localhost:18889` (real OpenClaw UI + gateway)
-- **Demo Camera** on `http://localhost:18081/snapshot.jpg`
 
 OpenClaw connects to VideoMemory via plain HTTP API at `http://videomemory:5050`.
 It should fetch the skill from `http://videomemory:5050/openclaw/skill.md` before making task/device calls.
+
+The bundled Docker stack does not add a demo camera anymore. Add your own camera from the VideoMemory Devices page or with `POST /api/devices/network`.
 
 Gateway token:
 
