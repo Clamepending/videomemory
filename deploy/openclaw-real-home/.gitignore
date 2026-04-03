@@ -3,6 +3,7 @@
 !openclaw.json
 !hooks/
 !hooks/bin/
+!hooks/bin/patch-openclaw-runtime.mjs
 !hooks/bin/videomemory-task-helper.mjs
 !hooks/transforms/
 !hooks/transforms/videomemory-alert.mjs

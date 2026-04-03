@@ -39,7 +39,10 @@ services:
       - OPENCLAW_PRIMARY_MODEL=${OPENCLAW_PRIMARY_MODEL:-anthropic/claude-sonnet-4-6}
       - OPENCLAW_FALLBACK_MODEL_1=${OPENCLAW_FALLBACK_MODEL_1:-anthropic/claude-haiku-4-5}
       - OPENCLAW_FALLBACK_MODEL_2=${OPENCLAW_FALLBACK_MODEL_2:-anthropic/claude-haiku-4-5}
-    command: ["node", "openclaw.mjs", "gateway", "--allow-unconfigured"]
+    command:
+      - /bin/sh
+      - -lc
+      - node /home/node/.openclaw/hooks/bin/patch-openclaw-runtime.mjs && exec node /app/openclaw.mjs gateway --allow-unconfigured
     depends_on:
       - videomemory
     ports:
