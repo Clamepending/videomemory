@@ -75,14 +75,20 @@ Usage:
 Options:
   --anthropic-api-key <key>        Anthropic API key for OpenClaw + VideoMemory
   --openai-api-key <key>           OpenAI API key for OpenClaw + VideoMemory
+  --google-api-key <key>           Google AI Studio key for VideoMemory + OpenClaw Gemini
+  --gemini-api-key <key>           Alias for --google-api-key
+  --openrouter-api-key <key>       OpenRouter API key for VideoMemory + OpenClaw
   --video-ingestor-model <model>   VideoMemory model override
+  --openclaw-model <model>         OpenClaw primary model override
   --gateway-token <token>          OpenClaw gateway token
   --telegram-bot-token <token>     Telegram bot token
   --telegram-owner-id <chat_id>    Telegram chat id allowlist
   -h, --help                       Show this help
 
 Environment variables are also supported:
-  ANTHROPIC_API_KEY, OPENAI_API_KEY, VIDEO_INGESTOR_MODEL,
+  ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY,
+  OPENROUTER_API_KEY, VIDEO_INGESTOR_MODEL, OPENCLAW_PRIMARY_MODEL,
+  OPENCLAW_FALLBACK_MODEL_1, OPENCLAW_FALLBACK_MODEL_2,
   OPENCLAW_GATEWAY_TOKEN, TELEGRAM_BOT_TOKEN, OPENCLAW_TELEGRAM_OWNER_ID
 EOF
 }
@@ -97,8 +103,21 @@ while [[ $# -gt 0 ]]; do
       export OPENAI_API_KEY="${2:-}"
       shift 2
       ;;
+    --google-api-key|--gemini-api-key)
+      export GOOGLE_API_KEY="${2:-}"
+      export GEMINI_API_KEY="${2:-}"
+      shift 2
+      ;;
+    --openrouter-api-key)
+      export OPENROUTER_API_KEY="${2:-}"
+      shift 2
+      ;;
     --video-ingestor-model)
       export VIDEO_INGESTOR_MODEL="${2:-}"
+      shift 2
+      ;;
+    --openclaw-model)
+      export OPENCLAW_PRIMARY_MODEL="${2:-}"
       shift 2
       ;;
     --gateway-token)
@@ -125,13 +144,23 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" ]]; then
+if [[ -n "${GOOGLE_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" ]]; then
+  export GEMINI_API_KEY="${GOOGLE_API_KEY}"
+fi
+
+if [[ -n "${GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" ]]; then
+  export GOOGLE_API_KEY="${GEMINI_API_KEY}"
+fi
+
+if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" && -z "${OPENROUTER_API_KEY:-}" ]]; then
   cat >&2 <<'EOF'
-Set either ANTHROPIC_API_KEY or OPENAI_API_KEY before launching.
+Set at least one supported model API key before launching.
 
 Examples:
   bash launch_openclaw_with_videomemory.sh --anthropic-api-key your_key_here
   OPENAI_API_KEY=your_key_here bash launch_openclaw_with_videomemory.sh
+  GOOGLE_API_KEY=your_key_here bash launch_openclaw_with_videomemory.sh
+  OPENROUTER_API_KEY=your_key_here bash launch_openclaw_with_videomemory.sh
 EOF
   exit 1
 fi
@@ -142,13 +171,44 @@ ensure_docker_running
 if [[ -z "${VIDEO_INGESTOR_MODEL:-}" ]]; then
   if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
     export VIDEO_INGESTOR_MODEL="claude-sonnet-4-6"
-  else
+  elif [[ -n "${OPENAI_API_KEY:-}" ]]; then
     export VIDEO_INGESTOR_MODEL="gpt-4o-mini"
+  elif [[ -n "${GOOGLE_API_KEY:-}" || -n "${GEMINI_API_KEY:-}" ]]; then
+    export VIDEO_INGESTOR_MODEL="gemini-2.5-flash"
+  elif [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+    export VIDEO_INGESTOR_MODEL="qwen3-vl-8b"
   fi
 fi
 
 if [[ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ]]; then
   export OPENCLAW_GATEWAY_TOKEN="openclaw-real-dev-token"
+fi
+
+if [[ -z "${OPENCLAW_PRIMARY_MODEL:-}" ]]; then
+  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    export OPENCLAW_PRIMARY_MODEL="anthropic/claude-sonnet-4-6"
+    export OPENCLAW_FALLBACK_MODEL_1="anthropic/claude-haiku-4-5"
+    export OPENCLAW_FALLBACK_MODEL_2="anthropic/claude-haiku-4-5"
+  elif [[ -n "${OPENAI_API_KEY:-}" ]]; then
+    export OPENCLAW_PRIMARY_MODEL="openai/gpt-5-mini"
+    export OPENCLAW_FALLBACK_MODEL_1="openai/gpt-5-mini"
+    export OPENCLAW_FALLBACK_MODEL_2="openai/gpt-5-mini"
+  elif [[ -n "${GOOGLE_API_KEY:-}" || -n "${GEMINI_API_KEY:-}" ]]; then
+    export OPENCLAW_PRIMARY_MODEL="google/gemini-3-flash-preview"
+    export OPENCLAW_FALLBACK_MODEL_1="google/gemini-3-pro-preview"
+    export OPENCLAW_FALLBACK_MODEL_2="google/gemini-3-pro-preview"
+  elif [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+    export OPENCLAW_PRIMARY_MODEL="openrouter/anthropic/claude-sonnet-4-5"
+    export OPENCLAW_FALLBACK_MODEL_1="openrouter/google/gemini-2.0-flash-vision:free"
+    export OPENCLAW_FALLBACK_MODEL_2="openrouter/google/gemini-2.0-flash-vision:free"
+  fi
+else
+  if [[ -z "${OPENCLAW_FALLBACK_MODEL_1:-}" ]]; then
+    export OPENCLAW_FALLBACK_MODEL_1="${OPENCLAW_PRIMARY_MODEL}"
+  fi
+  if [[ -z "${OPENCLAW_FALLBACK_MODEL_2:-}" ]]; then
+    export OPENCLAW_FALLBACK_MODEL_2="${OPENCLAW_PRIMARY_MODEL}"
+  fi
 fi
 
 echo "Launching bundled OpenClaw + VideoMemory stack..."

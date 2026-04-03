@@ -7,6 +7,7 @@ services:
     environment:
       - PORT=5050
       - GOOGLE_API_KEY
+      - GEMINI_API_KEY
       - OPENAI_API_KEY
       - OPENROUTER_API_KEY
       - ANTHROPIC_API_KEY
@@ -27,12 +28,17 @@ services:
     restart: unless-stopped
     environment:
       - ANTHROPIC_API_KEY
+      - GEMINI_API_KEY
       - OPENAI_API_KEY
+      - OPENROUTER_API_KEY
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-openclaw-real-dev-token}
       - OPENCLAW_HOOKS_TOKEN=${OPENCLAW_HOOKS_TOKEN:-videomemory-hook-token}
       - OPENCLAW_TELEGRAM_OWNER_ID
       - OPENCLAW_VIDEOMEMORY_HOOK_DEDUPE_TTL_S=${OPENCLAW_VIDEOMEMORY_HOOK_DEDUPE_TTL_S:-300}
+      - OPENCLAW_PRIMARY_MODEL=${OPENCLAW_PRIMARY_MODEL:-anthropic/claude-sonnet-4-6}
+      - OPENCLAW_FALLBACK_MODEL_1=${OPENCLAW_FALLBACK_MODEL_1:-anthropic/claude-haiku-4-5}
+      - OPENCLAW_FALLBACK_MODEL_2=${OPENCLAW_FALLBACK_MODEL_2:-anthropic/claude-haiku-4-5}
     command: ["node", "openclaw.mjs", "gateway", "--allow-unconfigured"]
     depends_on:
       - videomemory
