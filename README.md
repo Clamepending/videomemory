@@ -1,58 +1,50 @@
 # VideoMemory
 
-A video monitoring system that uses vision-language models to analyse camera feeds. You create **tasks** describing what to watch for, and the system continuously analyses the video stream.
+Use vision language models to let your openclaw see and monitor cameras (USB, RTSP, Android devices)
+A video monitoring system that uses vision-language models to analyse camera feeds. You or your agent creates a **tasks** describing what to watch for, and the system continuously analyses the video stream.
 
 ## Quick Start
-
-To launch both Openclaw and Videomemory in docker containers on your computer, use
-```bash
-ANTHROPIC_API_KEY=<YOUR ANTHROPIC API KEY> \
-VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
-docker compose -f docker-compose.real-openclaw.yml up -d --build
-```
-Then Openclaw UI: http://127.0.0.1:18889/chat?session=agent%3Amain%3Amain
-Videomemory UI: http://127.0.0.1:5050/device
-You can set up telegram in openclaw.
 
 To launch just Videomemory (no openclaw)
 ```bash
 ./start.sh
 ```
-
 This starts VideoMemory for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
-
-
 
 ## OpenClaw Quickstart
 
-### I already have OpenClaw on a VM, server, or computer
-
-Run this on the same machine where OpenClaw runs:
+### I want to launch openclaw with videomemory
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/openclaw-bootstrap.sh)
+ANTHROPIC_API_KEY=<YOUR ANTHROPIC API KEY> \
+VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
+docker compose -f docker-compose.real-openclaw.yml up -d --build
 ```
+Hint: You can set up telegram in openclaw.
+Install Tailscale to stream video to videomemory over the android app.
 
-What it does:
-- clones or reuses VideoMemory
-- starts VideoMemory in Docker if needed
-- installs the OpenClaw helper, skill, and webhook transform
-- merges the OpenClaw hook config
 
-After that, use OpenClaw normally. It should be able to:
+### I already have OpenClaw on a VM, server, or computer
+
+Send this message to OpenClaw:
+
+```text
+Please Run this and onboard: bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
+```
+After that, your OpenClaw should be able to:
 - create/list/edit/stop/delete VideoMemory tasks
 - answer one-off camera questions like `what do you see on camera?`
-- use trigger/action splits for `when X happens, do Y`
+- Monitor cameras like `when X happens in camera Y, do Z`
 
-### I already have OpenClaw in Docker
+### I already have OpenClaw in a container
 
 1. Start VideoMemory on the host:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/codex/openclaw-trigger-action-split/docs/install-videomemory.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/install-videomemory.sh)
 ```
 
-2. Send this exact message to OpenClaw:
+2. Send this message to OpenClaw:
 
 ```text
 Please install and onboard VideoMemory by running VIDEOMEMORY_BASE=http://host.docker.internal:5050 bash <(curl -fsSL http://host.docker.internal:5050/openclaw/bootstrap.sh). Then use VideoMemory from http://host.docker.internal:5050/openclaw/skill.md and use the videomemory task helper for any "when X happens, do Y" request.
