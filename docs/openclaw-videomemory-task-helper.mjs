@@ -19,10 +19,16 @@ const registryPath =
 function usage() {
   return [
     "Usage:",
-    "  node openclaw-videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--delivery telegram|internal] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
-    "  node openclaw-videomemory-task-helper.mjs update --task-id 0 --trigger 'Watch for backpacks...' [--action 'Tell one short backpack joke...'] [--delivery telegram|internal] [--original-request '...'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
+    "  node openclaw-videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--delivery telegram|session|webchat|internal] [--session-key agent:main:main] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
+    "  node openclaw-videomemory-task-helper.mjs update --task-id 0 --trigger 'Watch for backpacks...' [--action 'Tell one short backpack joke...'] [--delivery telegram|session|webchat|internal] [--session-key agent:main:main] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request '...'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
     "  node openclaw-videomemory-task-helper.mjs stop --task-id 0 [--base-url http://videomemory:5050]",
     "  node openclaw-videomemory-task-helper.mjs delete --task-id 0 [--base-url http://videomemory:5050]",
+    "",
+    "Notes:",
+    "  telegram sends an external user alert through Telegram.",
+    "  session routes the follow-up action into a specific OpenClaw session without external channel delivery.",
+    "  webchat is an alias for session delivery and should point at the originating OpenClaw session.",
+    "  internal keeps the follow-up action inside the hook flow and does not reply in the current web chat.",
   ].join("\n");
 }
 
@@ -58,11 +64,182 @@ function requireOption(options, key) {
 }
 
 function normalizeDelivery(rawValue) {
-  const value = cleanText(rawValue || "telegram").toLowerCase();
-  if (value === "telegram" || value === "internal") {
+  const value = cleanText(rawValue).toLowerCase();
+  if (!value || value === "auto") {
+    return "";
+  }
+  if (value === "telegram" || value === "internal" || value === "session") {
     return value;
   }
-  throw new Error(`Unsupported delivery mode: ${rawValue}`);
+  if (value === "webchat") {
+    return "session";
+  }
+  throw new Error(
+    `Unsupported delivery mode: ${rawValue}. Supported modes are telegram, session, webchat, or internal.`,
+  );
+}
+
+function resolveCommandSource(options, previousEntry) {
+  const explicitDelivery = cleanText(options.delivery).toLowerCase();
+  if (explicitDelivery === "webchat") {
+    return "webchat";
+  }
+  if (explicitDelivery === "telegram") {
+    return "telegram";
+  }
+  const candidates = [
+    options.source,
+    options["command-source"],
+    previousEntry?.delivery_source,
+    process.env.OPENCLAW_COMMAND_SOURCE,
+    process.env.COMMAND_SOURCE,
+  ];
+  for (const candidate of candidates) {
+    const value = cleanText(candidate).toLowerCase();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function resolveSenderId(options, previousEntry) {
+  const candidates = [
+    options["sender-id"],
+    previousEntry?.delivery_sender_id,
+    process.env.OPENCLAW_SENDER_ID,
+    process.env.SENDER_ID,
+  ];
+  for (const candidate of candidates) {
+    const value = cleanText(candidate);
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function fallbackSessionKey() {
+  return cleanText(process.env.OPENCLAW_DEFAULT_SESSION_KEY) || "agent:main:main";
+}
+
+function resolveSessionKey(options, previousEntry) {
+  const candidates = [
+    options["session-key"],
+    previousEntry?.delivery_session_key,
+    process.env.OPENCLAW_SESSION_KEY,
+    process.env.SESSION_KEY,
+    fallbackSessionKey(),
+  ];
+  for (const candidate of candidates) {
+    const value = cleanText(candidate);
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function resolveTelegramTarget(options, previousEntry, source, senderId) {
+  const candidates = [
+    options.to,
+    options["delivery-target"],
+    previousEntry?.delivery_target,
+    source === "telegram" ? senderId : "",
+    process.env.OPENCLAW_TELEGRAM_OWNER_ID,
+  ];
+  for (const candidate of candidates) {
+    const value = cleanText(candidate);
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function inferDeliveryMode(options, previousEntry) {
+  const explicit = normalizeDelivery(options.delivery);
+  if (explicit) {
+    return explicit;
+  }
+
+  const previous = normalizeDelivery(previousEntry?.delivery_mode);
+  if (previous) {
+    return previous;
+  }
+
+  const source = resolveCommandSource(options, previousEntry);
+  if (source === "telegram") {
+    return "telegram";
+  }
+  if (
+    source === "webchat" ||
+    source === "ui" ||
+    source === "controlui" ||
+    source === "control-ui" ||
+    cleanText(options["session-key"]) ||
+    cleanText(process.env.OPENCLAW_SESSION_KEY)
+  ) {
+    return "session";
+  }
+
+  return "session";
+}
+
+function buildDeliveryConfig(options, previousEntry) {
+  const source = resolveCommandSource(options, previousEntry);
+  const senderId = resolveSenderId(options, previousEntry);
+  const mode = inferDeliveryMode(options, previousEntry);
+
+  if (mode === "telegram") {
+    return {
+      mode,
+      source,
+      senderId,
+      target: resolveTelegramTarget(options, previousEntry, source, senderId),
+      sessionKey: "",
+    };
+  }
+
+  if (mode === "session") {
+    return {
+      mode,
+      source,
+      senderId,
+      target: "",
+      sessionKey: resolveSessionKey(options, previousEntry),
+    };
+  }
+
+  return {
+    mode,
+    source,
+    senderId,
+    target: "",
+    sessionKey: "",
+  };
+}
+
+function validateDeliveryConfig(delivery) {
+  const deliveryMode = delivery.mode;
+  if (deliveryMode !== "telegram") {
+    if (deliveryMode === "session" && !cleanText(delivery.sessionKey)) {
+      throw new Error(
+        "Session delivery requires a session key. Pass --session-key or set OPENCLAW_SESSION_KEY.",
+      );
+    }
+    return delivery;
+  }
+
+  const botToken = cleanText(process.env.TELEGRAM_BOT_TOKEN);
+  const target = cleanText(delivery.target);
+  if (botToken && target) {
+    return delivery;
+  }
+
+  throw new Error(
+    "Telegram delivery requires TELEGRAM_BOT_TOKEN and a target chat id. Pass --to, set OPENCLAW_TELEGRAM_OWNER_ID, or provide the current Telegram sender id.",
+  );
 }
 
 function makeRegistryKey(botId, ioId, taskId) {
@@ -152,13 +329,13 @@ function removeEntry(registry, taskId) {
 }
 
 async function createTask(options) {
-  const baseUrl = await resolveBaseUrl(options["base-url"]);
   const ioId = requireOption(options, "io-id");
   const trigger = requireOption(options, "trigger");
   const action = requireOption(options, "action");
   const botId = cleanText(options["bot-id"]) || "openclaw";
-  const deliveryMode = normalizeDelivery(options.delivery);
+  const delivery = validateDeliveryConfig(buildDeliveryConfig(options));
   const originalRequest = cleanText(options["original-request"]);
+  const baseUrl = await resolveBaseUrl(options["base-url"]);
 
   const created = await requestJson(`${baseUrl}/api/tasks`, {
     method: "POST",
@@ -179,7 +356,11 @@ async function createTask(options) {
     task_description: trigger,
     trigger_condition: trigger,
     action_instruction: action,
-    delivery_mode: deliveryMode,
+    delivery_mode: delivery.mode,
+    delivery_source: delivery.source,
+    delivery_sender_id: delivery.senderId,
+    delivery_target: delivery.target,
+    delivery_session_key: delivery.sessionKey,
     original_request: originalRequest || trigger,
     created_at: now,
     updated_at: now,
@@ -197,11 +378,11 @@ async function updateTask(options) {
   const taskId = requireOption(options, "task-id");
   const trigger = requireOption(options, "trigger");
   const action = cleanText(options.action);
-  const deliveryOption = cleanText(options.delivery);
   const originalRequest = cleanText(options["original-request"]);
   const botIdOverride = cleanText(options["bot-id"]);
 
-  const task = await getTask(baseUrl, taskId);
+  const taskResponse = await getTask(baseUrl, taskId);
+  const task = typeof taskResponse?.task === "object" && taskResponse.task ? taskResponse.task : taskResponse;
   const updated = await requestJson(`${baseUrl}/api/task/${encodeURIComponent(taskId)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -215,6 +396,7 @@ async function updateTask(options) {
   removeEntry(registry, taskId);
 
   const now = new Date().toISOString();
+  const delivery = validateDeliveryConfig(buildDeliveryConfig(options, previousEntry));
   const entry = {
     task_id: taskId,
     io_id: cleanText(task?.io_id),
@@ -222,9 +404,11 @@ async function updateTask(options) {
     task_description: trigger,
     trigger_condition: trigger,
     action_instruction: action || cleanText(previousEntry?.action_instruction),
-    delivery_mode: deliveryOption
-      ? normalizeDelivery(deliveryOption)
-      : normalizeDelivery(previousEntry?.delivery_mode || "telegram"),
+    delivery_mode: delivery.mode,
+    delivery_source: delivery.source,
+    delivery_sender_id: delivery.senderId,
+    delivery_target: delivery.target,
+    delivery_session_key: delivery.sessionKey,
     original_request: originalRequest || cleanText(previousEntry?.original_request) || trigger,
     created_at: cleanText(previousEntry?.created_at) || now,
     updated_at: now,

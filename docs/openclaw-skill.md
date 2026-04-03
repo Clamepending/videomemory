@@ -163,6 +163,19 @@ node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs create \
   --bot-id openclaw
 ```
 
+Create a split trigger-plus-action task that replies back into the current OpenClaw chat session:
+
+```bash
+node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs create \
+  --io-id net0 \
+  --trigger 'Watch for a card in the frame. Add a note only when a card appears, disappears, or the visible card count changes.' \
+  --action 'Tell me one concise sentence when a card is visible.' \
+  --delivery webchat \
+  --session-key agent:main:main \
+  --original-request 'Can you let me know here when you see a card?' \
+  --bot-id openclaw
+```
+
 List all tasks:
 
 ```bash
@@ -255,4 +268,6 @@ curl -fsSL -X PUT http://videomemory:5050/api/settings/VIDEO_INGESTOR_MODEL \
 8. If the user asks a one-off camera question, call `/api/caption_frame`.
 9. If the user wants record-only monitoring, use `/api/tasks` directly with a neutral condition-only description.
 10. If the user wants "when X happens, do Y", use `videomemory-task-helper.mjs` so OpenClaw keeps `do Y` locally and VideoMemory only sees `watch for X`.
-11. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.
+11. Use `--delivery webchat` for "tell me here/in this chat" requests and point it at the originating OpenClaw session when available.
+12. Use `--delivery telegram` only when the user explicitly wants Telegram or the current interaction already came from Telegram.
+13. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.

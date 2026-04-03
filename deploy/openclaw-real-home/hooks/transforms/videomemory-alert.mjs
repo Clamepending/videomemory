@@ -69,7 +69,74 @@ async function loadTaskAction(payload) {
 }
 
 function wantsExternalDelivery(entry) {
-  return cleanText(entry?.delivery_mode || "telegram").toLowerCase() === "telegram";
+  return normalizeDeliveryMode(entry) === "telegram";
+}
+
+function normalizeDeliveryMode(entry) {
+  const value = cleanText(entry?.delivery_mode || "session").toLowerCase();
+  if (value === "webchat") {
+    return "session";
+  }
+  if (value === "telegram" || value === "internal" || value === "session") {
+    return value;
+  }
+  return "session";
+}
+
+function fallbackSessionKey() {
+  return cleanText(process.env.OPENCLAW_DEFAULT_SESSION_KEY) || "agent:main:main";
+}
+
+function resolveSessionDelivery(entry) {
+  return cleanText(entry?.delivery_session_key) || fallbackSessionKey();
+}
+
+function resolveTelegramTarget(entry) {
+  return cleanText(entry?.delivery_target) || cleanText(process.env.OPENCLAW_TELEGRAM_OWNER_ID);
+}
+
+function noteIndicatesAbsence(note) {
+  const value = cleanText(note);
+  if (!value) {
+    return false;
+  }
+
+  return [
+    /\bno\b[\s\S]{0,80}\bvisible\b/i,
+    /\bno\b[\s\S]{0,80}\bpresent\b/i,
+    /\bno longer\b[\s\S]{0,40}\bvisible\b/i,
+    /\bnot\b[\s\S]{0,30}\bvisible\b/i,
+    /\bno\b[\s\S]{0,120}\b(?:card|cards|marker|markers|backpack|backpacks|bin|bins|person|people)\b[\s\S]{0,40}\b(?:visible|present)\b/i,
+  ].some((pattern) => pattern.test(value));
+}
+
+function actionWantsAbsence(entry) {
+  const preferred = [entry?.action_instruction, entry?.original_request]
+    .map(cleanText)
+    .filter(Boolean)
+    .join("\n");
+  const fallback = [entry?.trigger_condition, entry?.task_description]
+    .map(cleanText)
+    .filter(Boolean)
+    .join("\n");
+  const combined = preferred || fallback;
+
+  if (!combined) {
+    return false;
+  }
+
+  return /\b(disappear|disappears|disappeared|disappearance|gone|missing|not visible|no longer visible|left|leave|leaves|left the frame|out of frame|removed|remove|removal|stops? being visible|isn'?t visible|is not visible)\b/i.test(
+    combined,
+  );
+}
+
+function shouldSuppressRegistryDrivenEvent(payload, entry) {
+  const note = cleanText(payload?.note);
+  if (!noteIndicatesAbsence(note)) {
+    return false;
+  }
+
+  return !actionWantsAbsence(entry);
 }
 
 function buildRegistryDrivenMessage(payload, entry) {
@@ -176,14 +243,22 @@ export default async function videomemoryAlertTransform(ctx) {
 
   const taskAction = await loadTaskAction(payload);
   if (taskAction) {
+    if (shouldSuppressRegistryDrivenEvent(payload, taskAction)) {
+      return null;
+    }
+
+    const deliveryMode = normalizeDeliveryMode(taskAction);
     const deliverExternally = wantsExternalDelivery(taskAction);
+    const sessionKey = deliveryMode === "session" ? resolveSessionDelivery(taskAction) : "";
+    const telegramTarget = deliveryMode === "telegram" ? resolveTelegramTarget(taskAction) : "";
     return {
       kind: "agent",
+      ...(sessionKey ? { sessionKey } : {}),
       deliver: deliverExternally,
       ...(deliverExternally
         ? {
             channel: "telegram",
-            to: process.env.OPENCLAW_TELEGRAM_OWNER_ID,
+            to: telegramTarget,
           }
         : {}),
       message: buildRegistryDrivenMessage(payload, taskAction),

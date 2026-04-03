@@ -246,6 +246,7 @@ config.hooks.token =
 
 const prefixes = new Set(Array.isArray(config.hooks.allowedSessionKeyPrefixes) ? config.hooks.allowedSessionKeyPrefixes : []);
 prefixes.add("hook:");
+prefixes.add("agent:");
 config.hooks.allowedSessionKeyPrefixes = Array.from(prefixes);
 
 const allowedAgentIds = new Set(Array.isArray(config.hooks.allowedAgentIds) ? config.hooks.allowedAgentIds : []);
@@ -326,6 +327,8 @@ if not isinstance(prefixes, list):
     prefixes = []
 if "hook:" not in prefixes:
     prefixes.append("hook:")
+if "agent:" not in prefixes:
+    prefixes.append("agent:")
 hooks["allowedSessionKeyPrefixes"] = prefixes
 
 allowed_agents = hooks.get("allowedAgentIds")

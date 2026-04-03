@@ -88,7 +88,7 @@
     "path": "/hooks",
     "defaultSessionKey": "hook:videomemory",
     "allowRequestSessionKey": false,
-    "allowedSessionKeyPrefixes": ["hook:"],
+    "allowedSessionKeyPrefixes": ["hook:", "agent:"],
     "allowedAgentIds": ["main"],
     "transformsDir": "~/.openclaw/hooks/transforms",
     "mappings": [
