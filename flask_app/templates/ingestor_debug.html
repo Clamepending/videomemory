@@ -114,6 +114,55 @@
             border: 1px solid #5c5c00;
         }
 
+        .frame-controls {
+            margin-top: 16px;
+            padding: 14px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+        }
+
+        .frame-controls-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .frame-controls-title {
+            color: #ececec;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .frame-controls-help {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .frame-skip-slider {
+            width: 100%;
+            accent-color: #19c37d;
+        }
+
+        .frame-skip-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: 8px;
+            font-size: 12px;
+        }
+
+        .frame-skip-value {
+            color: #19c37d;
+            font-weight: 600;
+        }
+
+        .frame-skip-status {
+            color: #888;
+        }
+
         .prompt-pre {
             background: #1a1a1a;
             padding: 12px;
@@ -304,6 +353,25 @@
                         <img id="currentFrame" alt="Current frame" />
                         <div class="frame-timestamp" id="frameTimestamp"></div>
                         <div id="frameDedupBadge" class="frame-dedup-badge" style="display: none;"></div>
+                        <div class="frame-controls">
+                            <div class="frame-controls-header">
+                                <div class="frame-controls-title">Frame skip threshold</div>
+                                <div class="frame-controls-help">Measured as average pixel difference on a 0-255 scale. For example, `25` means the average pixel changed by about `25`.</div>
+                            </div>
+                            <input
+                                id="frameSkipThresholdSlider"
+                                class="frame-skip-slider"
+                                type="range"
+                                min="0"
+                                max="255"
+                                step="0.5"
+                                value="3.0"
+                            />
+                            <div class="frame-skip-meta">
+                                <span class="frame-skip-value" id="frameSkipThresholdValue">3.0 avg pixel diff</span>
+                                <span class="frame-skip-status" id="frameSkipThresholdStatus">Loading threshold…</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="debug-panel">
                         <h2>Ingestor Tasks</h2>
@@ -340,7 +408,8 @@
                 const dedupBadge = document.getElementById('frameDedupBadge');
                 if (dedupBadge && data.dedup_status && data.dedup_status.consecutive_skips > 0) {
                     dedupBadge.style.display = 'inline-block';
-                    dedupBadge.textContent = `Scene unchanged — skipping analysis (${data.dedup_status.consecutive_skips} frames skipped). No new outputs until the scene changes.`;
+                    const threshold = Number(data.dedup_status.average_pixel_diff_threshold ?? data.dedup_status.frame_diff_threshold ?? 0).toFixed(1);
+                    dedupBadge.textContent = `Scene unchanged — skipping analysis (${data.dedup_status.consecutive_skips} frames skipped, threshold ${threshold} avg pixel diff). No new outputs until the scene changes.`;
                 } else if (dedupBadge) {
                     dedupBadge.style.display = 'none';
                 }
@@ -352,6 +421,91 @@
             } catch (e) {
                 console.error('Error fetching frame:', e);
             }
+        }
+
+        function setFrameSkipThresholdUi(value, statusText = '') {
+            const slider = document.getElementById('frameSkipThresholdSlider');
+            const valueLabel = document.getElementById('frameSkipThresholdValue');
+            const statusLabel = document.getElementById('frameSkipThresholdStatus');
+            const numericValue = Number(value);
+            if (slider && document.activeElement !== slider) {
+                slider.value = numericValue.toFixed(1);
+            }
+            if (valueLabel) {
+                valueLabel.textContent = `${numericValue.toFixed(1)} avg pixel diff`;
+            }
+            if (statusLabel && statusText) {
+                statusLabel.textContent = statusText;
+            }
+        }
+
+        async function loadFrameSkipThreshold() {
+            try {
+                const resp = await fetch(`/api/device/${IO_ID}/debug/frame-skip-threshold`);
+                const data = await resp.json();
+                if (!resp.ok) {
+                    setFrameSkipThresholdUi(3.0, data.error || 'Failed to load threshold');
+                    return;
+                }
+                const sourceLabel = data.source === 'active_ingestor'
+                    ? 'Applied to the running ingestor'
+                    : (data.source === 'database' ? 'Saved for the next ingestor start' : 'Using the default average pixel-diff threshold');
+                setFrameSkipThresholdUi(data.average_pixel_diff_threshold ?? data.frame_diff_threshold, sourceLabel);
+            } catch (e) {
+                console.error('Error loading frame skip threshold:', e);
+                setFrameSkipThresholdUi(3.0, 'Failed to load threshold');
+            }
+        }
+
+        let frameSkipSaveTimer = null;
+        let frameSkipSaveInFlight = false;
+
+        async function saveFrameSkipThreshold(value) {
+            if (frameSkipSaveInFlight) return;
+            frameSkipSaveInFlight = true;
+            try {
+                const resp = await fetch(`/api/device/${IO_ID}/debug/frame-skip-threshold`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: Number(value) }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    setFrameSkipThresholdUi(value, data.error || 'Failed to save threshold');
+                    return;
+                }
+                const sourceLabel = data.has_ingestor
+                    ? 'Applied live to the running ingestor'
+                    : 'Saved for the next ingestor start';
+                setFrameSkipThresholdUi(data.average_pixel_diff_threshold ?? data.frame_diff_threshold, sourceLabel);
+            } catch (e) {
+                console.error('Error saving frame skip threshold:', e);
+                setFrameSkipThresholdUi(value, 'Failed to save threshold');
+            } finally {
+                frameSkipSaveInFlight = false;
+            }
+        }
+
+        function bindFrameSkipControls() {
+            const slider = document.getElementById('frameSkipThresholdSlider');
+            if (!slider || slider.dataset.bound === 'true') return;
+            slider.dataset.bound = 'true';
+
+            slider.addEventListener('input', () => {
+                setFrameSkipThresholdUi(slider.value, 'Saving…');
+                if (frameSkipSaveTimer) {
+                    clearTimeout(frameSkipSaveTimer);
+                }
+                frameSkipSaveTimer = setTimeout(() => saveFrameSkipThreshold(slider.value), 180);
+            });
+
+            slider.addEventListener('change', () => {
+                if (frameSkipSaveTimer) {
+                    clearTimeout(frameSkipSaveTimer);
+                    frameSkipSaveTimer = null;
+                }
+                saveFrameSkipThreshold(slider.value);
+            });
         }
 
         async function updateTasks() {
@@ -436,6 +590,8 @@
             }
             if (!panelsRendered) {
                 renderDebugPanels();
+                bindFrameSkipControls();
+                loadFrameSkipThreshold();
                 panelsRendered = true;
             }
             updateFrame();

@@ -1,6 +1,7 @@
 """Task Manager for managing tasks associated with IO streams."""
 
 import logging
+import os
 from typing import Dict, List, Optional, Any, Callable
 from .stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from .io_manager import IOmanager
@@ -8,6 +9,11 @@ from .task_types import NoteEntry, Task, STATUS_ACTIVE, STATUS_DONE, STATUS_TERM
 from .database import TaskDatabase
 from .model_providers import BaseModelProvider, get_VLM_provider
 logger = logging.getLogger('TaskManager')
+
+_NOTE_FRAME_SETTING_KEY = "VIDEOMEMORY_SAVE_NOTE_FRAMES"
+_TRUE_SETTING_VALUES = {"1", "true", "yes", "on"}
+_FALSE_SETTING_VALUES = {"0", "false", "no", "off"}
+_AVERAGE_PIXEL_DIFF_UNIT = "average_pixel_difference_0_to_255"
 
 class TaskManager:
     """Manages tasks and their associations with IO streams."""
@@ -51,7 +57,12 @@ class TaskManager:
             saved_tasks = self._db.load_all_tasks()
             for t in saved_tasks:
                 notes = [
-                    NoteEntry(content=n['content'], timestamp=n['timestamp'])
+                    NoteEntry(
+                        content=n['content'],
+                        timestamp=n['timestamp'],
+                        note_id=n.get('note_id'),
+                        frame_path=n.get('frame_path'),
+                    )
                     for n in t['notes']
                 ]
                 task = Task(
@@ -84,10 +95,23 @@ class TaskManager:
         Called when the ingestor appends a note or changes done status.
         """
         if self._db is None:
+            if new_note is not None:
+                new_note.clear_frame_bytes()
             return
         try:
             if new_note:
-                self._db.save_note(task.task_id, new_note.content, new_note.timestamp)
+                should_persist_note_frames = self._should_persist_note_frames()
+                frame_bytes = new_note.consume_frame_bytes() if should_persist_note_frames else None
+                if not should_persist_note_frames:
+                    new_note.clear_frame_bytes()
+                save_result = self._db.save_note(
+                    task.task_id,
+                    new_note.content,
+                    new_note.timestamp,
+                    frame_bytes=frame_bytes,
+                )
+                new_note.note_id = save_result.get('note_id')
+                new_note.frame_path = save_result.get('frame_path')
             # When done is set, also update status to 'done'
             if task.done:
                 task.status = STATUS_DONE
@@ -96,6 +120,41 @@ class TaskManager:
                 self._db.update_task_done(task.task_id, task.done)
         except Exception as e:
             logger.error(f"Failed to persist task update for {task.task_id}: {e}")
+
+    def _should_persist_note_frames(self) -> bool:
+        """Return whether task notes should persist their associated frames."""
+        raw_value = None
+        if self._db is not None:
+            try:
+                raw_value = self._db.get_setting(_NOTE_FRAME_SETTING_KEY)
+            except Exception as e:
+                logger.error("Failed to load note-frame setting from database: %s", e, exc_info=True)
+        if raw_value is None:
+            raw_value = os.getenv(_NOTE_FRAME_SETTING_KEY)
+
+        if raw_value is None:
+            return True
+
+        normalized = str(raw_value).strip().lower()
+        if not normalized:
+            return True
+        if normalized in _TRUE_SETTING_VALUES:
+            return True
+        if normalized in _FALSE_SETTING_VALUES:
+            return False
+        logger.warning("Unrecognized %s value %r; defaulting to enabled", _NOTE_FRAME_SETTING_KEY, raw_value)
+        return True
+
+    def _apply_saved_ingestor_preferences(self, io_id: str, ingestor: VideoStreamIngestor) -> None:
+        """Apply any persisted per-device ingestor settings to a live ingestor."""
+        if self._db is None:
+            return
+        try:
+            saved_threshold = self._db.get_ingestor_frame_diff_threshold(io_id)
+            if saved_threshold is not None:
+                ingestor.set_frame_diff_threshold(saved_threshold)
+        except Exception as e:
+            logger.error("Failed to apply saved ingestor preferences for %s: %s", io_id, e, exc_info=True)
     
     def add_task(self, io_id: str, task_description: str, bot_id: Optional[str] = None) -> Dict:
         """Add a new task for a specific IO stream.
@@ -177,6 +236,7 @@ class TaskManager:
                 on_task_updated=self._on_task_updated,
                 on_detection_event=self._emit_detection_event,
             )
+            self._apply_saved_ingestor_preferences(io_id, self._ingestors[io_id])
         
         # Create task with sequential ID starting from 0
         task_id = str(self._task_counter)
@@ -468,6 +528,80 @@ class TaskManager:
             True if an active ingestor exists for this device
         """
         return io_id in self._ingestors
+
+    def get_ingestor_frame_skip_threshold(self, io_id: str) -> Dict[str, Any]:
+        """Get the current or saved frame-skip threshold for a device."""
+        ingestor = self._ingestors.get(io_id)
+        if ingestor is not None:
+            return self._build_frame_skip_threshold_response(
+                io_id=io_id,
+                threshold=ingestor.get_frame_diff_threshold(),
+                source="active_ingestor",
+                has_ingestor=True,
+            )
+
+        saved_threshold = None
+        if self._db is not None:
+            try:
+                saved_threshold = self._db.get_ingestor_frame_diff_threshold(io_id)
+            except Exception as e:
+                logger.error("Failed to load saved frame diff threshold for %s: %s", io_id, e, exc_info=True)
+
+        if saved_threshold is not None:
+            return self._build_frame_skip_threshold_response(
+                io_id=io_id,
+                threshold=float(saved_threshold),
+                source="database",
+                has_ingestor=False,
+            )
+
+        return self._build_frame_skip_threshold_response(
+            io_id=io_id,
+            threshold=float(VideoStreamIngestor.DEFAULT_FRAME_DIFF_THRESHOLD),
+            source="default",
+            has_ingestor=False,
+        )
+
+    def set_ingestor_frame_skip_threshold(self, io_id: str, threshold: float) -> Dict[str, Any]:
+        """Persist and, if possible, apply a frame-skip threshold for a device."""
+        threshold_value = float(threshold)
+
+        if self._db is not None:
+            self._db.set_ingestor_frame_diff_threshold(io_id, threshold_value)
+
+        ingestor = self._ingestors.get(io_id)
+        if ingestor is not None:
+            threshold_value = ingestor.set_frame_diff_threshold(threshold_value)
+            source = "active_ingestor"
+        else:
+            threshold_value = max(0.0, min(255.0, threshold_value))
+            source = "database"
+
+        return self._build_frame_skip_threshold_response(
+            io_id=io_id,
+            threshold=float(threshold_value),
+            source=source,
+            has_ingestor=ingestor is not None,
+        )
+
+    def _build_frame_skip_threshold_response(
+        self,
+        *,
+        io_id: str,
+        threshold: float,
+        source: str,
+        has_ingestor: bool,
+    ) -> Dict[str, Any]:
+        """Build a consistent threshold payload for API/UI consumers."""
+        threshold_value = float(threshold)
+        return {
+            "io_id": io_id,
+            "average_pixel_diff_threshold": threshold_value,
+            "frame_diff_threshold": threshold_value,
+            "threshold_unit": _AVERAGE_PIXEL_DIFF_UNIT,
+            "source": source,
+            "has_ingestor": has_ingestor,
+        }
     
     def edit_task(self, task_id: str, new_description: str) -> Dict:
         """Edit/update a task's description.

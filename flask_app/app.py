@@ -324,6 +324,24 @@ def stop_task_endpoint(task_id):
         flask_logger.error(f"Failed to stop task {task_id}: {e}", exc_info=True)
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
+
+@app.route('/api/task-note/<int:note_id>/frame', methods=['GET'])
+def get_task_note_frame(note_id):
+    """Serve the stored frame associated with a task note, if available."""
+    try:
+        frame_path = db.get_note_frame_path(note_id)
+        if frame_path is None or not frame_path.exists():
+            return Response(status=404)
+        return send_file(
+            frame_path,
+            mimetype='image/jpeg',
+            conditional=True,
+            max_age=0,
+        )
+    except Exception as e:
+        flask_logger.error(f"Failed to load task note frame {note_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 # ── Device API ────────────────────────────────────────────────
 
 def _get_camera_preview_frame(camera_index: int) -> Optional[bytes]:
@@ -799,6 +817,36 @@ def get_ingestor_status(io_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/device/<io_id>/debug/frame-skip-threshold', methods=['GET', 'PUT'])
+def ingestor_frame_skip_threshold(io_id):
+    """Get or update the live frame-skip threshold for a device ingestor."""
+    try:
+        if io_manager.get_stream_info(io_id) is None:
+            return jsonify({'error': 'Device not found'}), 404
+
+        if request.method == 'GET':
+            return jsonify(task_manager.get_ingestor_frame_skip_threshold(io_id))
+
+        data = request.get_json(silent=True) or {}
+        raw_value = data.get('value', data.get('frame_diff_threshold'))
+        if raw_value is None:
+            return jsonify({'error': 'value is required'}), 400
+
+        try:
+            threshold = float(raw_value)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'value must be numeric'}), 400
+
+        if threshold < 0 or threshold > 255:
+            return jsonify({'error': 'value must be between 0 and 255'}), 400
+
+        result = task_manager.set_ingestor_frame_skip_threshold(io_id, threshold)
+        return jsonify(result)
+    except Exception as e:
+        flask_logger.error(f"Error updating frame-skip threshold for {io_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/device/<io_id>/debug/frame-and-prompt', methods=['GET'])
 def get_ingestor_frame_and_prompt(io_id):
     """Get the latest frame and prompt from a device's ingestor."""
@@ -1268,6 +1316,12 @@ _SENSITIVE_KEYS = {
 # Models that use local vLLM (no cloud API)
 _LOCAL_VLLM_MODELS = {'local-vllm'}
 
+_BOOLEAN_TRUE_VALUES = {'1', 'true', 'yes', 'on'}
+_BOOLEAN_FALSE_VALUES = {'0', 'false', 'no', 'off'}
+_DEFAULT_SETTINGS = {
+    'VIDEOMEMORY_SAVE_NOTE_FRAMES': '1',
+}
+
 # All known setting keys (for the settings page)
 _KNOWN_SETTINGS = [
     'GOOGLE_API_KEY',
@@ -1275,6 +1329,7 @@ _KNOWN_SETTINGS = [
     'OPENROUTER_API_KEY',
     'ANTHROPIC_API_KEY',
     'VIDEO_INGESTOR_MODEL',
+    'VIDEOMEMORY_SAVE_NOTE_FRAMES',
     'LOCAL_MODEL_BASE_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
@@ -1297,6 +1352,36 @@ _MODEL_RUNTIME_KEYS = {
     'VIDEO_INGESTOR_MODEL',
     'LOCAL_MODEL_BASE_URL',
 }
+
+
+def _coerce_boolean_setting(value, *, default: bool) -> bool:
+    """Parse a boolean-ish setting value while preserving sensible defaults."""
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+    if normalized in _BOOLEAN_TRUE_VALUES:
+        return True
+    if normalized in _BOOLEAN_FALSE_VALUES:
+        return False
+    return default
+
+
+def _get_effective_setting_value_and_source(key: str) -> tuple[str, str]:
+    """Resolve a setting from DB/env/default and report the source."""
+    db_val = db.get_setting(key)
+    if db_val is not None:
+        return db_val, 'database'
+
+    env_val = os.getenv(key, '')
+    if env_val:
+        return env_val, 'env'
+
+    if key in _DEFAULT_SETTINGS:
+        return _DEFAULT_SETTINGS[key], 'default'
+
+    return '', 'unset'
 
 
 def _apply_runtime_setting_change(changed_key: str) -> None:
@@ -1350,14 +1435,11 @@ def get_settings():
     try:
         result = {}
         for key in _KNOWN_SETTINGS:
-            # Check DB first, then fall back to env
-            db_val = db.get_setting(key)
-            env_val = os.getenv(key, '')
-            value = db_val if db_val is not None else env_val
+            value, source = _get_effective_setting_value_and_source(key)
             result[key] = {
                 'value': _mask_value(key, value),
                 'is_set': bool(value),
-                'source': 'database' if db_val is not None else ('env' if env_val else 'unset')
+                'source': source,
             }
         # Add model provider type for UI indicator (local vLLM vs cloud)
         model_name = (result.get('VIDEO_INGESTOR_MODEL', {}).get('value') or '').strip().lower()
@@ -1376,8 +1458,12 @@ def update_setting(key):
         return jsonify({'error': f'Unknown setting: {key}'}), 400
     
     try:
-        data = request.json
-        value = data.get('value', '').strip()
+        data = request.get_json(silent=True) or {}
+        raw_value = data.get('value', '')
+        if key == 'VIDEOMEMORY_SAVE_NOTE_FRAMES':
+            value = '1' if _coerce_boolean_setting(raw_value, default=True) else '0'
+        else:
+            value = '' if raw_value is None else str(raw_value).strip()
         
         if not value:
             # Clear the setting from DB (fall back to .env)

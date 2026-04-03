@@ -1,11 +1,11 @@
 """SQLite database for persistent task and session metadata storage."""
 
-import sqlite3
 import logging
 import os
+import sqlite3
 import time
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
 
 logger = logging.getLogger('Database')
 
@@ -38,6 +38,9 @@ class TaskDatabase:
         
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._db_path = db_path
+        self._data_dir = Path(db_path).parent
+        self._note_frames_dir = self._data_dir / 'task_note_frames'
+        self._note_frames_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
         logger.info(f"Task database initialized at {db_path}")
     
@@ -68,6 +71,7 @@ class TaskDatabase:
                     task_id TEXT NOT NULL,
                     content TEXT NOT NULL,
                     timestamp REAL NOT NULL,
+                    frame_path TEXT,
                     FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
                 );
 
@@ -83,6 +87,12 @@ class TaskDatabase:
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS ingestor_preferences (
+                    io_id TEXT PRIMARY KEY,
+                    frame_diff_threshold REAL NOT NULL,
                     updated_at REAL NOT NULL
                 );
 
@@ -104,6 +114,54 @@ class TaskDatabase:
             if 'bot_id' not in columns:
                 conn.execute("ALTER TABLE tasks ADD COLUMN bot_id TEXT")
                 logger.info("Migrated tasks table: added bot_id column")
+
+            note_columns = [row[1] for row in conn.execute("PRAGMA table_info(task_notes)").fetchall()]
+            if 'frame_path' not in note_columns:
+                conn.execute("ALTER TABLE task_notes ADD COLUMN frame_path TEXT")
+                logger.info("Migrated task_notes table: added frame_path column")
+
+    def _note_frame_relpath(self, task_id: str, note_id: int) -> Path:
+        """Build a relative file path for a task note frame."""
+        return Path('task_note_frames') / str(task_id) / f'note_{note_id}.jpg'
+
+    def _resolve_note_frame_path(self, frame_path: str) -> Optional[Path]:
+        """Resolve a stored relative frame path to an absolute path inside the data dir."""
+        if not frame_path:
+            return None
+        resolved = (self._data_dir / frame_path).resolve()
+        try:
+            resolved.relative_to(self._data_dir.resolve())
+        except ValueError:
+            logger.warning("Ignoring note frame outside data dir: %s", frame_path)
+            return None
+        return resolved
+
+    def _write_note_frame(self, task_id: str, note_id: int, frame_bytes: Optional[bytes]) -> Optional[str]:
+        """Persist frame bytes for a note and return the stored relative path."""
+        if not frame_bytes:
+            return None
+
+        relpath = self._note_frame_relpath(task_id, note_id)
+        absolute_path = self._data_dir / relpath
+        absolute_path.parent.mkdir(parents=True, exist_ok=True)
+        absolute_path.write_bytes(frame_bytes)
+        return relpath.as_posix()
+
+    def _delete_note_frame(self, frame_path: Optional[str]) -> None:
+        """Delete a stored note frame if it exists."""
+        absolute_path = self._resolve_note_frame_path(frame_path or "")
+        if absolute_path is None:
+            return
+        try:
+            absolute_path.unlink(missing_ok=True)
+            parent = absolute_path.parent
+            if parent != self._note_frames_dir:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    pass
+        except OSError as exc:
+            logger.warning("Failed to delete task note frame %s: %s", absolute_path, exc)
     
     # ── Task methods ─────────────────────────────────────────────
 
@@ -163,15 +221,29 @@ class TaskDatabase:
     def delete_task(self, task_id: str) -> None:
         """Delete a task and its notes (CASCADE)."""
         with self._get_conn() as conn:
+            note_rows = conn.execute(
+                "SELECT frame_path FROM task_notes WHERE task_id = ?",
+                (task_id,),
+            ).fetchall()
             conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+        for row in note_rows:
+            self._delete_note_frame(row['frame_path'])
     
-    def save_note(self, task_id: str, content: str, timestamp: float) -> None:
-        """Append a single note entry for a task."""
+    def save_note(self, task_id: str, content: str, timestamp: float, frame_bytes: Optional[bytes] = None) -> Dict[str, Optional[str]]:
+        """Append a single note entry for a task and optionally persist a frame."""
         with self._get_conn() as conn:
-            conn.execute(
-                "INSERT INTO task_notes (task_id, content, timestamp) VALUES (?, ?, ?)",
+            cursor = conn.execute(
+                "INSERT INTO task_notes (task_id, content, timestamp, frame_path) VALUES (?, ?, ?, NULL)",
                 (task_id, content, timestamp)
             )
+            note_id = int(cursor.lastrowid)
+            frame_path = self._write_note_frame(task_id, note_id, frame_bytes)
+            if frame_path:
+                conn.execute(
+                    "UPDATE task_notes SET frame_path = ? WHERE id = ?",
+                    (frame_path, note_id),
+                )
+            return {"note_id": note_id, "frame_path": frame_path}
     
     def load_all_tasks(self) -> List[Dict]:
         """Load all tasks with their notes, ordered by task_id."""
@@ -182,7 +254,7 @@ class TaskDatabase:
             result = []
             for r in rows:
                 notes = conn.execute(
-                    "SELECT content, timestamp FROM task_notes WHERE task_id = ? ORDER BY timestamp",
+                    "SELECT id, content, timestamp, frame_path FROM task_notes WHERE task_id = ? ORDER BY timestamp",
                     (r['task_id'],)
                 ).fetchall()
                 row_dict = {
@@ -193,7 +265,12 @@ class TaskDatabase:
                     'status': r['status'] if 'status' in r.keys() else ('done' if r['done'] else 'active'),
                     'io_id': r['io_id'],
                     'notes': [
-                        {'content': n['content'], 'timestamp': n['timestamp']}
+                        {
+                            'note_id': n['id'],
+                            'content': n['content'],
+                            'timestamp': n['timestamp'],
+                            'frame_path': n['frame_path'],
+                        }
                         for n in notes
                     ]
                 }
@@ -346,6 +423,38 @@ class TaskDatabase:
         """Delete a setting."""
         with self._get_conn() as conn:
             conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+
+    def get_note_frame_path(self, note_id: int) -> Optional[Path]:
+        """Get the absolute file path for a stored note frame, if any."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT frame_path FROM task_notes WHERE id = ?",
+                (note_id,),
+            ).fetchone()
+        if not row or not row['frame_path']:
+            return None
+        return self._resolve_note_frame_path(row['frame_path'])
+
+    def get_ingestor_frame_diff_threshold(self, io_id: str) -> Optional[float]:
+        """Get a saved frame diff threshold for a specific device."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT frame_diff_threshold FROM ingestor_preferences WHERE io_id = ?",
+                (io_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return float(row['frame_diff_threshold'])
+
+    def set_ingestor_frame_diff_threshold(self, io_id: str, threshold: float) -> None:
+        """Persist the frame diff threshold for a specific device."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO ingestor_preferences
+                   (io_id, frame_diff_threshold, updated_at)
+                   VALUES (?, ?, ?)""",
+                (io_id, float(threshold), time.time()),
+            )
 
     def get_all_settings(self) -> Dict[str, str]:
         """Get all settings as a dict."""

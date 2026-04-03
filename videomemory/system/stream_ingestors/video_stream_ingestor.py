@@ -43,6 +43,9 @@ class VideoIngestorOutput(BaseModel):
 
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
+
+    DEFAULT_FRAME_DIFF_THRESHOLD = 3.0
+    FRAME_DIFF_THRESHOLD_UNIT = "average_pixel_difference_0_to_255"
     
     def __init__(self, camera_source, model_provider: BaseModelProvider, target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None, on_detection_event=None):
         """Initialize the video stream ingestor.
@@ -74,9 +77,9 @@ class VideoStreamIngestor:
         self._total_output_count: int = 0  # Track total number of outputs processed (for debugging)
         self._process_loop_ticks: int = 0
         
-        # Frame deduplication: skip VLM calls when the frame hasn't changed
+        # Frame deduplication: skip VLM calls when the average pixel difference stays below threshold
         self._last_processed_frame: Optional[Any] = None  # Last frame sent to VLM
-        self._frame_diff_threshold: float = 3.0  # Mean absolute pixel difference threshold (0-255 scale)
+        self._frame_diff_threshold: float = self.DEFAULT_FRAME_DIFF_THRESHOLD  # Mean absolute pixel difference threshold (0-255 scale)
         self._frames_skipped: int = 0  # Total frames skipped (lifetime)
         self._consecutive_skips: int = 0  # Frames skipped since last VLM call (for UI)
         
@@ -441,7 +444,7 @@ class VideoStreamIngestor:
     def _is_frame_duplicate(self, frame: Any) -> bool:
         """Check if a frame is effectively identical to the last processed frame.
         
-        Uses mean absolute pixel difference — very fast (single numpy op).
+        Uses mean absolute pixel difference on the 0-255 pixel scale.
         Returns True if the frame should be skipped.
         """
         import numpy as np
@@ -455,11 +458,22 @@ class VideoStreamIngestor:
     def _frame_to_base64(self, frame: Any) -> str:
         """Convert OpenCV frame to base64 encoded image."""
         try:
-            _, buffer = cv2.imencode('.jpg', frame)
-            return base64.b64encode(buffer).decode('utf-8')
+            frame_bytes = self._frame_to_jpeg_bytes(frame)
+            if not frame_bytes:
+                return ""
+            return base64.b64encode(frame_bytes).decode('utf-8')
         except Exception as e:
             logger.error(f"Error encoding frame: {e}")
             return ""
+
+    def _frame_to_jpeg_bytes(self, frame: Any, quality: int = 85) -> bytes:
+        """Convert OpenCV frame to JPEG bytes."""
+        if frame is None:
+            return b""
+        success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        if not success:
+            return b""
+        return buffer.tobytes()
     
     def _build_prompt(self) -> str:
         """Build the prompt for the LLM based on tasks and history."""
@@ -632,6 +646,7 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
             return
 
         task_updates = ml_results.get("task_updates", [])
+        note_frame_bytes = self._frame_to_jpeg_bytes(ml_results.get("frame"))
         available_task_numbers = [t.task_number for t in self._tasks_list]
         completed_task_seen = False
 
@@ -665,7 +680,7 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
 
             # Append new note entry with current timestamp
             if new_note_content:  # Only append if there's actual content
-                new_note = NoteEntry(content=new_note_content)
+                new_note = NoteEntry(content=new_note_content, frame_bytes=note_frame_bytes or None)
                 task.task_note.append(new_note)
 
             # Update done status
@@ -822,16 +837,40 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
         """Get the total number of outputs processed (for debugging)."""
         return self._total_output_count
 
-    def get_dedup_status(self) -> Dict[str, int]:
+    def get_dedup_status(self) -> Dict[str, Any]:
         """Get frame deduplication status for UI display.
         
         Returns:
-            dict with frames_skipped (lifetime), consecutive_skips (since last VLM call)
+            dict with frames_skipped (lifetime), consecutive_skips (since last VLM call),
+            and the active average-pixel-difference threshold.
         """
         return {
             "frames_skipped": self._frames_skipped,
             "consecutive_skips": self._consecutive_skips,
+            "average_pixel_diff_threshold": float(self._frame_diff_threshold),
+            "frame_diff_threshold": float(self._frame_diff_threshold),
+            "threshold_unit": self.FRAME_DIFF_THRESHOLD_UNIT,
         }
+
+    def get_frame_diff_threshold(self) -> float:
+        """Return the active average-pixel-difference threshold."""
+        return float(self._frame_diff_threshold)
+
+    def set_frame_diff_threshold(self, threshold: float) -> float:
+        """Update the duplicate-frame threshold for future VLM calls."""
+        try:
+            threshold_value = float(threshold)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Average pixel difference threshold must be numeric") from exc
+
+        threshold_value = max(0.0, min(255.0, threshold_value))
+        self._frame_diff_threshold = threshold_value
+        logger.info(
+            "Updated average pixel difference threshold [camera=%s] to %.2f",
+            self.camera_index,
+            threshold_value,
+        )
+        return threshold_value
     
     def get_latest_frame(self) -> Optional[Any]:
         """Get the latest captured frame.
