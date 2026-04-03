@@ -32,6 +32,8 @@ gradle wrapper   # if gradlew is missing
 4. In VideoMemory, go to **Devices** and add that URL as a network camera.
 5. Create tasks for that device as usual. Stop the server from the app when you are done.
 
+Your openclaw can guide and evendo steps 4 and 5 for you
+
 ## Tech
 
 - **CameraX**: camera preview and frame capture.
