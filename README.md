@@ -4,11 +4,24 @@ A video monitoring system that uses vision-language models to analyse camera fee
 
 ## Quick Start
 
+To launch both Openclaw and Videomemory in docker containers on your computer, use
+```bash
+ANTHROPIC_API_KEY=<YOUR ANTHROPIC API KEY> \
+VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
+docker compose -f docker-compose.real-openclaw.yml up -d --build
+```
+Then Openclaw UI: http://127.0.0.1:18889/chat?session=agent%3Amain%3Amain
+Videomemory UI: http://127.0.0.1:5050/device
+You can set up telegram in openclaw.
+
+To launch just Videomemory (no openclaw)
 ```bash
 ./start.sh
 ```
 
 This starts VideoMemory for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
+
+
 
 ## OpenClaw Quickstart
 
