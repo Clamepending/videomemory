@@ -23,9 +23,6 @@ To launch just Videomemory (no openclaw)
 ```
 This starts VideoMemory for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
 
-## OpenClaw Quickstart
-
-
 ## I already have OpenClaw on a VM, server, or computer
 
 Send this message to OpenClaw:
