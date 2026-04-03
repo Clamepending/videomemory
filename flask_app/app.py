@@ -12,13 +12,14 @@ from urllib.parse import urlparse
 # Add parent directory to path so we can import videomemory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from flask import Flask, render_template, request, jsonify, Response, redirect
+from flask import Flask, render_template, request, jsonify, Response, redirect, send_file
 from dotenv import load_dotenv
 import videomemory.system
 import videomemory.tools
 from videomemory.system.logging_config import setup_logging
 from videomemory.system.model_providers import get_VLM_provider
 from videomemory.system.database import TaskDatabase, get_default_data_dir
+from videomemory.system.openclaw_integration import OpenClawWebhookDispatcher
 import cv2
 import platform
 from typing import Any, Dict, List, Optional
@@ -51,10 +52,12 @@ db.load_settings_to_env()
 # ── System components ─────────────────────────────────────────
 io_manager = videomemory.system.IOmanager(db=db)
 model_provider = get_VLM_provider()
+openclaw_dispatcher = OpenClawWebhookDispatcher()
 task_manager = videomemory.system.TaskManager(
     io_manager=io_manager,
     model_provider=model_provider,
     db=db,
+    on_detection_event=openclaw_dispatcher.dispatch_task_update,
 )
 
 # Set managers in tools
@@ -167,6 +170,34 @@ def settings_page():
 def documentation_page():
     """Render the documentation page."""
     return render_template('documentation.html')
+
+
+@app.route('/openclaw/skill.md')
+def openclaw_skill():
+    """Serve the OpenClaw skill document over plain HTTP."""
+    skill_path = Path(__file__).parent.parent / 'docs' / 'openclaw-skill.md'
+    return send_file(skill_path, mimetype='text/markdown')
+
+
+@app.route('/openclaw/videomemory-task-helper.mjs')
+def openclaw_task_helper():
+    """Serve the OpenClaw helper used for split trigger/action task setup."""
+    helper_path = Path(__file__).parent.parent / 'docs' / 'openclaw-videomemory-task-helper.mjs'
+    return send_file(helper_path, mimetype='text/javascript')
+
+
+@app.route('/openclaw/bootstrap.sh')
+def openclaw_bootstrap():
+    """Serve the one-shot bootstrap script for existing OpenClaw installs."""
+    script_path = Path(__file__).parent.parent / 'docs' / 'openclaw-bootstrap.sh'
+    return send_file(script_path, mimetype='text/x-shellscript')
+
+
+@app.route('/openclaw/install-videomemory.sh')
+def openclaw_install_videomemory():
+    """Serve the host-side VideoMemory installer used before Dockerized OpenClaw onboarding."""
+    script_path = Path(__file__).parent.parent / 'docs' / 'install-videomemory.sh'
+    return send_file(script_path, mimetype='text/x-shellscript')
 
 @app.route('/device/<io_id>/debug')
 def device_debug(io_id):
@@ -958,6 +989,12 @@ def health_check():
         'active_tasks': task_count,
     })
 
+
+@app.route('/healthz', methods=['GET'])
+def healthz():
+    """Shallow health endpoint for HTTP clients that probe /healthz."""
+    return jsonify({'status': 'ok', 'service': 'videomemory'})
+
 @app.route('/openapi.json', methods=['GET'])
 def openapi_spec():
     """Serve the OpenAPI 3.1 specification for this API."""
@@ -1221,6 +1258,11 @@ def openapi_spec():
 # Keys that should be masked when returned to the frontend
 _SENSITIVE_KEYS = {
     'GOOGLE_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
+    'VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
 }
 
 # Models that use local vLLM (no cloud API)
@@ -1234,6 +1276,17 @@ _KNOWN_SETTINGS = [
     'ANTHROPIC_API_KEY',
     'VIDEO_INGESTOR_MODEL',
     'LOCAL_MODEL_BASE_URL',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
+    'VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S',
+    'VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S',
+    'VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S',
+    'VIDEOMEMORY_OPENCLAW_BOT_ID',
+    'VIDEOMEMORY_SIMPLEAGENT_BASE_URL',
+    'VIDEOMEMORY_SIMPLEAGENT_OPENAI_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_ANTHROPIC_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_GOOGLE_API_KEY',
+    'VIDEOMEMORY_SIMPLEAGENT_TELEGRAM_BOT_TOKEN',
 ]
 
 _MODEL_RUNTIME_KEYS = {

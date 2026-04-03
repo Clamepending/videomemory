@@ -1,0 +1,8 @@
+*
+!.gitignore
+!openclaw.json
+!hooks/
+!hooks/bin/
+!hooks/bin/videomemory-task-helper.mjs
+!hooks/transforms/
+!hooks/transforms/videomemory-alert.mjs

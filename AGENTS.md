@@ -65,6 +65,28 @@ Returns available cameras and other input devices grouped by category. Each devi
 }
 ```
 
+#### Caption or describe the latest frame for one device
+
+```
+POST /api/caption_frame
+```
+
+**Body:**
+```json
+{
+  "io_id": "0",
+  "prompt": "Describe what is visible in this camera frame in detail."
+}
+```
+
+Use this for one-off questions like:
+- "What do you see on camera?"
+- "Describe the current frame."
+- "Is anyone visible right now?"
+- "What color marker is in the image?"
+
+Prefer this endpoint over downloading the raw snapshot and using a separate vision tool. It keeps the reasoning inside VideoMemory's configured model path.
+
 ---
 
 ### Tasks
@@ -155,11 +177,12 @@ Run your conversational SimpleAgent separately and have it call VideoMemory APIs
 1. **Check health:** `GET /api/health`
 2. **Configure API keys:** `GET /api/settings` to check what's set, then `PUT /api/settings/GOOGLE_API_KEY` (or other keys) if needed.
 3. **List devices:** `GET /api/devices` to discover cameras and their `io_id`s.
-4. **Create a task:** `POST /api/tasks` with an `io_id` and `task_description`.
-5. **Monitor progress:** `GET /api/task/{task_id}` to read the notes (video analysis results).
-6. **Edit if needed:** `PUT /api/task/{task_id}` to amend the task description (e.g., add an action trigger).
-7. **Handle external actions:** If you need notifications or messaging channels, use an external agent service.
-8. **Stop or delete:** `POST /api/task/{task_id}/stop` or `DELETE /api/task/{task_id}`.
+4. **One-off frame questions:** `POST /api/caption_frame` when the user wants a current description instead of a monitoring task.
+5. **Create a task:** `POST /api/tasks` with an `io_id` and `task_description`.
+6. **Monitor progress:** `GET /api/task/{task_id}` to read the notes (video analysis results).
+7. **Edit if needed:** `PUT /api/task/{task_id}` to amend the task description (e.g., add an action trigger).
+8. **Handle external actions:** If you need notifications or messaging channels, use an external agent service.
+9. **Stop or delete:** `POST /api/task/{task_id}/stop` or `DELETE /api/task/{task_id}`.
 
 ## Error Format
 
