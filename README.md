@@ -1,7 +1,8 @@
 # VideoMemory
 
 Use vision language models to let your openclaw see and monitor cameras (USB, RTSP, Android devices)
-A video monitoring system that uses vision-language models to analyse camera feeds. You or your agent creates a **tasks** describing what to watch for, and the system continuously analyses the video stream.
+
+You or your agent creates a **tasks** describing what to watch for, and the system continuously analyses the video stream.
 
 ## Quick Start
 
