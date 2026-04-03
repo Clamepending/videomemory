@@ -1,5 +1,10 @@
 datasets/tvqa
 __pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
 
 outputs/datasets/*
 venv/
