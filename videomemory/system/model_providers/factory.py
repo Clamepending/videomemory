@@ -6,6 +6,11 @@ from typing import Optional
 from .base import BaseModelProvider
 from .google_provider import Gemini25FlashProvider, Gemini25FlashLiteProvider
 from .openai_provider import OpenAIGPT41NanoProvider, OpenAIGPT4oMiniProvider
+from .anthropic_provider import (
+    AnthropicClaudeHaiku45Provider,
+    AnthropicClaudeOpus46Provider,
+    AnthropicClaudeSonnet46Provider,
+)
 from .openrouter_provider import (
     OpenRouterMolmo28BProvider,
     OpenRouterQwen2VL7BProvider,
@@ -26,6 +31,10 @@ MODEL_PROVIDER_MAP = {
     # OpenAI models
     "gpt-4.1-nano": OpenAIGPT41NanoProvider,
     "gpt-4o-mini": OpenAIGPT4oMiniProvider,
+    # Anthropic models
+    "claude-sonnet-4-6": AnthropicClaudeSonnet46Provider,
+    "claude-haiku-4-5": AnthropicClaudeHaiku45Provider,
+    "claude-opus-4-6": AnthropicClaudeOpus46Provider,
     # OpenRouter models
     "molmo-2-8b": OpenRouterMolmo28BProvider,
     "qwen-2-vl-7b": OpenRouterQwen2VL7BProvider,
@@ -73,4 +82,3 @@ def get_VLM_provider(model_name: Optional[str] = None) -> BaseModelProvider:
     provider_class = MODEL_PROVIDER_MAP[model_name]
     logger.info(f"Creating model provider: {model_name} ({provider_class.__name__})")
     return provider_class()
-

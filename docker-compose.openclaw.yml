@@ -1,0 +1,104 @@
+services:
+  videomemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: videomemory
+    restart: unless-stopped
+    env_file:
+      - ../simpleagent/.env
+    environment:
+      PORT: "5050"
+      VIDEO_INGESTOR_MODEL: "${VIDEO_INGESTOR_MODEL:-claude-sonnet-4-6}"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_URL: "http://openclaw:18789/hooks/videomemory-alert"
+      VIDEOMEMORY_OPENCLAW_BOT_ID: "${VIDEOMEMORY_OPENCLAW_BOT_ID:-openclaw}"
+      VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S: "${VIDEOMEMORY_OPENCLAW_WEBHOOK_TIMEOUT_S:-5}"
+      VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S: "${VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S:-30}"
+      VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S: "${VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S:-0}"
+    ports:
+      - "5050:5050"
+    volumes:
+      - videomemory-data:/root/.local/share/videomemory
+
+  demo-camera:
+    image: python:3.11-slim
+    container_name: demo-camera
+    restart: unless-stopped
+    working_dir: /app
+    command: ["python", "/app/deploy/demo_camera_server.py"]
+    volumes:
+      - ./:/app:ro
+    ports:
+      - "18080:8080"
+
+  videomemory-bootstrap:
+    image: curlimages/curl:8.10.1
+    container_name: videomemory-bootstrap
+    depends_on:
+      - videomemory
+      - demo-camera
+    restart: "no"
+    command:
+      - sh
+      - -lc
+      - >
+        until curl -fsS http://videomemory:5050/api/health >/dev/null; do sleep 2; done &&
+        curl -fsS -X POST http://videomemory:5050/api/devices/network
+        -H 'Content-Type: application/json'
+        -d '{"url":"http://demo-camera:8080/snapshot.jpg","name":"Demo Red Marker Camera"}'
+
+  openclaw:
+    build:
+      context: ../simpleagent
+      dockerfile: Dockerfile
+    container_name: openclaw
+    restart: unless-stopped
+    env_file:
+      - ../simpleagent/.env
+    environment:
+      PORT: "18789"
+      SIMPLEAGENT_SERVICE_MODE: "all"
+      SIMPLEAGENT_EXECUTOR_AUTO_RUN: "1"
+      SIMPLEAGENT_DELIVERY_AUTO_RUN: "0"
+      SIMPLEAGENT_TELEGRAM_POLLER_ENABLED: "1"
+      SIMPLEAGENT_TELEGRAM_POLL_TIMEOUT_S: "${SIMPLEAGENT_TELEGRAM_POLL_TIMEOUT_S:-25}"
+      SIMPLEAGENT_TELEGRAM_POLL_RETRY_S: "${SIMPLEAGENT_TELEGRAM_POLL_RETRY_S:-5}"
+      SIMPLEAGENT_WEB_ENABLED: "1"
+      SIMPLEAGENT_SHELL_ENABLED: "1"
+      SIMPLEAGENT_SHELL_CWD: "/tmp"
+      SIMPLEAGENT_FIXED_BOT_ID: "${SIMPLEAGENT_FIXED_BOT_ID:-openclaw}"
+      SIMPLEAGENT_FIXED_BOT_NAME: "${SIMPLEAGENT_FIXED_BOT_NAME:-OpenClaw}"
+      SIMPLEAGENT_FIXED_BOT_MODEL: "${SIMPLEAGENT_FIXED_BOT_MODEL:-claude-sonnet-4-6}"
+      SIMPLEAGENT_DB_PATH: "/data/simpleagent.db"
+      SIMPLEAGENT_BOT_CONTEXT_DIR: "/data/bot_context"
+    depends_on:
+      - videomemory
+      - videomemory-bootstrap
+    ports:
+      - "18789:18789"
+    volumes:
+      - openclaw-data:/data
+      - ./deploy/openclaw-bot-context/openclaw:/data/bot_context/openclaw:ro
+
+  openclaw-bootstrap:
+    image: curlimages/curl:8.10.1
+    container_name: openclaw-bootstrap
+    depends_on:
+      - openclaw
+    restart: "no"
+    environment:
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+    command:
+      - sh
+      - -lc
+      - >
+        until curl -fsS http://openclaw:18789/health >/dev/null; do sleep 2; done &&
+        if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+          curl -fsS -X POST http://openclaw:18789/api/bots/openclaw/config -H 'Content-Type: application/json' -d "{\"telegram_bot_token\":\"${TELEGRAM_BOT_TOKEN}\"}";
+        else
+          echo "TELEGRAM_BOT_TOKEN not set; skipping OpenClaw Telegram bootstrap";
+        fi
+
+volumes:
+  videomemory-data:
+  openclaw-data:

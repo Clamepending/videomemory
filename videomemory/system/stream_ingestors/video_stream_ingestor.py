@@ -464,8 +464,9 @@ class VideoStreamIngestor:
     def _build_prompt(self) -> str:
         """Build the prompt for the LLM based on tasks and history."""
         # Build tasks section
+        active_tasks = [task for task in self._tasks_list if not task.done]
         tasks_lines = ["<tasks>"]
-        for task in self._tasks_list:
+        for task in active_tasks:
             tasks_lines.append("<task>")
             tasks_lines.append(f"<task_number>{task.task_number}</task_number>")
             tasks_lines.append(f"<task_desc>{task.task_desc}</task_desc>")
@@ -537,6 +538,34 @@ For multiple task updates: {"task_updates": [{task_number: 0, task_note: "Clap c
 When task is complete: {"task_updates": [{task_number: 0, task_note: "Task completed - 10 claps counted", task_done: true}]}
 </instructions>"""
         return "\n".join(tasks_lines) + "\n\n" + instructions
+
+    def _schedule_stop_if_idle(self) -> None:
+        if len(self._tasks_list) != 0:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            asyncio.create_task(self.stop())
+        except RuntimeError:
+            bg_loop = getattr(sys.modules[__name__], '_flask_background_loop', None)
+            if bg_loop and bg_loop.is_running():
+                asyncio.run_coroutine_threadsafe(self.stop(), bg_loop)
+            else:
+                logger.warning("Could not stop ingestor - no event loop")
+
+    def _prune_completed_tasks(self) -> None:
+        active_tasks = [task for task in self._tasks_list if not task.done]
+        removed = len(self._tasks_list) - len(active_tasks)
+        if removed <= 0:
+            return
+        self._tasks_list = active_tasks
+        for i, task in enumerate(self._tasks_list):
+            task.task_number = i
+        logger.info(
+            "Pruned %s completed task(s) for camera index=%s",
+            removed,
+            self.camera_index,
+        )
+        self._schedule_stop_if_idle()
     
     async def _run_ml_inference(self, frame: Any, prompt: str) -> Optional[Dict[str, Any]]:
         """Run multimodal LLM inference on a frame with the given prompt."""
@@ -604,6 +633,7 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
 
         task_updates = ml_results.get("task_updates", [])
         available_task_numbers = [t.task_number for t in self._tasks_list]
+        completed_task_seen = False
 
         # Update tasks - append new notes instead of overwriting
         for update in task_updates:
@@ -641,6 +671,7 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
             # Update done status
             if update.get("task_done"):
                 task.done = True
+                completed_task_seen = True
 
             # Persist changes via callback
             if self._on_task_updated and (new_note or update.get("task_done")):
@@ -653,6 +684,8 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
                     self._on_detection_event(task, new_note)
                 except Exception as e:
                     logger.error(f"Failed to emit detection event: {e}")
+        if completed_task_seen:
+            self._prune_completed_tasks()
         
     def add_task(self, task: Task):
         """Add a task to the video stream ingestor.
@@ -716,16 +749,7 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
             logger.warning(f"Task '{task_desc}' not found for camera index={self.camera_index}")
         
         # Stop ingestor if no tasks remain (async call)
-        if len(self._tasks_list) == 0:
-            try:
-                loop = asyncio.get_running_loop()
-                asyncio.create_task(self.stop())
-            except RuntimeError:
-                bg_loop = getattr(sys.modules[__name__], '_flask_background_loop', None)
-                if bg_loop and bg_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(self.stop(), bg_loop)
-                else:
-                    logger.warning(f"Could not stop ingestor - no event loop")
+        self._schedule_stop_if_idle()
     
     def edit_task(self, old_task_desc: str, new_task_desc: str):
         """Edit/update a task description in the video stream ingestor.

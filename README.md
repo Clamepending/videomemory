@@ -4,15 +4,16 @@ A video monitoring system that uses vision-language models to analyse camera fee
 
 ## Quick Start
 
-To launch both Openclaw and Videomemory in docker containers on your computer, use
+To launch both OpenClaw and VideoMemory in Docker, use:
 ```bash
-ANTHROPIC_API_KEY=<YOUR ANTHROPIC API KEY> \
-VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
-docker compose -f docker-compose.real-openclaw.yml up -d --build
+bash ./launch_openclaw_with_videomemory.sh --anthropic-api-key <YOUR_ANTHROPIC_API_KEY>
 ```
-Then Openclaw UI: http://127.0.0.1:18889/chat?session=agent%3Amain%3Amain
-Videomemory UI: http://127.0.0.1:5050/device
-You can set up telegram in openclaw.
+
+It prints:
+- a ready-to-open OpenClaw dashboard link with `?token=...` already included
+- the VideoMemory UI link
+
+The bundled stack already includes the OpenClaw config that wires VideoMemory webhooks.
 
 To launch just Videomemory (no openclaw)
 ```bash
@@ -69,21 +70,39 @@ If `host.docker.internal` does not resolve on Linux, relaunch the OpenClaw conta
 This is the bundled two-container setup for **OpenClaw + VideoMemory**:
 
 ```bash
-docker compose -f docker-compose.real-openclaw.yml up -d --build
+bash ./launch_openclaw_with_videomemory.sh --anthropic-api-key your_key_here
 ```
 
-If you want a single launch command with model setup, use the helper script:
+If you prefer environment variables, this is equivalent:
 
 ```bash
 ANTHROPIC_API_KEY=your_key_here \
 TELEGRAM_BOT_TOKEN=your_bot_token_here \
 OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash docs/launch-openclaw-real.sh
+bash ./launch_openclaw_with_videomemory.sh
 ```
 
-If `OPENCLAW_TELEGRAM_OWNER_ID` is not set, the script will try to discover it automatically from the bot's recent Telegram updates. Send any message to your bot once before running it.
+On macOS, the launcher will try to open Docker Desktop automatically if the daemon is not ready yet.
 
-To find `OPENCLAW_TELEGRAM_OWNER_ID` yourself:
+After launch, the script prints:
+- `VideoMemory UI: http://localhost:5050/devices`
+- `OpenClaw dashboard: http://localhost:18889/?token=...`
+
+That OpenClaw dashboard link already includes the gateway token, so you can open it directly without pasting the token manually.
+
+If you want the terminal UI, keep it as two commands:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here \
+TELEGRAM_BOT_TOKEN=your_bot_token_here \
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+bash ./launch_openclaw_with_videomemory.sh
+
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+bash docs/launch-openclaw-real-tui.sh
+```
+
+If you want Telegram alerts, set `OPENCLAW_TELEGRAM_OWNER_ID` yourself:
 
 1. Send any message to your Telegram bot.
 2. Run:
@@ -101,7 +120,7 @@ ANTHROPIC_API_KEY=your_key_here \
 TELEGRAM_BOT_TOKEN=your_bot_token_here \
 OPENCLAW_TELEGRAM_OWNER_ID=123456789 \
 OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash docs/launch-openclaw-real.sh
+bash ./launch_openclaw_with_videomemory.sh
 ```
 
 You can also launch with raw `docker compose`. The bundled compose file forwards launch-time keys to both **OpenClaw** and **VideoMemory**:
@@ -122,15 +141,7 @@ OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
 docker compose -f docker-compose.real-openclaw.yml up -d --build
 ```
 
-Then open:
-- VideoMemory: `http://localhost:5050/devices`
-- OpenClaw: `http://localhost:18889/`
-
-Gateway token:
-
-```text
-openclaw-real-dev-token
-```
+Then open the printed links from the launcher output.
 
 After the stack starts, add your own camera in the VideoMemory Devices page, then try these in OpenClaw:
 
@@ -169,9 +180,26 @@ OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
 bash docs/launch-openclaw-real.sh
 ```
 
-If the Telegram owner chat id is not already set, the helper script will try to resolve it from the bot's recent updates. Send your bot one message first so it has an update to read.
+To launch the stack and then attach directly to `openclaw tui` inside the running container, use two commands:
 
-You can also fetch the chat id yourself:
+```bash
+ANTHROPIC_API_KEY=your_key_here \
+TELEGRAM_BOT_TOKEN=your_bot_token_here \
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+bash docs/launch-openclaw-real.sh
+
+OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
+bash docs/launch-openclaw-real-tui.sh
+```
+
+The TUI helper is intentionally very small. It just finds the running `openclaw` container and runs:
+
+```bash
+docker exec -e TERM="$TERM" -it <openclaw-container> \
+  sh -lc 'exec openclaw tui --url ws://127.0.0.1:18789 --token "$OPENCLAW_GATEWAY_TOKEN" --session main'
+```
+
+If you want Telegram alerts, fetch the chat id yourself:
 
 ```bash
 curl -fsSL "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates"
