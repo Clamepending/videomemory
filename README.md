@@ -12,6 +12,7 @@ ANTHROPIC_API_KEY=<YOUR ANTHROPIC API KEY> \
 OPENCLAW_GATEWAY_TOKEN=chooseyourowntoken \
 bash ./launch_openclaw_with_videomemory.sh
 ```
+(OPENAI_API_KEY, GOOGLE_API_KEY, and OPENROUTER_API_KEY are supported too)
 
 It prints:
 - a ready-to-open OpenClaw dashboard link
