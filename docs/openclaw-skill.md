@@ -81,6 +81,10 @@ Do not precompute those results during setup unless the user explicitly asked fo
 - Prefer the container-internal base URL when OpenClaw is running in Docker.
 - If the pasted URL uses `localhost` or `127.0.0.1`, normalize it to the canonical Docker URL first.
 - Treat VideoMemory as the source of truth for device discovery and task state.
+- During onboarding, if the user wants to use an Android phone camera from outside the same local network, tell them to install Tailscale on both the VideoMemory machine and the phone first.
+- If the user provides a `100.x.y.z` phone address, treat it as a Tailscale address and check that Tailscale is installed and connected on the VideoMemory host before trying to use that phone camera.
+- If the user asks to rerun the bootstrap or install step, fetch and execute the current script instead of assuming an earlier failure still applies.
+- When a bootstrap or install command fails, report the actual failing command or stderr before proposing a fix.
 - Include `Content-Type: application/json` on `POST`, `PUT`, and `DELETE` calls that send JSON.
 - When the user wants monitoring to stop but keep history, call `POST /api/task/{task_id}/stop`.
 - When the user explicitly wants a task erased, call `DELETE /api/task/{task_id}`.
@@ -144,6 +148,16 @@ Remove a network camera:
 ```bash
 curl -fsSL -X DELETE http://videomemory:5050/api/devices/network/net0
 ```
+
+## Android phone cameras
+
+- First decide whether the phone and the VideoMemory machine are on the same LAN.
+- If they are not on the same LAN, install Tailscale on both devices before trying to use the phone camera URL.
+- If the user gives a `100.x.y.z` address, that is usually a Tailscale address, so the VideoMemory host must also have Tailscale installed and connected.
+- If the user does not want to install Tailscale, ask for the phone's local Wi-Fi IP instead and use that only when both devices are on the same LAN.
+- For DroidCam, common URLs are:
+  - Snapshot: `http://<phone-ip>:4747/jpeg`
+  - MJPEG stream: `http://<phone-ip>:4747/mjpegfeed`
 
 ## Tasks
 
