@@ -17,12 +17,15 @@ REPO_DIR="${VIDEOMEMORY_REPO_DIR:-$HOME/videomemory}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 VIDEOMEMORY_BASE="${VIDEOMEMORY_BASE:-}"
 BOT_ID="${VIDEOMEMORY_OPENCLAW_BOT_ID:-openclaw}"
+TAILSCALE_AUTHKEY="${VIDEOMEMORY_TAILSCALE_AUTHKEY:-${TAILSCALE_AUTHKEY:-}}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 STATE_DIR="${VIDEOMEMORY_STATE_DIR:-$STATE_HOME/videomemory}"
 LOG_FILE="$STATE_DIR/server.log"
 PID_FILE="$STATE_DIR/server.pid"
+TAILSCALE_UI_URL=""
 SKIP_START=0
 SKIP_KEYS=0
+SKIP_TAILSCALE=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -58,6 +61,14 @@ while [ "$#" -gt 0 ]; do
       SKIP_KEYS=1
       shift 1
       ;;
+    --skip-tailscale)
+      SKIP_TAILSCALE=1
+      shift 1
+      ;;
+    --tailscale-authkey)
+      TAILSCALE_AUTHKEY="$2"
+      shift 2
+      ;;
     --help|-h)
       cat <<'EOF'
 Usage: openclaw-bootstrap.sh [options]
@@ -71,6 +82,8 @@ Options:
   --bot-id ID                 bot_id to write into helper-created tasks
   --skip-start                Do not attempt to launch VideoMemory
   --skip-keys                 Do not copy model API keys into VideoMemory
+  --skip-tailscale            Do not attempt to install/configure Tailscale
+  --tailscale-authkey KEY     Optional Tailscale auth key for noninteractive tailscale up
 EOF
       exit 0
       ;;
@@ -101,6 +114,7 @@ PYTHON_BIN="$(find_bin python3 || true)"
 GIT_BIN="$(find_bin git || true)"
 CURL_BIN="$(find_bin curl || true)"
 UV_BIN="$(find_bin uv || true)"
+SUDO_BIN="$(find_bin sudo || true)"
 
 [ -n "$CURL_BIN" ] || fail "curl is required"
 [ -n "$GIT_BIN" ] || fail "git is required"
@@ -128,6 +142,18 @@ healthcheck() {
 pid_is_running() {
   pid="${1:-}"
   [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1
+}
+
+run_privileged() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+    return $?
+  fi
+  if [ -n "$SUDO_BIN" ] && "$SUDO_BIN" -n true >/dev/null 2>&1; then
+    "$SUDO_BIN" "$@"
+    return $?
+  fi
+  return 1
 }
 
 pick_videomemory_base() {
@@ -236,6 +262,161 @@ start_videomemory_if_needed() {
   done
 
   fail "VideoMemory did not become healthy at $VIDEOMEMORY_BASE; check $LOG_FILE"
+}
+
+install_tailscale_if_needed() {
+  if [ "$SKIP_TAILSCALE" -eq 1 ]; then
+    log "Skipping Tailscale install"
+    return 0
+  fi
+
+  TAILSCALE_BIN="$(find_bin tailscale || true)"
+  if [ -n "$TAILSCALE_BIN" ]; then
+    log "Tailscale already installed at $TAILSCALE_BIN"
+    return 0
+  fi
+
+  case "$(uname -s 2>/dev/null || printf 'unknown')" in
+    Linux)
+      mkdir -p "$STATE_DIR"
+      INSTALL_SCRIPT="$STATE_DIR/install-tailscale.sh"
+      if ! "$CURL_BIN" -fsSL https://tailscale.com/install.sh -o "$INSTALL_SCRIPT"; then
+        log "Warning: could not download the Tailscale installer"
+        return 0
+      fi
+      chmod +x "$INSTALL_SCRIPT"
+      if run_privileged sh "$INSTALL_SCRIPT" >>"$LOG_FILE" 2>&1; then
+        TAILSCALE_BIN="$(find_bin tailscale || true)"
+        if [ -n "$TAILSCALE_BIN" ]; then
+          log "Installed Tailscale successfully"
+        fi
+      else
+        log "Warning: could not install Tailscale automatically. Run 'curl -fsSL https://tailscale.com/install.sh | sh' with root access."
+      fi
+      ;;
+    *)
+      log "Warning: automatic Tailscale install is only implemented for Linux. Install Tailscale manually on this machine."
+      ;;
+  esac
+}
+
+ensure_tailscaled_service() {
+  TAILSCALE_BIN="$(find_bin tailscale || true)"
+  [ -n "$TAILSCALE_BIN" ] || return 0
+
+  if command -v systemctl >/dev/null 2>&1; then
+    run_privileged systemctl enable --now tailscaled >>"$LOG_FILE" 2>&1 || true
+    return 0
+  fi
+
+  if command -v service >/dev/null 2>&1; then
+    run_privileged service tailscaled start >>"$LOG_FILE" 2>&1 || true
+  fi
+}
+
+get_tailscale_ipv4() {
+  TAILSCALE_BIN="$(find_bin tailscale || true)"
+  [ -n "$TAILSCALE_BIN" ] || return 1
+  "$TAILSCALE_BIN" ip -4 2>/dev/null | sed -n '1p'
+}
+
+setup_tailscale_if_needed() {
+  if [ "$SKIP_TAILSCALE" -eq 1 ]; then
+    return 0
+  fi
+
+  install_tailscale_if_needed
+  ensure_tailscaled_service
+
+  TAILSCALE_IP="$(get_tailscale_ipv4 || true)"
+  if [ -n "$TAILSCALE_IP" ]; then
+    TAILSCALE_UI_URL="http://$TAILSCALE_IP:5050/devices"
+    log "Detected Tailscale UI URL: $TAILSCALE_UI_URL"
+    return 0
+  fi
+
+  TAILSCALE_BIN="$(find_bin tailscale || true)"
+  if [ -z "$TAILSCALE_BIN" ]; then
+    log "Warning: Tailscale is not installed, so the tailnet UI link is unavailable."
+    return 0
+  fi
+
+  if [ -n "$TAILSCALE_AUTHKEY" ]; then
+    log "Connecting Tailscale with provided auth key"
+    if run_privileged "$TAILSCALE_BIN" up --authkey="$TAILSCALE_AUTHKEY" --accept-routes >>"$LOG_FILE" 2>&1; then
+      TAILSCALE_IP="$(get_tailscale_ipv4 || true)"
+      if [ -n "$TAILSCALE_IP" ]; then
+        TAILSCALE_UI_URL="http://$TAILSCALE_IP:5050/devices"
+        log "Connected Tailscale UI URL: $TAILSCALE_UI_URL"
+        return 0
+      fi
+    fi
+    log "Warning: Tailscale auth key setup did not produce a tailnet IP. Check $LOG_FILE."
+    return 0
+  fi
+
+  log "Tailscale is installed but not connected yet. Run 'sudo tailscale up' to get a tailnet VideoMemory UI link."
+}
+
+extract_telegram_bot_token() {
+  if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+    printf '%s\n' "$TELEGRAM_BOT_TOKEN"
+    return 0
+  fi
+
+  CONFIG_PATH="$OPENCLAW_HOME/openclaw.json"
+  [ -f "$CONFIG_PATH" ] || return 0
+
+  if [ -n "$NODE_BIN" ]; then
+    OPENCLAW_CONFIG_PATH="$CONFIG_PATH" "$NODE_BIN" <<'EOF'
+const fs = require("node:fs");
+
+try {
+  const config = JSON.parse(fs.readFileSync(process.env.OPENCLAW_CONFIG_PATH, "utf8"));
+  const token = config?.channels?.telegram?.botToken;
+  if (typeof token === "string" && token.trim() && !token.includes("${")) {
+    process.stdout.write(token.trim());
+  }
+} catch (_) {}
+EOF
+    return 0
+  fi
+
+  OPENCLAW_CONFIG_PATH="$CONFIG_PATH" "$PYTHON_BIN" <<'EOF'
+import json
+import os
+from pathlib import Path
+
+try:
+    config = json.loads(Path(os.environ["OPENCLAW_CONFIG_PATH"]).read_text())
+    token = (((config or {}).get("channels") or {}).get("telegram") or {}).get("botToken", "")
+    token = str(token).strip()
+    if token and "${" not in token:
+        print(token, end="")
+except Exception:
+    pass
+EOF
+}
+
+notify_user_with_ui_link() {
+  ui_url="$1"
+  [ -n "$ui_url" ] || return 0
+
+  message="VideoMemory is ready. Open the UI here: $ui_url"
+  telegram_chat_id="${VIDEOMEMORY_BOOTSTRAP_NOTIFY_CHAT_ID:-${OPENCLAW_TELEGRAM_OWNER_ID:-}}"
+  telegram_bot_token="$(extract_telegram_bot_token)"
+
+  if [ -n "$telegram_chat_id" ] && [ -n "$telegram_bot_token" ]; then
+    if "$CURL_BIN" -fsS -X POST "https://api.telegram.org/bot$telegram_bot_token/sendMessage" \
+      --data-urlencode "chat_id=$telegram_chat_id" \
+      --data-urlencode "text=$message" >/dev/null 2>&1; then
+      log "Sent VideoMemory UI link to Telegram chat $telegram_chat_id"
+    else
+      log "Warning: failed to send the VideoMemory UI link to Telegram"
+    fi
+  fi
+
+  log "Reply to the user with this VideoMemory UI link: $ui_url"
 }
 
 copy_if_exists() {
@@ -471,12 +652,23 @@ sync_model_keys() {
 
 pick_videomemory_base
 start_videomemory_if_needed
+setup_tailscale_if_needed
 install_openclaw_files
 merge_openclaw_config
 sync_model_keys
 
+USER_FACING_UI_URL="$VIDEOMEMORY_BASE/devices"
+if [ -n "$TAILSCALE_UI_URL" ]; then
+  USER_FACING_UI_URL="$TAILSCALE_UI_URL"
+fi
+
 log "Bootstrap complete"
 log "VideoMemory base: $VIDEOMEMORY_BASE"
+log "User-facing VideoMemory UI: $USER_FACING_UI_URL"
 log "VideoMemory log: $LOG_FILE"
 log "OpenClaw home: $OPENCLAW_HOME"
+if [ -z "$TAILSCALE_UI_URL" ] && [ "$SKIP_TAILSCALE" -eq 0 ]; then
+  log "Tailscale UI link unavailable yet. Finish 'sudo tailscale up' or provide --tailscale-authkey to make the UI reachable over Tailscale."
+fi
+notify_user_with_ui_link "$USER_FACING_UI_URL"
 log "Next prompt to OpenClaw: Please onboard to VideoMemory here $VIDEOMEMORY_BASE/openclaw/skill.md and use the videomemory task helper for any 'when X happens, do Y' request."

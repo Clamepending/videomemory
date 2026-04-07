@@ -58,9 +58,18 @@ bash docs/openclaw-bootstrap.sh
 What this bootstrap does:
 - clones or reuses the VideoMemory repo
 - launches VideoMemory locally with `uv` or a Python virtualenv if it is not already reachable
+- installs Tailscale on Linux when possible, and prefers a Tailscale UI link for the user
 - installs the OpenClaw helper, hook transform, and local skill
 - merges the VideoMemory webhook mapping into `~/.openclaw/openclaw.json`
 - copies any model API keys present in the shell environment into VideoMemory settings
+- prints a user-facing VideoMemory UI link, and sends it over Telegram too when a bot token plus chat id are available
+
+If you already have a reusable Tailscale auth key, pass it in so onboarding can connect noninteractively:
+
+```bash
+VIDEOMEMORY_TAILSCALE_AUTHKEY=tskey-auth-... \
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
+```
 
 If OpenClaw needs to handle "watch for X, then do Y" requests, install the helper once:
 
@@ -83,6 +92,7 @@ Do not precompute those results during setup unless the user explicitly asked fo
 - Treat VideoMemory as the source of truth for device discovery and task state.
 - During onboarding, if the user wants to use an Android phone camera from outside the same local network, tell them to install Tailscale on both the VideoMemory machine and the phone first.
 - If the user provides a `100.x.y.z` phone address, treat it as a Tailscale address and check that Tailscale is installed and connected on the VideoMemory host before trying to use that phone camera.
+- After successful onboarding, reply to the user with the user-facing VideoMemory UI link from bootstrap output. Prefer the Tailscale UI URL when one is available.
 - If the user asks to rerun the bootstrap or install step, fetch and execute the current script instead of assuming an earlier failure still applies.
 - When a bootstrap or install command fails, report the actual failing command or stderr before proposing a fix.
 - Include `Content-Type: application/json` on `POST`, `PUT`, and `DELETE` calls that send JSON.
