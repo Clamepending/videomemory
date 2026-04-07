@@ -432,6 +432,11 @@ sync_model_keys() {
     return 0
   fi
 
+  if [ -n "${GEMINI_API_KEY:-}" ] && [ -z "${GOOGLE_API_KEY:-}" ]; then
+    GOOGLE_API_KEY="$GEMINI_API_KEY"
+    export GOOGLE_API_KEY
+  fi
+
   for key in GOOGLE_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY ANTHROPIC_API_KEY; do
     value="$(printenv "$key" || true)"
     if [ -z "$value" ]; then
@@ -442,6 +447,26 @@ sync_model_keys() {
       -H 'Content-Type: application/json' \
       -d "{\"value\":\"$value\"}" >/dev/null || log "Warning: failed to copy $key"
   done
+
+  selected_model="${VIDEO_INGESTOR_MODEL:-}"
+  if [ -z "$selected_model" ]; then
+    if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+      selected_model="claude-sonnet-4-6"
+    elif [ -n "${OPENAI_API_KEY:-}" ]; then
+      selected_model="gpt-4o-mini"
+    elif [ -n "${GOOGLE_API_KEY:-}" ]; then
+      selected_model="gemini-2.5-flash"
+    elif [ -n "${OPENROUTER_API_KEY:-}" ]; then
+      selected_model="qwen3-vl-8b"
+    fi
+  fi
+
+  if [ -n "$selected_model" ]; then
+    log "Setting VIDEO_INGESTOR_MODEL to $selected_model"
+    "$CURL_BIN" -fsS -X PUT "$VIDEOMEMORY_BASE/api/settings/VIDEO_INGESTOR_MODEL" \
+      -H 'Content-Type: application/json' \
+      -d "{\"value\":\"$selected_model\"}" >/dev/null || log "Warning: failed to set VIDEO_INGESTOR_MODEL"
+  fi
 }
 
 pick_videomemory_base

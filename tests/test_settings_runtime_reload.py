@@ -75,6 +75,45 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         mock_db.set_setting.assert_called_once_with("VIDEO_INGESTOR_MODEL", "gpt-4o-mini")
         mock_task_manager.reload_model_provider.assert_called_once_with(model_name="gpt-4o-mini")
 
+    def test_model_selection_normalizes_alias_to_canonical_value(self):
+        mock_db = MagicMock()
+        mock_task_manager = MagicMock()
+
+        with (
+            patch.object(app_module, "db", mock_db),
+            patch.object(app_module, "task_manager", mock_task_manager),
+            patch.dict(os.environ, {"VIDEO_INGESTOR_MODEL": "gemini-2.5-flash"}, clear=False),
+        ):
+            resp = self.client.put(
+                "/api/settings/VIDEO_INGESTOR_MODEL",
+                json={"value": "gpt-4o"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json(), {"status": "saved", "key": "VIDEO_INGESTOR_MODEL"})
+        mock_db.set_setting.assert_called_once_with("VIDEO_INGESTOR_MODEL", "gpt-4o-mini")
+        mock_task_manager.reload_model_provider.assert_called_once_with(model_name="gpt-4o-mini")
+
+    def test_model_selection_rejects_unknown_model_name(self):
+        mock_db = MagicMock()
+        mock_task_manager = MagicMock()
+
+        with (
+            patch.object(app_module, "db", mock_db),
+            patch.object(app_module, "task_manager", mock_task_manager),
+        ):
+            resp = self.client.put(
+                "/api/settings/VIDEO_INGESTOR_MODEL",
+                json={"value": "gpt-4o-super"},
+            )
+
+        self.assertEqual(resp.status_code, 400)
+        body = resp.get_json()
+        self.assertIn("Unknown model name", body.get("error", ""))
+        self.assertIn("supported_models", body)
+        mock_db.set_setting.assert_not_called()
+        mock_task_manager.reload_model_provider.assert_not_called()
+
     def test_note_frame_toggle_save_does_not_trigger_model_reload(self):
         mock_db = MagicMock()
         mock_task_manager = MagicMock()

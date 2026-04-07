@@ -18,6 +18,13 @@ import videomemory.system
 import videomemory.tools
 from videomemory.system.logging_config import setup_logging
 from videomemory.system.model_providers import get_VLM_provider
+from videomemory.system.model_providers.factory import (
+    choose_default_model_for_available_keys,
+    get_required_api_key_env,
+    get_supported_model_names,
+    normalize_model_name,
+    validate_model_name,
+)
 from videomemory.system.database import TaskDatabase, get_default_data_dir
 from videomemory.system.openclaw_integration import OpenClawWebhookDispatcher
 import cv2
@@ -26,6 +33,7 @@ from typing import Any, Dict, List, Optional
 import logging
 import numpy as np
 import requests
+import httpx
 from pydantic import BaseModel, Field
 from videomemory.system.io_manager.url_utils import is_snapshot_url
 
@@ -1012,7 +1020,9 @@ def caption_frame():
         })
     except Exception as e:
         flask_logger.error("Error in /api/caption_frame: %s", e, exc_info=True)
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+        provider_name = type(getattr(task_manager, "_model_provider", None) or model_provider).__name__
+        body, status_code = _build_caption_frame_provider_error(e, provider_name=provider_name)
+        return jsonify(body), status_code
 
 
 # ── Health & OpenAPI ──────────────────────────────────────────
@@ -1354,6 +1364,60 @@ _MODEL_RUNTIME_KEYS = {
 }
 
 
+def _current_ingestor_model_name() -> str:
+    """Return the normalized effective ingestor model name."""
+    return normalize_model_name(os.getenv('VIDEO_INGESTOR_MODEL')) or 'local-vllm'
+
+
+def _build_caption_frame_provider_error(exc: Exception, *, provider_name: str) -> tuple[dict, int]:
+    """Turn provider/configuration failures into actionable API errors."""
+    model_name = _current_ingestor_model_name()
+    message = str(exc).strip() or exc.__class__.__name__
+    required_setting = get_required_api_key_env(model_name)
+
+    if model_name == 'local-vllm':
+        base_url = (os.getenv('LOCAL_MODEL_BASE_URL') or os.getenv('VLLM_LOCAL_URL') or 'http://localhost:8100').rstrip('/')
+        if isinstance(exc, httpx.ConnectError) or 'connection refused' in message.lower() or base_url in message:
+            suggested_model = choose_default_model_for_available_keys()
+            body = {
+                'status': 'error',
+                'error': f"VideoMemory is configured to use local-vllm at {base_url}, but that server is not reachable.",
+                'hint': f"Start the local vLLM server at {base_url}, or set VIDEO_INGESTOR_MODEL to a configured cloud model.",
+                'current_model': model_name,
+                'model_provider': provider_name,
+                'local_model_base_url': base_url,
+            }
+            if suggested_model:
+                suggested_key = get_required_api_key_env(suggested_model)
+                body['suggested_model'] = suggested_model
+                if suggested_key:
+                    body['required_setting'] = suggested_key
+                    body['hint'] = (
+                        f"{suggested_key} is available, so setting VIDEO_INGESTOR_MODEL to '{suggested_model}' "
+                        f"should use the cloud provider immediately."
+                    )
+            else:
+                body['required_setting'] = 'OPENAI_API_KEY | GOOGLE_API_KEY | ANTHROPIC_API_KEY | OPENROUTER_API_KEY'
+            return body, 503
+
+    if required_setting and ('api key' in message.lower() or 'not initialized' in message.lower() or required_setting in message):
+        return {
+            'status': 'error',
+            'error': f"Model '{model_name}' requires {required_setting}, but it is not configured.",
+            'hint': f"Save {required_setting} in Settings or switch VIDEO_INGESTOR_MODEL to another configured model.",
+            'current_model': model_name,
+            'model_provider': provider_name,
+            'required_setting': required_setting,
+        }, 503
+
+    return {
+        'status': 'error',
+        'error': message,
+        'current_model': model_name,
+        'model_provider': provider_name,
+    }, 500
+
+
 def _coerce_boolean_setting(value, *, default: bool) -> bool:
     """Parse a boolean-ish setting value while preserving sensible defaults."""
     if value is None:
@@ -1436,16 +1500,18 @@ def get_settings():
         result = {}
         for key in _KNOWN_SETTINGS:
             value, source = _get_effective_setting_value_and_source(key)
+            if key == 'VIDEO_INGESTOR_MODEL':
+                value = normalize_model_name(value) or value
             result[key] = {
                 'value': _mask_value(key, value),
                 'is_set': bool(value),
                 'source': source,
             }
         # Add model provider type for UI indicator (local vLLM vs cloud)
-        model_name = (result.get('VIDEO_INGESTOR_MODEL', {}).get('value') or '').strip().lower()
+        model_name = normalize_model_name(result.get('VIDEO_INGESTOR_MODEL', {}).get('value')) or 'local-vllm'
         result['_model_provider_type'] = {
             'type': 'local' if model_name in _LOCAL_VLLM_MODELS else 'cloud',
-            'model': model_name or 'local-vllm',
+            'model': model_name,
         }
         return jsonify({'settings': result})
     except Exception as e:
@@ -1462,6 +1528,12 @@ def update_setting(key):
         raw_value = data.get('value', '')
         if key == 'VIDEOMEMORY_SAVE_NOTE_FRAMES':
             value = '1' if _coerce_boolean_setting(raw_value, default=True) else '0'
+        elif key == 'VIDEO_INGESTOR_MODEL':
+            try:
+                value = validate_model_name(raw_value)
+                value = '' if value is None else value
+            except ValueError as exc:
+                return jsonify({'error': str(exc), 'supported_models': get_supported_model_names()}), 400
         else:
             value = '' if raw_value is None else str(raw_value).strip()
         
