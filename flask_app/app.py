@@ -494,7 +494,21 @@ def add_network_camera():
 
     try:
         camera_info = io_manager.add_network_camera(url, name)
-        return jsonify({'status': 'success', 'device': camera_info})
+        response_body = {'status': 'success', 'device': camera_info}
+        try:
+            task_manager.ensure_device_ingestor(camera_info["io_id"])
+        except Exception as warm_exc:
+            flask_logger.warning(
+                "Network camera %s was added, but its warm preview ingestor did not start yet: %s",
+                camera_info.get("io_id"),
+                warm_exc,
+                exc_info=True,
+            )
+            response_body["warning"] = (
+                "Camera saved, but the background preview reader could not start yet. "
+                "The preview will retry automatically the next time you open the device."
+            )
+        return jsonify(response_body)
     except Exception as e:
         flask_logger.error(f"Error adding network camera: {e}", exc_info=True)
         return jsonify({'status': 'error', 'error': str(e)}), 500
@@ -506,6 +520,8 @@ def remove_network_camera(io_id):
     active_tasks = [t for t in task_manager.list_tasks(io_id) if t.get('status') == 'active']
     for t in active_tasks:
         task_manager.stop_task(t['task_id'])
+
+    task_manager.release_device_ingestor(io_id)
 
     if io_manager.remove_network_camera(io_id):
         return jsonify({'status': 'success', 'message': f'Network camera {io_id} removed'})
@@ -593,6 +609,36 @@ def _get_network_preview_frame(url: str) -> Optional[bytes]:
             cap.release()
 
 
+def _ensure_network_camera_ingestor(
+    io_id: str,
+    device_info: Optional[Dict[str, Any]],
+    *,
+    wait_timeout_s: float = 0.0,
+) -> Optional[np.ndarray]:
+    """Warm a background ingestor for a network camera and optionally wait for a frame."""
+    if device_info is None or device_info.get("source") != "network":
+        return None
+
+    try:
+        task_manager.ensure_device_ingestor(io_id)
+    except Exception as e:
+        flask_logger.debug("Error warming network camera ingestor for %s: %s", io_id, e, exc_info=True)
+        return None
+
+    if wait_timeout_s <= 0:
+        return None
+
+    import time
+    deadline = time.monotonic() + wait_timeout_s
+    while time.monotonic() < deadline:
+        latest_frame = task_manager.get_latest_frame_for_device(io_id)
+        if latest_frame is not None and latest_frame.size > 0 and latest_frame.mean() >= 1:
+            return latest_frame
+        time.sleep(0.05)
+
+    return None
+
+
 @app.route('/api/device/<io_id>/preview', methods=['GET'])
 def get_device_preview(io_id):
     """Get a preview image from a camera device.
@@ -624,6 +670,18 @@ def _get_device_preview_frame_bytes(io_id: str) -> Optional[bytes]:
 
         # Try active ingestor frame first for lower latency and less camera churn.
         latest_frame = task_manager.get_latest_frame_for_device(io_id)
+        if (
+            (latest_frame is None or latest_frame.size == 0 or latest_frame.mean() < 1)
+            and device_info.get("source") == "network"
+        ):
+            latest_frame = _ensure_network_camera_ingestor(
+                io_id,
+                device_info,
+                wait_timeout_s=max(
+                    0.0,
+                    float(os.getenv("VIDEOMEMORY_NETWORK_PREVIEW_WARMUP_S", "0.75")),
+                ),
+            )
         if latest_frame is not None and latest_frame.size > 0:
             frame_mean = latest_frame.mean()
             if frame_mean >= 1:
@@ -654,6 +712,7 @@ def get_device_preview_stream(io_id):
     boundary = "frame"
     max_grabs = max(1, int(os.getenv("VIDEOMEMORY_PREVIEW_MAX_GRABS", "8")))
     drain_ms = max(0.0, float(os.getenv("VIDEOMEMORY_PREVIEW_DRAIN_MS", "80")))
+    warmup_seconds = max(0.0, float(os.getenv("VIDEOMEMORY_NETWORK_PREVIEW_WARMUP_S", "0.75")))
 
     def _open_preview_capture(source):
         cap = cv2.VideoCapture()
@@ -724,18 +783,36 @@ def get_device_preview_stream(io_id):
     def generate():
         cap = None
         cap_source = None
+        warmup_deadline = None
         try:
+            initial_device_info = io_manager.get_stream_info(io_id)
+            if initial_device_info is not None and initial_device_info.get("source") == "network":
+                _ensure_network_camera_ingestor(io_id, initial_device_info, wait_timeout_s=0.0)
+                if warmup_seconds > 0:
+                    warmup_deadline = time.monotonic() + warmup_seconds
+
             while True:
                 loop_started = time.monotonic()
                 frame_data = None
 
                 latest_frame = task_manager.get_latest_frame_for_device(io_id)
                 if latest_frame is not None and latest_frame.size > 0 and latest_frame.mean() >= 1:
+                    if cap is not None:
+                        cap.release()
+                        cap = None
+                        cap_source = None
                     _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     frame_data = buffer.tobytes()
                 else:
                     device_info = io_manager.get_stream_info(io_id)
                     if device_info is not None and 'camera' in (device_info.get('category', '').lower()):
+                        if (
+                            device_info.get("source") == "network"
+                            and warmup_deadline is not None
+                            and time.monotonic() < warmup_deadline
+                        ):
+                            time.sleep(min(0.05, frame_delay_s))
+                            continue
                         pull_url = device_info.get('pull_url') or device_info.get('url')
                         if pull_url:
                             desired_source = pull_url

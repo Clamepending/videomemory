@@ -71,6 +71,7 @@ class VideoStreamIngestor:
         self._snapshot_client: Optional[httpx.Client] = None
         self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
         self._target_resolution = target_resolution # Default to 640x480
+        self._keep_alive_without_tasks = False
         
         # History tracking: past 20 model outputs (each dict includes the frame that produced it)
         self._output_history: deque = deque(maxlen=20)  # Store last 20 model outputs
@@ -556,6 +557,12 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
     def _schedule_stop_if_idle(self) -> None:
         if len(self._tasks_list) != 0:
             return
+        if self._keep_alive_without_tasks:
+            logger.info(
+                "Keeping ingestor alive without tasks for camera index=%s",
+                self.camera_index,
+            )
+            return
         try:
             loop = asyncio.get_running_loop()
             asyncio.create_task(self.stop())
@@ -718,28 +725,7 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
         logger.info(f"Added task {task.task_number} '{task.task_desc}' for camera index={self.camera_index}")
         
         # Start the ingestor if not already running
-        if not self._running:
-            logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Ingestor not running, scheduling start()")
-
-            async def start_with_error_handling():
-                try:
-                    await self.start()
-                except Exception as e:
-                    logger.error(f"[ERROR] VideoStreamIngestor.start_with_error_handling: Error in start(): {e}", exc_info=True)
-
-            try:
-                loop = asyncio.get_running_loop()
-                asyncio.create_task(start_with_error_handling())
-            except RuntimeError:
-                # Not inside an async context — use the Flask background loop if available
-                bg_loop = getattr(sys.modules[__name__], '_flask_background_loop', None)
-                if bg_loop and bg_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(start_with_error_handling(), bg_loop)
-                    logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Scheduled start() on Flask background loop")
-                else:
-                    logger.warning(f"No event loop available. Call start() manually.")
-        else:
-            logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Ingestor already running, skipping start()")
+        self.ensure_started()
     
     def remove_task(self, task_desc: str):
         """Remove a task from the video stream ingestor.
@@ -836,6 +822,54 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
     def get_total_output_count(self) -> int:
         """Get the total number of outputs processed (for debugging)."""
         return self._total_output_count
+
+    def set_keep_alive_without_tasks(self, keep_alive: bool) -> bool:
+        """Control whether the ingestor should keep reading frames with zero tasks."""
+        self._keep_alive_without_tasks = bool(keep_alive)
+        logger.info(
+            "Set keep_alive_without_tasks=%s for camera index=%s",
+            self._keep_alive_without_tasks,
+            self.camera_index,
+        )
+        return self._keep_alive_without_tasks
+
+    def ensure_started(self) -> None:
+        """Start the ingestor if needed using the active event loop strategy."""
+        if self._running:
+            logger.debug(
+                "[DEBUG] VideoStreamIngestor.ensure_started: Ingestor already running for camera_index=%s",
+                self.camera_index,
+            )
+            return
+
+        logger.debug(
+            "[DEBUG] VideoStreamIngestor.ensure_started: scheduling start() for camera_index=%s",
+            self.camera_index,
+        )
+
+        async def start_with_error_handling():
+            try:
+                await self.start()
+            except Exception as e:
+                logger.error(
+                    "[ERROR] VideoStreamIngestor.start_with_error_handling: Error in start(): %s",
+                    e,
+                    exc_info=True,
+                )
+
+        try:
+            asyncio.get_running_loop()
+            asyncio.create_task(start_with_error_handling())
+        except RuntimeError:
+            # Not inside an async context — use the Flask background loop if available
+            bg_loop = getattr(sys.modules[__name__], '_flask_background_loop', None)
+            if bg_loop and bg_loop.is_running():
+                asyncio.run_coroutine_threadsafe(start_with_error_handling(), bg_loop)
+                logger.debug(
+                    "[DEBUG] VideoStreamIngestor.ensure_started: Scheduled start() on Flask background loop"
+                )
+            else:
+                logger.warning("No event loop available. Call start() manually.")
 
     def get_dedup_status(self) -> Dict[str, Any]:
         """Get frame deduplication status for UI display.

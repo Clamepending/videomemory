@@ -1,7 +1,9 @@
 """Task Manager for managing tasks associated with IO streams."""
 
+import asyncio
 import logging
 import os
+import sys
 from typing import Dict, List, Optional, Any, Callable
 from .stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from .io_manager import IOmanager
@@ -155,6 +157,126 @@ class TaskManager:
                 ingestor.set_frame_diff_threshold(saved_threshold)
         except Exception as e:
             logger.error("Failed to apply saved ingestor preferences for %s: %s", io_id, e, exc_info=True)
+
+    def _should_keep_network_camera_warm(self, io_id: str) -> bool:
+        """Return whether this device should keep streaming even without active tasks."""
+        if self._io_manager is None or not hasattr(self._io_manager, "is_network_camera"):
+            return False
+        try:
+            if not self._io_manager.is_network_camera(io_id):
+                return False
+        except Exception as e:
+            logger.error("Failed to determine whether %s is a network camera: %s", io_id, e, exc_info=True)
+            return False
+
+        raw_value = os.getenv("VIDEOMEMORY_KEEP_NETWORK_CAMERAS_WARM", "1")
+        normalized = str(raw_value).strip().lower()
+        return normalized not in _FALSE_SETTING_VALUES
+
+    def _create_ingestor_for_stream(self, io_id: str, stream_info: Dict[str, Any]) -> VideoStreamIngestor:
+        """Create and register a VideoStreamIngestor for a camera device."""
+        if io_id in self._ingestors:
+            return self._ingestors[io_id]
+
+        stream_url = stream_info.get("url")
+        if stream_url:
+            camera_source = stream_info.get("pull_url") or stream_url
+            logger.info(
+                "Creating VideoStreamIngestor for network camera io_id=%s (pull url=%s)",
+                io_id,
+                camera_source,
+            )
+        else:
+            try:
+                camera_source = int(io_id)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"Invalid camera io_id '{io_id}'. Expected numeric index.") from exc
+
+            expected_device_name = stream_info.get("name", "Unknown")
+
+            try:
+                current_cameras = self._io_manager._detector.detect_cameras()
+                camera_found = False
+                for idx, name in current_cameras:
+                    if idx == camera_source:
+                        if name != expected_device_name:
+                            logger.warning(
+                                "Camera index mismatch! io_id=%s expects '%s' but index %s is now '%s'. Camera order may have changed.",
+                                io_id,
+                                expected_device_name,
+                                camera_source,
+                                name,
+                            )
+                        camera_found = True
+                        break
+                if not camera_found:
+                    logger.warning(
+                        "Camera index %s not found in current device list. Device may have been disconnected.",
+                        camera_source,
+                    )
+            except Exception as e:
+                logger.debug(f"Could not verify camera index: {e}")
+
+            logger.info(
+                "Creating VideoStreamIngestor for io_id=%s (camera_index=%s, device=%s)",
+                io_id,
+                camera_source,
+                expected_device_name,
+            )
+
+        ingestor = VideoStreamIngestor(
+            camera_source,
+            model_provider=self._model_provider,
+            on_task_updated=self._on_task_updated,
+            on_detection_event=self._emit_detection_event,
+        )
+        ingestor.set_keep_alive_without_tasks(self._should_keep_network_camera_warm(io_id))
+        self._apply_saved_ingestor_preferences(io_id, ingestor)
+        self._ingestors[io_id] = ingestor
+        return ingestor
+
+    def ensure_device_ingestor(self, io_id: str) -> Optional[VideoStreamIngestor]:
+        """Create and start an ingestor for a camera device if needed."""
+        if self._io_manager is None:
+            return None
+
+        stream_info = self._io_manager.get_stream_info(io_id)
+        if stream_info is None:
+            return None
+        if stream_info.get("category") != "camera":
+            return None
+
+        ingestor = self._ingestors.get(io_id)
+        if ingestor is None:
+            ingestor = self._create_ingestor_for_stream(io_id, stream_info)
+
+        ingestor.set_keep_alive_without_tasks(self._should_keep_network_camera_warm(io_id))
+        ingestor.ensure_started()
+        return ingestor
+
+    def release_device_ingestor(self, io_id: str) -> bool:
+        """Stop and forget an ingestor for a device, if one exists."""
+        ingestor = self._ingestors.pop(io_id, None)
+        if ingestor is None:
+            return False
+
+        try:
+            ingestor.set_keep_alive_without_tasks(False)
+        except Exception:
+            pass
+
+        try:
+            loop = asyncio.get_running_loop()
+            asyncio.create_task(ingestor.stop())
+        except RuntimeError:
+            ingestor_module = sys.modules.get(VideoStreamIngestor.__module__)
+            bg_loop = getattr(ingestor_module, "_flask_background_loop", None)
+            if bg_loop and bg_loop.is_running():
+                asyncio.run_coroutine_threadsafe(ingestor.stop(), bg_loop)
+            else:
+                logger.warning("Could not stop ingestor for %s - no event loop", io_id)
+
+        return True
     
     def add_task(self, io_id: str, task_description: str, bot_id: Optional[str] = None) -> Dict:
         """Add a new task for a specific IO stream.
@@ -192,51 +314,13 @@ class TaskManager:
         
         # Initialize video ingestor if not already created for this io_id
         if io_id not in self._ingestors:
-            # Determine camera source: URL for network cameras, int index for local
-            stream_url = stream_info.get("url")
-            if stream_url:
-                camera_source = stream_info.get("pull_url") or stream_url
-                logger.info(f"Creating VideoStreamIngestor for network camera io_id={io_id} (pull url={camera_source})")
-            else:
-                try:
-                    camera_source = int(io_id)
-                except (ValueError, TypeError):
-                    return {
-                        "status": "error",
-                        "message": f"Invalid camera io_id '{io_id}'. Expected numeric index.",
-                    }
-                
-                expected_device_name = stream_info.get("name", "Unknown")
-                
-                try:
-                    current_cameras = self._io_manager._detector.detect_cameras()
-                    camera_found = False
-                    for idx, name in current_cameras:
-                        if idx == camera_source:
-                            if name != expected_device_name:
-                                logger.warning(
-                                    f"Camera index mismatch! io_id={io_id} expects '{expected_device_name}' "
-                                    f"but index {camera_source} is now '{name}'. Camera order may have changed."
-                                )
-                            camera_found = True
-                            break
-                    if not camera_found:
-                        logger.warning(
-                            f"Camera index {camera_source} not found in current device list. "
-                            f"Device may have been disconnected."
-                        )
-                except Exception as e:
-                    logger.debug(f"Could not verify camera index: {e}")
-                
-                logger.info(f"Creating VideoStreamIngestor for io_id={io_id} (camera_index={camera_source}, device={expected_device_name})")
-            
-            self._ingestors[io_id] = VideoStreamIngestor(
-                camera_source, 
-                model_provider=self._model_provider,
-                on_task_updated=self._on_task_updated,
-                on_detection_event=self._emit_detection_event,
-            )
-            self._apply_saved_ingestor_preferences(io_id, self._ingestors[io_id])
+            try:
+                self._create_ingestor_for_stream(io_id, stream_info)
+            except ValueError as exc:
+                return {
+                    "status": "error",
+                    "message": str(exc),
+                }
         
         # Create task with sequential ID starting from 0
         task_id = str(self._task_counter)
@@ -375,6 +459,7 @@ class TaskManager:
         
         # Remove from ingestor (stops processing) but keep the Task object
         if io_id in self._ingestors:
+            self._ingestors[io_id].set_keep_alive_without_tasks(self._should_keep_network_camera_warm(io_id))
             self._ingestors[io_id].remove_task(task.task_desc)
         
         # Mark as done
@@ -391,8 +476,14 @@ class TaskManager:
         # Clean up ingestor if no active tasks remain for this io_id
         active_for_io = [t for t in self._tasks.values() if t.io_id == io_id and not t.done]
         if len(active_for_io) == 0 and io_id in self._ingestors:
-            logger.info(f"VideoStreamIngestor for io_id={io_id} has no active tasks. Deleting ingestor.")
-            del self._ingestors[io_id]
+            if self._should_keep_network_camera_warm(io_id):
+                logger.info(
+                    "VideoStreamIngestor for io_id=%s has no active tasks, but the network camera is configured to stay warm.",
+                    io_id,
+                )
+            else:
+                logger.info(f"VideoStreamIngestor for io_id={io_id} has no active tasks. Deleting ingestor.")
+                del self._ingestors[io_id]
         
         return {
             "status": "success",
@@ -420,6 +511,7 @@ class TaskManager:
         
         # Remove task from ingestor
         if io_id in self._ingestors:
+            self._ingestors[io_id].set_keep_alive_without_tasks(self._should_keep_network_camera_warm(io_id))
             self._ingestors[io_id].remove_task(task.task_desc)
         
         # Remove task from manager
@@ -435,9 +527,15 @@ class TaskManager:
         # Check if there are no more tasks for this io_id
         remaining_tasks = [task for task in self._tasks.values() if task.io_id == io_id]
         if len(remaining_tasks) == 0 and io_id in self._ingestors:
-            # Delete the ingestor if no tasks remain
-            logger.info(f"VideoStreamIngestor for io_id={io_id} has no tasks remaining. Deleting ingestor.")
-            del self._ingestors[io_id]
+            if self._should_keep_network_camera_warm(io_id):
+                logger.info(
+                    "VideoStreamIngestor for io_id=%s has no tasks remaining, but the network camera is configured to stay warm.",
+                    io_id,
+                )
+            else:
+                # Delete the ingestor if no tasks remain
+                logger.info(f"VideoStreamIngestor for io_id={io_id} has no tasks remaining. Deleting ingestor.")
+                del self._ingestors[io_id]
         
         return True
     
