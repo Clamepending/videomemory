@@ -50,9 +50,8 @@
   "channels": {
     "telegram": {
       "enabled": true,
-      "botToken": "${TELEGRAM_BOT_TOKEN}",
-      "dmPolicy": "allowlist",
-      "allowFrom": ["${OPENCLAW_TELEGRAM_OWNER_ID}"]
+      "botToken": "8635265893:AAEJD5UXvvUBN4kpnqNiG8Zt5R4E0GEqTD0",
+      "dmPolicy": "pairing"
     }
   },
   "agents": {

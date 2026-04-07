@@ -16,6 +16,10 @@ REPO_REF="${VIDEOMEMORY_REPO_REF:-main}"
 REPO_DIR="${VIDEOMEMORY_REPO_DIR:-$HOME/videomemory}"
 VIDEOMEMORY_BASE="${VIDEOMEMORY_BASE:-http://127.0.0.1:5050}"
 DOCKER_OPENCLAW_BASE="${VIDEOMEMORY_DOCKER_OPENCLAW_BASE:-http://host.docker.internal:5050}"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+STATE_DIR="${VIDEOMEMORY_STATE_DIR:-$STATE_HOME/videomemory}"
+LOG_FILE="$STATE_DIR/server.log"
+PID_FILE="$STATE_DIR/server.pid"
 SKIP_START=0
 SKIP_KEYS=0
 
@@ -70,6 +74,8 @@ EOF
   esac
 done
 
+VENV_PYTHON="$REPO_DIR/.venv/bin/python"
+
 find_bin() {
   for candidate in "$@"; do
     if [ -n "$candidate" ] && [ -x "$candidate" ]; then
@@ -85,11 +91,13 @@ find_bin() {
 }
 
 GIT_BIN="$(find_bin git || true)"
-DOCKER_BIN="$(find_bin docker /Applications/Docker.app/Contents/Resources/bin/docker || true)"
 CURL_BIN="$(find_bin curl || true)"
+PYTHON_BIN="$(find_bin python3 || true)"
+UV_BIN="$(find_bin uv || true)"
 
 [ -n "$CURL_BIN" ] || fail "curl is required"
 [ -n "$GIT_BIN" ] || fail "git is required"
+[ -n "$UV_BIN" ] || [ -n "$PYTHON_BIN" ] || fail "uv or python3 is required to launch VideoMemory without Docker"
 
 ensure_repo() {
   if [ -d "$REPO_DIR/.git" ]; then
@@ -109,6 +117,64 @@ healthcheck() {
   "$CURL_BIN" -fsS "$VIDEOMEMORY_BASE/api/health" >/dev/null 2>&1
 }
 
+pid_is_running() {
+  pid="${1:-}"
+  [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1
+}
+
+prepare_runtime() {
+  mkdir -p "$STATE_DIR"
+
+  if [ -n "$UV_BIN" ]; then
+    log "Preparing Python environment with uv"
+    (
+      cd "$REPO_DIR"
+      "$UV_BIN" sync >>"$LOG_FILE" 2>&1
+    ) || fail "uv sync failed; check $LOG_FILE"
+    return 0
+  fi
+
+  [ -n "$PYTHON_BIN" ] || fail "python3 is required when uv is not installed"
+
+  if [ ! -x "$VENV_PYTHON" ]; then
+    log "Creating Python virtual environment at $REPO_DIR/.venv"
+    "$PYTHON_BIN" -m venv "$REPO_DIR/.venv" >>"$LOG_FILE" 2>&1 || fail "python3 -m venv failed; check $LOG_FILE"
+  fi
+
+  log "Installing VideoMemory dependencies into $REPO_DIR/.venv"
+  "$VENV_PYTHON" -m pip install --upgrade pip >>"$LOG_FILE" 2>&1 || fail "pip upgrade failed; check $LOG_FILE"
+  "$VENV_PYTHON" -m pip install -e "$REPO_DIR" >>"$LOG_FILE" 2>&1 || fail "dependency install failed; check $LOG_FILE"
+}
+
+start_local_videomemory() {
+  mkdir -p "$STATE_DIR"
+
+  if [ -f "$PID_FILE" ]; then
+    existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if pid_is_running "$existing_pid"; then
+      log "VideoMemory process already running with pid $existing_pid"
+      return 0
+    fi
+    rm -f "$PID_FILE"
+  fi
+
+  log "Launching VideoMemory directly on the host"
+
+  if [ -n "$UV_BIN" ]; then
+    (
+      cd "$REPO_DIR"
+      nohup "$UV_BIN" run flask_app/app.py >>"$LOG_FILE" 2>&1 &
+      echo $! >"$PID_FILE"
+    )
+  else
+    (
+      cd "$REPO_DIR"
+      nohup "$VENV_PYTHON" flask_app/app.py >>"$LOG_FILE" 2>&1 &
+      echo $! >"$PID_FILE"
+    )
+  fi
+}
+
 start_videomemory_if_needed() {
   if healthcheck; then
     log "VideoMemory already reachable at $VIDEOMEMORY_BASE"
@@ -119,13 +185,8 @@ start_videomemory_if_needed() {
     fail "VideoMemory is not reachable at $VIDEOMEMORY_BASE and --skip-start was set"
   fi
 
-  [ -n "$DOCKER_BIN" ] || fail "docker is required to launch VideoMemory automatically"
-
-  COMPOSE_FILE="$REPO_DIR/docker-compose.core.yml"
-  [ -f "$COMPOSE_FILE" ] || fail "Missing compose file: $COMPOSE_FILE"
-
-  log "Launching VideoMemory with docker compose"
-  "$DOCKER_BIN" compose -f "$COMPOSE_FILE" up -d --build >/dev/null
+  prepare_runtime
+  start_local_videomemory
 
   log "Waiting for VideoMemory health at $VIDEOMEMORY_BASE"
   i=0
@@ -134,11 +195,15 @@ start_videomemory_if_needed() {
       log "VideoMemory is healthy"
       return 0
     fi
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [ -n "$pid" ] && ! pid_is_running "$pid"; then
+      fail "VideoMemory exited before becoming healthy; check $LOG_FILE"
+    fi
     i=$((i + 1))
     sleep 2
   done
 
-  fail "VideoMemory did not become healthy at $VIDEOMEMORY_BASE"
+  fail "VideoMemory did not become healthy at $VIDEOMEMORY_BASE; check $LOG_FILE"
 }
 
 sync_model_keys() {
@@ -166,4 +231,5 @@ sync_model_keys
 log "Install complete"
 log "Repo dir: $REPO_DIR"
 log "VideoMemory UI: $VIDEOMEMORY_BASE/devices"
+log "VideoMemory log: $LOG_FILE"
 log "Docker OpenClaw prompt: Please install and onboard VideoMemory by running VIDEOMEMORY_BASE=$DOCKER_OPENCLAW_BASE bash <(curl -fsSL $DOCKER_OPENCLAW_BASE/openclaw/bootstrap.sh). Then use VideoMemory from $DOCKER_OPENCLAW_BASE/openclaw/skill.md and use the videomemory task helper for any 'when X happens, do Y' request."

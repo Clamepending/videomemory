@@ -35,12 +35,14 @@ This starts VideoMemory for local development. Open http://localhost:5050. Set y
 
 ## I already have OpenClaw on a VM, server, or computer
 
-1. [Install Openclaw](https://docs.openclaw.ai/install)
+1. [Install OpenClaw](https://docs.openclaw.ai/install)
+
+This path now starts VideoMemory directly on that machine with `uv` or `python3`. It does not use Docker.
 
 Send this message to OpenClaw:
 
 ```text
-Please Run this and onboard: bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
+Please run this to install and onboard VideoMemory locally: bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
 ```
 After that, your OpenClaw should be able to:
 - create/list/edit/stop/delete VideoMemory tasks
@@ -56,6 +58,8 @@ Install Tailscale to stream video to videomemory over the android app.
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/install-videomemory.sh)
 ```
+
+That script launches VideoMemory directly on the host machine and leaves Docker out of the host-side install.
 
 2. Send this message to OpenClaw:
 

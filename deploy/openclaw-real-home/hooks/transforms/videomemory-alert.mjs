@@ -152,18 +152,26 @@ function buildRegistryDrivenMessage(payload, entry) {
   const note = cleanText(payload?.note) || "VideoMemory reported an update.";
   const ioId = cleanText(payload?.io_id) || "unknown device";
   const taskId = cleanText(payload?.task_id) || "unknown";
+  const actionNeedsFreshLookup = /\b(search|web search|look up|lookup|find|fetch|check|inspect|get the latest|current|today|now|price|weather|news|headline|first result|top result)\b/i.test(
+    actionInstruction,
+  );
 
   return [
     "A VideoMemory trigger evaluation is requested.",
-    `Original request: ${originalRequest}`,
+    `Original request context: ${originalRequest}`,
     `Trigger condition: ${triggerCondition}`,
-    `Requested action if the trigger happened now: ${actionInstruction}`,
+    `Authoritative requested action if the trigger happened now: ${actionInstruction}`,
     `Observation: ${note}`,
     `Device: ${ioId}`,
     `Task ID: ${taskId}`,
+    "If the authoritative requested action differs from the original request context, follow the authoritative requested action.",
+    "You may use tools if needed to perform the requested action right now.",
+    actionNeedsFreshLookup
+      ? "This requested action appears to require a fresh lookup. Use tools now instead of relying on any earlier or stale setup-time result."
+      : "If the requested action already contains specific facts or wording to relay, include those details instead of replacing them with a generic alert.",
     "Reply with exactly NO_REPLY if the observation does not show the trigger condition happening now.",
     "Ignore unrelated scene details or correction-only notes that do not affect the trigger condition.",
-    "If the trigger condition is satisfied now, reply with exactly one concise user-facing sentence that performs the requested action.",
+    "If the trigger condition is satisfied now, complete the requested action for the user. Keep it brief, but do not omit required details. One or two sentences is fine if needed.",
   ].join("\n");
 }
 

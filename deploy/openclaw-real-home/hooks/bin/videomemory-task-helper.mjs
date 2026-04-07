@@ -303,6 +303,21 @@ function removeEntry(registry, taskId) {
   return null;
 }
 
+function buildOriginalRequestContext(trigger, action, explicitOriginalRequest, previousEntry) {
+  const explicit = cleanText(explicitOriginalRequest);
+  if (explicit) {
+    return explicit;
+  }
+
+  const normalizedTrigger = cleanText(trigger);
+  const normalizedAction = cleanText(action);
+  if (normalizedTrigger && normalizedAction) {
+    return `Trigger condition: ${normalizedTrigger}\nFollow-up action: ${normalizedAction}`;
+  }
+
+  return cleanText(previousEntry?.original_request) || normalizedTrigger;
+}
+
 async function createTask(options) {
   const ioId = requireOption(options, "io-id");
   const trigger = requireOption(options, "trigger");
@@ -336,7 +351,7 @@ async function createTask(options) {
     delivery_sender_id: delivery.senderId,
     delivery_target: delivery.target,
     delivery_session_key: delivery.sessionKey,
-    original_request: originalRequest || trigger,
+    original_request: buildOriginalRequestContext(trigger, action, originalRequest),
     created_at: now,
     updated_at: now,
   };
@@ -384,7 +399,7 @@ async function updateTask(options) {
     delivery_sender_id: delivery.senderId,
     delivery_target: delivery.target,
     delivery_session_key: delivery.sessionKey,
-    original_request: originalRequest || cleanText(previousEntry?.original_request) || trigger,
+    original_request: buildOriginalRequestContext(trigger, action, originalRequest, previousEntry),
     created_at: cleanText(previousEntry?.created_at) || now,
     updated_at: now,
   };

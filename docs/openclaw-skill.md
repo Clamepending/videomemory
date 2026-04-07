@@ -35,7 +35,7 @@ curl -fsSL http://host.docker.internal:5050/openclaw/skill.md
 
 ## One-shot bootstrap
 
-If OpenClaw's `exec` environment has `git`, `node`, and Docker access, it can bootstrap VideoMemory and the integration in one shell step:
+If OpenClaw's `exec` environment has `git` plus either `uv` or `python3`, it can bootstrap VideoMemory and the integration in one shell step:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
@@ -57,7 +57,7 @@ bash docs/openclaw-bootstrap.sh
 
 What this bootstrap does:
 - clones or reuses the VideoMemory repo
-- launches `docker-compose.core.yml` if VideoMemory is not already reachable
+- launches VideoMemory locally with `uv` or a Python virtualenv if it is not already reachable
 - installs the OpenClaw helper, hook transform, and local skill
 - merges the VideoMemory webhook mapping into `~/.openclaw/openclaw.json`
 - copies any model API keys present in the shell environment into VideoMemory settings
@@ -72,6 +72,10 @@ curl -fsSL http://videomemory:5050/openclaw/videomemory-task-helper.mjs \
 
 The helper auto-detects the reachable VideoMemory base URL across `videomemory`, `host.docker.internal`, `127.0.0.1`, and `localhost`. You can still force a base URL with `--base-url ...` if needed.
 
+If the follow-up action should happen later when the trigger fires and it depends on fresh information or tools, keep that as a future instruction in `--action`.
+Examples: web search, current weather, latest prices, reading a file, or checking a live status.
+Do not precompute those results during setup unless the user explicitly asked for a snapshot taken now.
+
 ## Ground rules
 
 - Prefer the container-internal base URL when OpenClaw is running in Docker.
@@ -82,7 +86,7 @@ The helper auto-detects the reachable VideoMemory base URL across `videomemory`,
 - When the user explicitly wants a task erased, call `DELETE /api/task/{task_id}`.
 - If there is exactly one available camera, use it unless the user asked for a different one.
 - Do not put follow-up actions like jokes, Telegram sends, or texting instructions directly into VideoMemory's `task_description` when OpenClaw should perform that action later.
-- If Docker is unavailable in the OpenClaw execution environment, the bootstrap can still install the integration pieces, but it cannot launch a new VideoMemory container by itself.
+- The bootstrap does not require Docker. It prefers a direct local launch on the same machine as OpenClaw.
 - On Linux, `host.docker.internal` may require the OpenClaw container to be started with `--add-host=host.docker.internal:host-gateway`.
 
 ## Basic checks
@@ -201,7 +205,8 @@ node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs update \
   --task-id 0 \
   --trigger 'Watch for a backpack in the frame. Add a note only when a backpack appears, disappears, or the visible backpack count changes.' \
   --action 'Tell one short backpack joke when a backpack is newly visible.' \
-  --delivery telegram
+  --delivery telegram \
+  --original-request 'When you see a backpack in the frame, tell a backpack joke.'
 ```
 
 Stop a task but keep history:
@@ -239,6 +244,17 @@ curl -fsSL -X PUT http://videomemory:5050/api/settings/VIDEO_INGESTOR_MODEL \
   -H 'Content-Type: application/json' \
   -d '{"value":"claude-sonnet-4-6"}'
 ```
+
+## Task phrasing tips
+
+- Never put follow-up actions like `tell a joke`, `search the web`, or `send Telegram` directly into the raw VideoMemory monitoring description when OpenClaw should do that later.
+- Split the request into:
+  - Trigger for VideoMemory: `Watch for a backpack in the frame. Add a note only when a backpack appears, disappears, or the visible backpack count changes.`
+  - Action for OpenClaw: `Tell one short backpack joke when a backpack is newly visible.`
+- If the follow-up action needs fresh data or tools at trigger time, store that future work directly in `--action`.
+  - Good: `--action 'When a glass of water is visible, search the web for "hello" and tell the user the first result.'`
+  - Avoid: searching now during setup and baking a stale result into the task unless the user explicitly asked for the result as of setup time.
+- When updating an existing watcher, always pass the full new user intent through `--original-request` if the follow-up action changed. This keeps stale earlier phrasing from biasing the later hook execution.
 
 ## Webhook behavior
 
