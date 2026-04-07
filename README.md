@@ -35,6 +35,8 @@ This starts VideoMemory for local development. Open http://localhost:5050. Set y
 
 ## I already have OpenClaw on a VM, server, or computer
 
+1. [Install Openclaw](https://docs.openclaw.ai/install)
+
 Send this message to OpenClaw:
 
 ```text
