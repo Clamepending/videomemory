@@ -53,6 +53,25 @@ setup_logging()
 
 app = Flask(__name__)
 
+
+def _apply_no_store_headers(response: Response) -> Response:
+    """Prevent browsers from caching live debug UI pages and payloads."""
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+@app.after_request
+def add_no_store_headers_for_debug_routes(response: Response) -> Response:
+    """Ensure the debug UI and its polling APIs always reflect the current deploy."""
+    path = request.path or ""
+    if (path.startswith("/device/") and path.endswith("/debug")) or (
+        path.startswith("/api/device/") and "/debug/" in path
+    ):
+        return _apply_no_store_headers(response)
+    return response
+
 # ── Database setup ────────────────────────────────────────────
 data_dir = get_default_data_dir()
 data_dir.mkdir(parents=True, exist_ok=True)

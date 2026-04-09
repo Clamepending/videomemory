@@ -161,6 +161,24 @@ class IngestorDebugApiTests(unittest.TestCase):
         html = resp.get_data(as_text=True)
         self.assertNotIn("??", html)
 
+    def test_debug_routes_disable_browser_caching(self):
+        html_resp = self.client.get("/device/net0/debug")
+        self.assertEqual(html_resp.status_code, 200)
+        self.assertEqual(html_resp.headers.get("Cache-Control"), "no-cache, no-store, must-revalidate")
+        self.assertEqual(html_resp.headers.get("Pragma"), "no-cache")
+        self.assertEqual(html_resp.headers.get("Expires"), "0")
+
+        with (
+            patch.object(app_module.task_manager, "has_ingestor", return_value=False),
+            patch.object(app_module.task_manager, "get_ingestor", return_value=None),
+        ):
+            api_resp = self.client.get("/api/device/net0/debug/status")
+
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertEqual(api_resp.headers.get("Cache-Control"), "no-cache, no-store, must-revalidate")
+        self.assertEqual(api_resp.headers.get("Pragma"), "no-cache")
+        self.assertEqual(api_resp.headers.get("Expires"), "0")
+
     def test_debug_page_inline_scripts_are_valid_javascript(self):
         if shutil.which("node") is None:
             self.skipTest("node is required for JS syntax validation")

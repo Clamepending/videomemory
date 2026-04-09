@@ -297,9 +297,14 @@
         const IO_ID = '{{ io_id }}';
         let deviceName = IO_ID;
 
+        function fetchNoStore(url, options) {
+            const mergedOptions = Object.assign({ cache: 'no-store' }, options || {});
+            return fetch(url, mergedOptions);
+        }
+
         async function fetchDeviceName() {
             try {
-                const resp = await fetch('/api/devices');
+                const resp = await fetchNoStore('/api/devices');
                 const data = await resp.json();
                 const devices = data.devices || {};
                 for (const category of Object.values(devices)) {
@@ -334,7 +339,7 @@
 
         async function checkStatus() {
             try {
-                const resp = await fetch(`/api/device/${IO_ID}/debug/status`);
+                const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/status`);
                 const data = await resp.json();
                 const badge = document.getElementById('statusBadge');
                 if (data.running) {
@@ -414,7 +419,7 @@
 
         async function updateFrame() {
             try {
-                const resp = await fetch(`/api/device/${IO_ID}/debug/frame-and-prompt`);
+                const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/frame-and-prompt`);
                 const data = await resp.json();
                 const img = document.getElementById('currentFrame');
                 const ts = document.getElementById('frameTimestamp');
@@ -470,7 +475,7 @@
 
         async function loadFrameSkipThreshold() {
             try {
-                const resp = await fetch(`/api/device/${IO_ID}/debug/frame-skip-threshold`);
+                const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/frame-skip-threshold`);
                 const data = await resp.json();
                 if (!resp.ok) {
                     setFrameSkipThresholdUi(3.0, data.error || 'Failed to load threshold');
@@ -493,7 +498,7 @@
             if (frameSkipSaveInFlight) return;
             frameSkipSaveInFlight = true;
             try {
-                const resp = await fetch(`/api/device/${IO_ID}/debug/frame-skip-threshold`, {
+                const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/frame-skip-threshold`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ value: Number(value) }),
@@ -539,7 +544,7 @@
 
         async function updateTasks() {
             try {
-                const resp = await fetch(`/api/device/${IO_ID}/debug/tasks`);
+                const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/tasks`);
                 const data = await resp.json();
                 const container = document.getElementById('tasksList');
                 if (!container) return;
@@ -571,7 +576,7 @@
 
         async function updateHistory() {
             try {
-                const resp = await fetch(`/api/device/${IO_ID}/debug/history`);
+                const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/history`);
                 const data = await resp.json();
                 const container = document.getElementById('historyList');
                 const countSpan = document.getElementById('historyCount');
