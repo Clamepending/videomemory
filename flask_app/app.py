@@ -1098,10 +1098,9 @@ def get_ingestor_tasks(io_id):
     """Get tasks from a device's ingestor."""
     try:
         ingestor = task_manager.get_ingestor(io_id)
-        if ingestor is None:
-            return jsonify({'tasks': []}), 200
-        
-        tasks = ingestor.get_tasks_list()
+        tasks = ingestor.get_tasks_list() if ingestor is not None else []
+        if not tasks:
+            tasks = task_manager.get_task_objects(io_id)
         tasks_data = []
         for task in tasks:
             task_dict = {

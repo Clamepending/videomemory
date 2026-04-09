@@ -129,6 +129,35 @@ class IngestorDebugApiTests(unittest.TestCase):
         self.assertEqual(data["dedup_status"]["consecutive_skips"], 4)
         self.assertIn("count desk items", data["prompt"])
 
+    def test_debug_tasks_endpoint_falls_back_to_task_manager_when_ingestor_has_no_tasks(self):
+        task = Task(
+            task_number=0,
+            task_id="1",
+            task_desc="count desk items",
+            task_note=[NoteEntry(content="Desk unchanged", timestamp=1712609854.0)],
+            done=False,
+            io_id="net0",
+        )
+        ingestor = SimpleNamespace(get_tasks_list=lambda: [])
+
+        with (
+            patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor),
+            patch.object(app_module.task_manager, "get_task_objects", return_value=[task]),
+        ):
+            resp = self.client.get("/api/device/net0/debug/tasks")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(len(data["tasks"]), 1)
+        self.assertEqual(data["tasks"][0]["task_desc"], "count desk items")
+        self.assertEqual(data["tasks"][0]["latest_note"]["content"], "Desk unchanged")
+
+    def test_debug_page_template_avoids_nullish_coalescing_for_browser_compatibility(self):
+        resp = self.client.get("/device/net0/debug")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+        self.assertNotIn("??", html)
+
 
 if __name__ == "__main__":
     unittest.main()

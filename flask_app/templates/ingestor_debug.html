@@ -313,6 +313,16 @@
             return div.innerHTML;
         }
 
+        function firstDefined() {
+            for (let i = 0; i < arguments.length; i += 1) {
+                const value = arguments[i];
+                if (value !== null && value !== undefined) {
+                    return value;
+                }
+            }
+            return undefined;
+        }
+
         async function checkStatus() {
             try {
                 const resp = await fetch(`/api/device/${IO_ID}/debug/status`);
@@ -412,7 +422,11 @@
                 const dedupBadge = document.getElementById('frameDedupBadge');
                 if (dedupBadge && data.dedup_status && data.dedup_status.consecutive_skips > 0) {
                     dedupBadge.style.display = 'inline-block';
-                    const threshold = Number(data.dedup_status.average_pixel_diff_threshold ?? data.dedup_status.frame_diff_threshold ?? 0).toFixed(1);
+                    const threshold = Number(firstDefined(
+                        data.dedup_status.average_pixel_diff_threshold,
+                        data.dedup_status.frame_diff_threshold,
+                        0
+                    )).toFixed(1);
                     dedupBadge.textContent = `Scene unchanged — skipping analysis (${data.dedup_status.consecutive_skips} frames skipped, threshold ${threshold} avg pixel diff). No new outputs until the scene changes.`;
                 } else if (dedupBadge) {
                     dedupBadge.style.display = 'none';
@@ -456,7 +470,7 @@
                 const sourceLabel = data.source === 'active_ingestor'
                     ? 'Applied to the running ingestor'
                     : (data.source === 'database' ? 'Saved for the next ingestor start' : 'Using the default average pixel-diff threshold');
-                setFrameSkipThresholdUi(data.average_pixel_diff_threshold ?? data.frame_diff_threshold, sourceLabel);
+                setFrameSkipThresholdUi(firstDefined(data.average_pixel_diff_threshold, data.frame_diff_threshold), sourceLabel);
             } catch (e) {
                 console.error('Error loading frame skip threshold:', e);
                 setFrameSkipThresholdUi(3.0, 'Failed to load threshold');
@@ -483,7 +497,7 @@
                 const sourceLabel = data.has_ingestor
                     ? 'Applied live to the running ingestor'
                     : 'Saved for the next ingestor start';
-                setFrameSkipThresholdUi(data.average_pixel_diff_threshold ?? data.frame_diff_threshold, sourceLabel);
+                setFrameSkipThresholdUi(firstDefined(data.average_pixel_diff_threshold, data.frame_diff_threshold), sourceLabel);
             } catch (e) {
                 console.error('Error saving frame skip threshold:', e);
                 setFrameSkipThresholdUi(value, 'Failed to save threshold');
@@ -529,8 +543,9 @@
                 let html = '';
                 tasks.forEach(task => {
                     const doneClass = task.done ? ' done' : '';
+                    const taskLabel = firstDefined(task.task_number, task.task_id);
                     html += `<div class="task-item${doneClass}">`;
-                    html += `<strong>Task ${escapeHtml(String(task.task_number ?? task.task_id))}:</strong> ${escapeHtml(task.task_desc)}`;
+                    html += `<strong>Task ${escapeHtml(String(taskLabel))}:</strong> ${escapeHtml(task.task_desc)}`;
                     html += `<span class="task-done-badge">(${task.done ? 'Done' : 'Active'})</span>`;
                     if (task.latest_note) {
                         html += `<div class="task-note">${escapeHtml(task.latest_note.content)} <span class="note-ts">(${task.latest_note.timestamp || ''})</span></div>`;
