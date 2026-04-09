@@ -6,7 +6,25 @@ You or your agent creates a **tasks** describing what to watch for, and the syst
 
 ## Quick Start
 
-To launch both OpenClaw and VideoMemory in containers, use:
+### I want OpenClaw + VIdeomemory on a VM, raspberry pi, or computer
+
+1. [Install OpenClaw](https://docs.openclaw.ai/install)
+
+This path now starts VideoMemory directly on that machine with `uv` or `python3`. It does not use Docker.
+
+Send this message to OpenClaw:
+
+```text
+Please run this to install and onboard VideoMemory locally: bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
+```
+After that, your OpenClaw should be able to:
+- create/list/edit/stop/delete VideoMemory tasks
+- answer one-off camera questions like `what do you see on camera?`
+- Monitor cameras like `when X happens in camera Y, do Z`
+Hint: You can set up telegram in openclaw.
+Install Tailscale to stream video to videomemory over the android app.
+
+### I want to launch both OpenClaw and VideoMemory in containers (useful for local development)
 ```bash
 ANTHROPIC_API_KEY=<YOUR ANTHROPIC API KEY> \
 OPENCLAW_GATEWAY_TOKEN=chooseyourowntoken \
@@ -33,25 +51,7 @@ To launch just Videomemory (no openclaw)
 ```
 This starts VideoMemory for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
 
-## I already have OpenClaw on a VM, server, or computer
-
-1. [Install OpenClaw](https://docs.openclaw.ai/install)
-
-This path now starts VideoMemory directly on that machine with `uv` or `python3`. It does not use Docker.
-
-Send this message to OpenClaw:
-
-```text
-Please run this to install and onboard VideoMemory locally: bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
-```
-After that, your OpenClaw should be able to:
-- create/list/edit/stop/delete VideoMemory tasks
-- answer one-off camera questions like `what do you see on camera?`
-- Monitor cameras like `when X happens in camera Y, do Z`
-Hint: You can set up telegram in openclaw.
-Install Tailscale to stream video to videomemory over the android app.
-
-## I already have OpenClaw in a container
+### I already have OpenClaw in a container
 
 1. Start VideoMemory on the host:
 
