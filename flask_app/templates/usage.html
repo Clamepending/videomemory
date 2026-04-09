@@ -1,0 +1,884 @@
+{% extends "base.html" %}
+{% block title %}Usage - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .usage-page {
+        width: min(1320px, calc(100vw - 40px));
+        padding: 28px 24px 40px;
+        display: grid;
+        gap: 20px;
+    }
+
+    .usage-hero,
+    .usage-panel,
+    .summary-card {
+        background: linear-gradient(180deg, rgba(45,45,45,0.98), rgba(34,34,34,0.98));
+        border: 1px solid #3f3f3f;
+        border-radius: 18px;
+        box-shadow: 0 18px 48px rgba(0,0,0,0.24);
+    }
+
+    .usage-hero {
+        padding: 26px 28px;
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        align-items: flex-start;
+        background:
+            radial-gradient(circle at top right, rgba(25,195,125,0.18), transparent 34%),
+            linear-gradient(180deg, rgba(45,45,45,0.98), rgba(34,34,34,0.98));
+    }
+
+    .usage-hero h2 {
+        font-size: 30px;
+        font-weight: 650;
+        margin-bottom: 8px;
+        color: #f5f7f7;
+    }
+
+    .usage-hero p {
+        color: #b8c1c1;
+        line-height: 1.5;
+        max-width: 760px;
+    }
+
+    .usage-note {
+        font-size: 13px;
+        color: #89d9b3;
+        padding: 10px 12px;
+        background: rgba(25,195,125,0.10);
+        border: 1px solid rgba(25,195,125,0.22);
+        border-radius: 12px;
+        min-width: 250px;
+    }
+
+    .usage-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .control-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .segmented-control {
+        display: inline-flex;
+        gap: 6px;
+        padding: 6px;
+        background: #252525;
+        border: 1px solid #3a3a3a;
+        border-radius: 14px;
+    }
+
+    .segmented-control button,
+    .action-button {
+        border: 0;
+        border-radius: 10px;
+        padding: 9px 14px;
+        background: transparent;
+        color: #cfd4d4;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+    }
+
+    .segmented-control button:hover,
+    .action-button:hover {
+        background: #383838;
+        color: #ffffff;
+    }
+
+    .segmented-control button.active {
+        background: #19c37d;
+        color: #082814;
+        font-weight: 700;
+    }
+
+    .action-button {
+        background: #2a2a2a;
+        border: 1px solid #404040;
+    }
+
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+    }
+
+    .summary-card {
+        padding: 18px 18px 16px;
+        min-height: 120px;
+    }
+
+    .summary-label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #8f9898;
+        margin-bottom: 16px;
+    }
+
+    .summary-value {
+        font-size: 34px;
+        font-weight: 700;
+        color: #f5f7f7;
+        line-height: 1;
+        margin-bottom: 10px;
+    }
+
+    .summary-meta {
+        color: #a8b0b0;
+        font-size: 13px;
+        line-height: 1.45;
+    }
+
+    .usage-main-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.85fr);
+        gap: 20px;
+        align-items: start;
+    }
+
+    .usage-panel {
+        padding: 20px 20px 18px;
+    }
+
+    .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+
+    .panel-header h3 {
+        font-size: 20px;
+        font-weight: 600;
+        color: #f2f4f4;
+        margin-bottom: 4px;
+    }
+
+    .panel-header p {
+        color: #9ca5a5;
+        font-size: 14px;
+        line-height: 1.45;
+    }
+
+    .chart-shell {
+        background: linear-gradient(180deg, rgba(22,22,22,0.94), rgba(18,18,18,0.94));
+        border: 1px solid #323232;
+        border-radius: 16px;
+        padding: 14px;
+    }
+
+    .chart-wrap {
+        width: 100%;
+        min-height: 380px;
+        position: relative;
+    }
+
+    .chart-empty {
+        min-height: 320px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #8d9595;
+        font-size: 15px;
+        border: 1px dashed #3a3a3a;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.01);
+    }
+
+    .chart-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 14px;
+        margin-top: 16px;
+    }
+
+    .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.06);
+        color: #d4d9d9;
+        font-size: 13px;
+    }
+
+    .legend-swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        flex: 0 0 auto;
+    }
+
+    .coverage-list,
+    .model-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .coverage-item,
+    .model-row {
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: #232323;
+        border: 1px solid #343434;
+    }
+
+    .coverage-item {
+        color: #d6dcdc;
+        font-size: 13px;
+        line-height: 1.45;
+    }
+
+    .model-row {
+        display: grid;
+        gap: 8px;
+    }
+
+    .model-topline {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+    }
+
+    .model-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: #eef1f1;
+        font-weight: 600;
+        font-size: 14px;
+    }
+
+    .model-metric {
+        color: #d6dcdc;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .model-subline {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        color: #95a0a0;
+        font-size: 12px;
+    }
+
+    .usage-table-wrap {
+        overflow: auto;
+        border-radius: 16px;
+        border: 1px solid #323232;
+        background: rgba(16,16,16,0.86);
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 860px;
+    }
+
+    thead th {
+        text-align: left;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #8f9898;
+        padding: 14px 16px;
+        border-bottom: 1px solid #303030;
+        background: rgba(255,255,255,0.02);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    tbody td {
+        padding: 14px 16px;
+        border-bottom: 1px solid #272727;
+        color: #dfe4e4;
+        font-size: 14px;
+        white-space: nowrap;
+    }
+
+    tbody tr:hover {
+        background: rgba(255,255,255,0.02);
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .status-pill.ok {
+        background: rgba(25,195,125,0.13);
+        color: #8ff0b8;
+        border: 1px solid rgba(25,195,125,0.22);
+    }
+
+    .status-pill.failed {
+        background: rgba(255,99,99,0.12);
+        color: #ffb3b3;
+        border: 1px solid rgba(255,99,99,0.18);
+    }
+
+    .loading-state,
+    .error-state {
+        padding: 18px;
+        border-radius: 14px;
+        font-size: 14px;
+    }
+
+    .loading-state {
+        color: #d7dddd;
+        background: rgba(255,255,255,0.04);
+    }
+
+    .error-state {
+        color: #ffb9b9;
+        background: rgba(255,99,99,0.10);
+        border: 1px solid rgba(255,99,99,0.18);
+    }
+
+    @media (max-width: 1120px) {
+        .summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .usage-main-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 720px) {
+        .usage-page {
+            width: min(100vw, calc(100vw - 16px));
+            padding: 16px 8px 28px;
+        }
+
+        .usage-hero {
+            padding: 20px 18px;
+            flex-direction: column;
+        }
+
+        .summary-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .summary-value {
+            font-size: 28px;
+        }
+
+        .panel-header {
+            flex-direction: column;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="usage-page">
+    <section class="usage-hero">
+        <div>
+            <h2>Usage</h2>
+            <p>Track how often VideoMemory calls your vision model, how many tokens those calls use, and the estimated spend over the last day, week, or month.</p>
+        </div>
+        <div class="usage-note">
+            Spend is estimated from published token pricing when a model has known rates. Self-hosted models and unknown-priced models are still counted in call totals.
+        </div>
+    </section>
+
+    <section class="usage-controls">
+        <div class="control-row">
+            <div class="segmented-control" id="rangeControl">
+                <button type="button" data-range="day">1d</button>
+                <button type="button" data-range="week">7d</button>
+                <button type="button" data-range="month" class="active">30d</button>
+            </div>
+            <div class="segmented-control" id="metricControl">
+                <button type="button" data-metric="calls" class="active">Calls</button>
+                <button type="button" data-metric="input_tokens">Input Tokens</button>
+                <button type="button" data-metric="output_tokens">Output Tokens</button>
+                <button type="button" data-metric="estimated_cost_usd">Spend</button>
+            </div>
+        </div>
+        <button type="button" class="action-button" id="exportButton">Export CSV</button>
+    </section>
+
+    <section class="summary-grid" id="summaryGrid">
+        <div class="summary-card"><div class="loading-state">Loading usage summary…</div></div>
+    </section>
+
+    <section class="usage-main-grid">
+        <div class="usage-panel">
+            <div class="panel-header">
+                <div>
+                    <h3>Usage Over Time</h3>
+                    <p id="chartSubtitle">Loading usage history…</p>
+                </div>
+            </div>
+            <div class="chart-shell">
+                <div class="chart-wrap" id="chartWrap">
+                    <div class="loading-state">Loading chart…</div>
+                </div>
+                <div class="chart-legend" id="chartLegend"></div>
+            </div>
+        </div>
+
+        <div class="usage-panel">
+            <div class="panel-header">
+                <div>
+                    <h3>Breakdown</h3>
+                    <p>See which models are responsible for the most calls, tokens, or spend in the selected range.</p>
+                </div>
+            </div>
+            <div class="coverage-list" id="coverageNotes"></div>
+            <div class="model-list" id="modelBreakdown">
+                <div class="loading-state">Loading model breakdown…</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="usage-panel">
+        <div class="panel-header">
+            <div>
+                <h3>Recent Calls</h3>
+                <p>Raw model invocations, including one-off camera questions and background task monitoring.</p>
+            </div>
+        </div>
+        <div class="usage-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Source</th>
+                        <th>Status</th>
+                        <th>Model</th>
+                        <th>Input</th>
+                        <th>Output</th>
+                        <th>Total</th>
+                        <th>Cost</th>
+                    </tr>
+                </thead>
+                <tbody id="recentUsageBody">
+                    <tr><td colspan="8"><div class="loading-state">Loading recent usage…</div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const state = {
+        range: 'month',
+        metric: 'calls',
+        payload: null,
+    };
+
+    const CHART_COLORS = [
+        '#19c37d',
+        '#70a9ff',
+        '#ffd166',
+        '#f78fb3',
+        '#8bd3dd',
+        '#ff9f68',
+        '#b9f18c',
+    ];
+
+    document.getElementById('rangeControl').addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-range]');
+        if (!button) return;
+        state.range = button.dataset.range;
+        updateSegmentedControl('rangeControl', 'range', state.range);
+        loadUsage();
+    });
+
+    document.getElementById('metricControl').addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-metric]');
+        if (!button) return;
+        state.metric = button.dataset.metric;
+        updateSegmentedControl('metricControl', 'metric', state.metric);
+        renderPayload();
+    });
+
+    document.getElementById('exportButton').addEventListener('click', () => {
+        window.location.href = `/api/usage/export.csv?range=${encodeURIComponent(state.range)}`;
+    });
+
+    function updateSegmentedControl(containerId, dataKey, activeValue) {
+        document.querySelectorAll(`#${containerId} button[data-${dataKey}]`).forEach((button) => {
+            button.classList.toggle('active', button.dataset[dataKey] === activeValue);
+        });
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    }
+
+    function formatInteger(value) {
+        return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Number(value || 0));
+    }
+
+    function formatMetric(metric, value) {
+        const numeric = Number(value || 0);
+        if (metric === 'estimated_cost_usd') {
+            let minimumFractionDigits = 2;
+            let maximumFractionDigits = 2;
+            if (numeric > 0 && numeric < 0.01) {
+                minimumFractionDigits = 6;
+                maximumFractionDigits = 6;
+            } else if (numeric > 0 && numeric < 1) {
+                minimumFractionDigits = 4;
+                maximumFractionDigits = 4;
+            }
+            return new Intl.NumberFormat(undefined, {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits,
+                maximumFractionDigits,
+            }).format(numeric);
+        }
+        if (numeric >= 1_000_000) {
+            return `${(numeric / 1_000_000).toFixed(numeric >= 10_000_000 ? 0 : 1)}M`;
+        }
+        if (numeric >= 1_000) {
+            return `${(numeric / 1_000).toFixed(numeric >= 10_000 ? 0 : 1)}K`;
+        }
+        return formatInteger(numeric);
+    }
+
+    function formatSource(value) {
+        if (value === 'task_ingestor') return 'Monitoring task';
+        if (value === 'caption_frame') return 'One-off question';
+        return value || 'Unknown';
+    }
+
+    function formatTimestamp(value) {
+        const date = new Date(Number(value || 0) * 1000);
+        return date.toLocaleString([], {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }
+
+    function metricLabel(metric) {
+        switch (metric) {
+            case 'input_tokens': return 'input tokens';
+            case 'output_tokens': return 'output tokens';
+            case 'estimated_cost_usd': return 'estimated spend';
+            default: return 'calls';
+        }
+    }
+
+    async function loadUsage() {
+        document.getElementById('chartSubtitle').textContent = 'Loading usage history…';
+        try {
+            const response = await fetch(`/api/usage?range=${encodeURIComponent(state.range)}`);
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.error || 'Failed to load usage');
+            }
+            state.payload = payload;
+            renderPayload();
+        } catch (error) {
+            renderError(error);
+        }
+    }
+
+    function renderPayload() {
+        if (!state.payload) return;
+        renderSummary(state.payload.summary);
+        renderChart(state.payload);
+        renderBreakdown(state.payload);
+        renderRecentEvents(state.payload.recent_events || []);
+    }
+
+    function renderError(error) {
+        const message = escapeHtml(error?.message || 'Failed to load usage');
+        document.getElementById('summaryGrid').innerHTML = `<div class="summary-card"><div class="error-state">${message}</div></div>`;
+        document.getElementById('chartWrap').innerHTML = `<div class="error-state">${message}</div>`;
+        document.getElementById('chartLegend').innerHTML = '';
+        document.getElementById('coverageNotes').innerHTML = `<div class="coverage-item">${message}</div>`;
+        document.getElementById('modelBreakdown').innerHTML = `<div class="error-state">${message}</div>`;
+        document.getElementById('recentUsageBody').innerHTML = `<tr><td colspan="8"><div class="error-state">${message}</div></td></tr>`;
+    }
+
+    function renderSummary(summary) {
+        const cards = [
+            {
+                label: 'VLM Calls',
+                value: formatInteger(summary.calls),
+                meta: `${formatInteger(summary.success_calls)} completed successfully in the selected range.`,
+            },
+            {
+                label: 'Input Tokens',
+                value: formatMetric('input_tokens', summary.input_tokens),
+                meta: summary.token_covered_calls < summary.calls
+                    ? `Tracked for ${formatInteger(summary.token_covered_calls)} of ${formatInteger(summary.calls)} calls.`
+                    : 'Prompt-side token usage across all tracked calls.',
+            },
+            {
+                label: 'Output Tokens',
+                value: formatMetric('output_tokens', summary.output_tokens),
+                meta: summary.token_covered_calls < summary.calls
+                    ? 'Output totals reflect only calls that reported token counts.'
+                    : 'Response-side token usage across all tracked calls.',
+            },
+            {
+                label: 'Estimated Spend',
+                value: formatMetric('estimated_cost_usd', summary.estimated_cost_usd),
+                meta: summary.cost_covered_calls < summary.calls
+                    ? `Pricing available for ${formatInteger(summary.cost_covered_calls)} of ${formatInteger(summary.calls)} calls.`
+                    : 'Estimated from published token pricing for the active models.',
+            },
+        ];
+        document.getElementById('summaryGrid').innerHTML = cards.map((card) => `
+            <div class="summary-card">
+                <div class="summary-label">${escapeHtml(card.label)}</div>
+                <div class="summary-value">${escapeHtml(card.value)}</div>
+                <div class="summary-meta">${escapeHtml(card.meta)}</div>
+            </div>
+        `).join('');
+    }
+
+    function getChartSeries(payload) {
+        const metric = state.metric;
+        const totalsByModel = (payload.models || [])
+            .map((item) => ({
+                ...item,
+                metricValue: Number(item?.[metric] || 0),
+            }))
+            .filter((item) => item.metricValue > 0)
+            .sort((left, right) => right.metricValue - left.metricValue);
+
+        const topModels = totalsByModel.slice(0, 5).map((item) => item.model_name);
+        const includeOther = totalsByModel.length > 5;
+        const series = topModels.map((modelName, index) => ({
+            key: modelName,
+            label: modelName,
+            color: CHART_COLORS[index % CHART_COLORS.length],
+            values: (payload.buckets || []).map((bucket) => Number(bucket.models?.[modelName]?.[metric] || 0)),
+        }));
+
+        if (includeOther) {
+            const otherModels = new Set(totalsByModel.slice(5).map((item) => item.model_name));
+            series.push({
+                key: 'other',
+                label: 'other',
+                color: CHART_COLORS[series.length % CHART_COLORS.length],
+                values: (payload.buckets || []).map((bucket) => {
+                    let total = 0;
+                    for (const [modelName, values] of Object.entries(bucket.models || {})) {
+                        if (otherModels.has(modelName)) {
+                            total += Number(values?.[metric] || 0);
+                        }
+                    }
+                    return total;
+                }),
+            });
+        }
+
+        return series;
+    }
+
+    function renderChart(payload) {
+        const buckets = payload.buckets || [];
+        const chartWrap = document.getElementById('chartWrap');
+        const chartLegend = document.getElementById('chartLegend');
+        const summary = payload.summary || {};
+        document.getElementById('chartSubtitle').textContent = `${summary.range_name || 'Selected range'} · ${metricLabel(state.metric)} by time`;
+
+        if (!buckets.length) {
+            chartWrap.innerHTML = '<div class="chart-empty">No usage data yet.</div>';
+            chartLegend.innerHTML = '';
+            return;
+        }
+
+        const series = getChartSeries(payload);
+        const totals = buckets.map((bucket, idx) => {
+            if (series.length) {
+                return series.reduce((sum, item) => sum + Number(item.values[idx] || 0), 0);
+            }
+            return Number(bucket[state.metric] || 0);
+        });
+        const maxY = Math.max(...totals, 0);
+        if (maxY <= 0) {
+            chartWrap.innerHTML = `<div class="chart-empty">No ${escapeHtml(metricLabel(state.metric))} reported in this range yet.</div>`;
+            chartLegend.innerHTML = '';
+            return;
+        }
+
+        const width = 980;
+        const height = 360;
+        const padding = { top: 18, right: 18, bottom: 54, left: 62 };
+        const innerWidth = width - padding.left - padding.right;
+        const innerHeight = height - padding.top - padding.bottom;
+        const xForIndex = (index) => (
+            padding.left + (buckets.length === 1 ? innerWidth / 2 : (index / (buckets.length - 1)) * innerWidth)
+        );
+        const yForValue = (value) => padding.top + innerHeight - (value / maxY) * innerHeight;
+
+        const gridLines = [];
+        for (let step = 0; step <= 4; step += 1) {
+            const value = (maxY / 4) * step;
+            const y = yForValue(value);
+            gridLines.push({
+                y,
+                value,
+            });
+        }
+
+        const areas = [];
+        const cumulative = new Array(buckets.length).fill(0);
+        series.forEach((item) => {
+            const lower = [...cumulative];
+            const upper = cumulative.map((value, idx) => value + Number(item.values[idx] || 0));
+            const topPoints = upper.map((value, idx) => `${xForIndex(idx)},${yForValue(value)}`).join(' ');
+            const bottomPoints = lower.slice().reverse().map((value, reverseIdx) => {
+                const idx = lower.length - reverseIdx - 1;
+                return `${xForIndex(idx)},${yForValue(value)}`;
+            }).join(' ');
+            const linePath = upper.map((value, idx) => `${idx === 0 ? 'M' : 'L'} ${xForIndex(idx)} ${yForValue(value)}`).join(' ');
+            areas.push(`
+                <polygon points="${topPoints} ${bottomPoints}" fill="${item.color}" fill-opacity="0.22"></polygon>
+                <path d="${linePath}" fill="none" stroke="${item.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
+            `);
+            for (let idx = 0; idx < cumulative.length; idx += 1) {
+                cumulative[idx] = upper[idx];
+            }
+        });
+
+        const xLabels = [];
+        const desiredLabels = Math.min(6, buckets.length);
+        const step = Math.max(1, Math.floor((buckets.length - 1) / Math.max(1, desiredLabels - 1)));
+        for (let idx = 0; idx < buckets.length; idx += step) {
+            xLabels.push({ idx, label: buckets[idx].label });
+        }
+        if (xLabels[xLabels.length - 1]?.idx !== buckets.length - 1) {
+            xLabels.push({ idx: buckets.length - 1, label: buckets[buckets.length - 1].label });
+        }
+
+        chartWrap.innerHTML = `
+            <svg viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" aria-label="Usage chart">
+                <defs>
+                    <linearGradient id="usageChartGlow" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#19c37d" stop-opacity="0.16"></stop>
+                        <stop offset="100%" stop-color="#19c37d" stop-opacity="0.02"></stop>
+                    </linearGradient>
+                </defs>
+                <rect x="0" y="0" width="${width}" height="${height}" rx="18" fill="transparent"></rect>
+                ${gridLines.map((line) => `
+                    <line x1="${padding.left}" y1="${line.y}" x2="${width - padding.right}" y2="${line.y}" stroke="rgba(255,255,255,0.08)" stroke-width="1"></line>
+                    <text x="${padding.left - 10}" y="${line.y + 4}" text-anchor="end" fill="#879090" font-size="11">${escapeHtml(formatMetric(state.metric, line.value))}</text>
+                `).join('')}
+                ${areas.join('')}
+                ${xLabels.map((label) => `
+                    <text x="${xForIndex(label.idx)}" y="${height - 18}" text-anchor="middle" fill="#879090" font-size="11">${escapeHtml(label.label)}</text>
+                `).join('')}
+            </svg>
+        `;
+
+        chartLegend.innerHTML = series.map((item, index) => {
+            const total = item.values.reduce((sum, value) => sum + Number(value || 0), 0);
+            return `
+                <div class="legend-item">
+                    <span class="legend-swatch" style="background:${item.color}"></span>
+                    <span>${escapeHtml(item.label)} · ${escapeHtml(formatMetric(state.metric, total))}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderBreakdown(payload) {
+        const summary = payload.summary || {};
+        const notes = summary.coverage_notes || [];
+        document.getElementById('coverageNotes').innerHTML = notes.length
+            ? notes.map((note) => `<div class="coverage-item">${escapeHtml(note)}</div>`).join('')
+            : '<div class="coverage-item">Token counts and estimated spend are fully available for the calls in this range.</div>';
+
+        const metric = state.metric;
+        const rows = (payload.models || [])
+            .map((item) => ({ ...item, metricValue: Number(item?.[metric] || 0) }))
+            .filter((item) => item.calls > 0)
+            .sort((left, right) => right.metricValue - left.metricValue)
+            .slice(0, 8);
+
+        if (!rows.length) {
+            document.getElementById('modelBreakdown').innerHTML = '<div class="coverage-item">No usage has been recorded yet.</div>';
+            return;
+        }
+
+        document.getElementById('modelBreakdown').innerHTML = rows.map((item, index) => `
+            <div class="model-row">
+                <div class="model-topline">
+                    <div class="model-title">
+                        <span class="legend-swatch" style="background:${CHART_COLORS[index % CHART_COLORS.length]}"></span>
+                        <span>${escapeHtml(item.model_name)}</span>
+                    </div>
+                    <div class="model-metric">${escapeHtml(formatMetric(metric, item[metric]))}</div>
+                </div>
+                <div class="model-subline">
+                    <span>${escapeHtml(formatInteger(item.calls))} calls</span>
+                    <span>${escapeHtml(formatMetric('input_tokens', item.input_tokens))} input</span>
+                    <span>${escapeHtml(formatMetric('output_tokens', item.output_tokens))} output</span>
+                    <span>${escapeHtml(formatMetric('estimated_cost_usd', item.estimated_cost_usd))} spend</span>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function renderRecentEvents(events) {
+        const tbody = document.getElementById('recentUsageBody');
+        if (!events.length) {
+            tbody.innerHTML = '<tr><td colspan="8"><div class="loading-state">No usage has been recorded yet.</div></td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = events.map((event) => `
+            <tr>
+                <td>${escapeHtml(formatTimestamp(event.created_at))}</td>
+                <td>${escapeHtml(formatSource(event.source))}</td>
+                <td>
+                    <span class="status-pill ${event.was_success ? 'ok' : 'failed'}">
+                        ${event.was_success ? 'ok' : 'failed'}
+                    </span>
+                </td>
+                <td>${escapeHtml(event.model_name || event.api_model_name || 'unknown')}</td>
+                <td>${escapeHtml(event.input_tokens != null ? formatMetric('input_tokens', event.input_tokens) : '—')}</td>
+                <td>${escapeHtml(event.output_tokens != null ? formatMetric('output_tokens', event.output_tokens) : '—')}</td>
+                <td>${escapeHtml(event.total_tokens != null ? formatMetric('input_tokens', event.total_tokens) : '—')}</td>
+                <td>${escapeHtml(event.estimated_cost_usd != null ? formatMetric('estimated_cost_usd', event.estimated_cost_usd) : '—')}</td>
+            </tr>
+        `).join('');
+    }
+
+    loadUsage();
+</script>
+{% endblock %}

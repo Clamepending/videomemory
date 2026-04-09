@@ -354,6 +354,7 @@ class VideoStreamIngestor:
                 image_base64=image_base64,
                 prompt=prompt,
                 response_model=VideoIngestorOutput,
+                usage_context={"source": "task_ingestor"},
             )
             results = response.model_dump()
         except Exception as e:
@@ -606,7 +607,8 @@ When task is complete: {"task_updates": [{task_number: 0, task_note: "Task compl
                 return self._model_provider._sync_generate_content(
                     image_base64=image_base64,
                     prompt=prompt,
-                    response_model=VideoIngestorOutput
+                    response_model=VideoIngestorOutput,
+                    usage_context={"source": "task_ingestor"},
                 )
             
             # Time the API call

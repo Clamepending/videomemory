@@ -2,7 +2,8 @@
 
 import os
 import logging
-from typing import Any, Type
+import time
+from typing import Any, Optional, Type
 from openai import OpenAI
 from pydantic import BaseModel
 from .base import BaseModelProvider
@@ -22,6 +23,8 @@ class OpenAIGPT41NanoProvider(BaseModelProvider):
         if api_key is None:
             api_key = os.getenv("OPENAI_API_KEY")
         super().__init__(api_key)
+        self._canonical_model_name = "gpt-4.1-nano"
+        self._api_model_name = "gpt-4.1-nano-2025-04-14"
         
         # Initialize the OpenAI client
         if not self.api_key:
@@ -35,7 +38,13 @@ class OpenAIGPT41NanoProvider(BaseModelProvider):
                 logger.error(f"Failed to initialize OpenAI client: {e}")
                 self._client = None
     
-    def _sync_generate_content(self, image_base64: str, prompt: str, response_model: Type[BaseModel]) -> BaseModel:
+    def _sync_generate_content(
+        self,
+        image_base64: str,
+        prompt: str,
+        response_model: Type[BaseModel],
+        usage_context: Optional[dict[str, Any]] = None,
+    ) -> BaseModel:
         """Generate content using OpenAI GPT-4.1-nano.
         
         Args:
@@ -50,6 +59,7 @@ class OpenAIGPT41NanoProvider(BaseModelProvider):
             raise RuntimeError("OpenAI client not initialized. Check OPENAI_API_KEY environment variable.")
         
         # Use Structured Outputs parsing directly into the Pydantic model.
+        started_at = time.time()
         completion = self._client.beta.chat.completions.parse(
             model="gpt-4.1-nano-2025-04-14",
             messages=[{
@@ -61,11 +71,33 @@ class OpenAIGPT41NanoProvider(BaseModelProvider):
             }],
             response_format=response_model,
         )
+        latency_ms = round((time.time() - started_at) * 1000.0, 3)
+        usage = getattr(completion, "usage", None)
+        input_tokens = self._coerce_optional_int(getattr(usage, "prompt_tokens", None))
+        output_tokens = self._coerce_optional_int(getattr(usage, "completion_tokens", None))
+        total_tokens = self._coerce_optional_int(getattr(usage, "total_tokens", None))
 
         message = completion.choices[0].message
         if getattr(message, "parsed", None) is not None:
-            return response_model.model_validate(message.parsed)
+            parsed = response_model.model_validate(message.parsed)
+            self._emit_usage_event(
+                usage_context=usage_context,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                latency_ms=latency_ms,
+                was_success=True,
+            )
+            return parsed
         refusal = getattr(message, "refusal", None)
+        self._emit_usage_event(
+            usage_context=usage_context,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            latency_ms=latency_ms,
+            was_success=False,
+        )
         raise RuntimeError(f"OpenAI refused or returned no parsed output: {refusal or 'unknown'}")
 
 
@@ -81,6 +113,8 @@ class OpenAIGPT4oMiniProvider(BaseModelProvider):
         if api_key is None:
             api_key = os.getenv("OPENAI_API_KEY")
         super().__init__(api_key)
+        self._canonical_model_name = "gpt-4o-mini"
+        self._api_model_name = "gpt-4o-mini-2024-07-18"
         
         # Initialize the OpenAI client
         if not self.api_key:
@@ -94,7 +128,13 @@ class OpenAIGPT4oMiniProvider(BaseModelProvider):
                 logger.error(f"Failed to initialize OpenAI client: {e}")
                 self._client = None
     
-    def _sync_generate_content(self, image_base64: str, prompt: str, response_model: Type[BaseModel]) -> BaseModel:
+    def _sync_generate_content(
+        self,
+        image_base64: str,
+        prompt: str,
+        response_model: Type[BaseModel],
+        usage_context: Optional[dict[str, Any]] = None,
+    ) -> BaseModel:
         """Generate content using OpenAI GPT-4o-mini.
         
         Args:
@@ -108,6 +148,7 @@ class OpenAIGPT4oMiniProvider(BaseModelProvider):
         if not self._client:
             raise RuntimeError("OpenAI client not initialized. Check OPENAI_API_KEY environment variable.")
         
+        started_at = time.time()
         completion = self._client.beta.chat.completions.parse(
             model="gpt-4o-mini-2024-07-18",
             messages=[{
@@ -119,10 +160,31 @@ class OpenAIGPT4oMiniProvider(BaseModelProvider):
             }],
             response_format=response_model,
         )
+        latency_ms = round((time.time() - started_at) * 1000.0, 3)
+        usage = getattr(completion, "usage", None)
+        input_tokens = self._coerce_optional_int(getattr(usage, "prompt_tokens", None))
+        output_tokens = self._coerce_optional_int(getattr(usage, "completion_tokens", None))
+        total_tokens = self._coerce_optional_int(getattr(usage, "total_tokens", None))
 
         message = completion.choices[0].message
         if getattr(message, "parsed", None) is not None:
-            return response_model.model_validate(message.parsed)
+            parsed = response_model.model_validate(message.parsed)
+            self._emit_usage_event(
+                usage_context=usage_context,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                latency_ms=latency_ms,
+                was_success=True,
+            )
+            return parsed
         refusal = getattr(message, "refusal", None)
+        self._emit_usage_event(
+            usage_context=usage_context,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            latency_ms=latency_ms,
+            was_success=False,
+        )
         raise RuntimeError(f"OpenAI refused or returned no parsed output: {refusal or 'unknown'}")
-

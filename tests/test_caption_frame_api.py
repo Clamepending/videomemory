@@ -57,7 +57,7 @@ class CaptionFrameApiTests(unittest.TestCase):
     @patch.object(flask_app_module, "_get_device_preview_frame_bytes", return_value=b"jpeg-bytes")
     def test_caption_frame_local_vllm_connect_error_returns_actionable_hint(self, _mock_preview):
         class LocalVLLMProvider:
-            def _sync_generate_content(self, image_base64, prompt, response_model):
+            def _sync_generate_content(self, image_base64, prompt, response_model, usage_context=None):
                 raise httpx.ConnectError("Connection refused")
 
         original_provider = flask_app_module.task_manager._model_provider
@@ -75,6 +75,31 @@ class CaptionFrameApiTests(unittest.TestCase):
         self.assertEqual(data.get("model_provider"), "LocalVLLMProvider")
         self.assertIn("not reachable", data.get("error", ""))
         self.assertIn("VIDEO_INGESTOR_MODEL", data.get("hint", ""))
+
+    @patch.object(flask_app_module, "_get_device_preview_frame_bytes", return_value=b"jpeg-bytes")
+    def test_caption_frame_invalid_api_key_returns_actionable_hint(self, _mock_preview):
+        class AnthropicProvider:
+            def _sync_generate_content(self, image_base64, prompt, response_model, usage_context=None):
+                raise RuntimeError(
+                    "Error code: 401 - {'type': 'error', 'error': {'type': 'authentication_error', "
+                    "'message': 'invalid x-api-key'}}"
+                )
+
+        original_provider = flask_app_module.task_manager._model_provider
+        try:
+            flask_app_module.task_manager._model_provider = AnthropicProvider()
+            with patch.dict("os.environ", {"VIDEO_INGESTOR_MODEL": "claude-sonnet-4-6"}, clear=False):
+                resp = self.client.post("/api/caption_frame", json={"io_id": "net0", "prompt": "describe scene"})
+        finally:
+            flask_app_module.task_manager._model_provider = original_provider
+
+        self.assertEqual(resp.status_code, 503)
+        data = resp.get_json()
+        self.assertEqual(data.get("status"), "error")
+        self.assertEqual(data.get("current_model"), "claude-sonnet-4-6")
+        self.assertEqual(data.get("required_setting"), "ANTHROPIC_API_KEY")
+        self.assertIn("valid ANTHROPIC_API_KEY", data.get("error", ""))
+        self.assertIn("Save a valid ANTHROPIC_API_KEY", data.get("hint", ""))
 
 
 if __name__ == "__main__":

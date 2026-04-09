@@ -2,7 +2,9 @@
 """Flask app for VideoMemory core APIs and UI."""
 
 import asyncio
+import csv
 import hashlib
+import io
 import os
 import sys
 import threading
@@ -27,6 +29,7 @@ from videomemory.system.model_providers.factory import (
 )
 from videomemory.system.database import TaskDatabase, get_default_data_dir
 from videomemory.system.openclaw_integration import OpenClawWebhookDispatcher
+from videomemory.system.usage import build_usage_dashboard_payload
 import cv2
 import platform
 from typing import Any, Dict, List, Optional
@@ -66,6 +69,7 @@ task_manager = videomemory.system.TaskManager(
     model_provider=model_provider,
     db=db,
     on_detection_event=openclaw_dispatcher.dispatch_task_update,
+    on_model_usage=db.save_model_usage_event,
 )
 
 # Set managers in tools
@@ -173,6 +177,11 @@ def devices():
 def settings_page():
     """Render the settings page."""
     return render_template('settings.html')
+
+@app.route('/usage')
+def usage_page():
+    """Render the usage page."""
+    return render_template('usage.html')
 
 @app.route('/documentation')
 def documentation_page():
@@ -1074,6 +1083,7 @@ def caption_frame():
             image_base64=image_base64,
             prompt=prompt,
             response_model=OneOffFrameAnalysis,
+            usage_context={'source': 'caption_frame'},
         )
         analysis = str(getattr(response, 'analysis', '')).strip()
         if not analysis:
@@ -1100,6 +1110,99 @@ def caption_frame():
         provider_name = type(getattr(task_manager, "_model_provider", None) or model_provider).__name__
         body, status_code = _build_caption_frame_provider_error(e, provider_name=provider_name)
         return jsonify(body), status_code
+
+
+_USAGE_RANGE_SECONDS = {
+    'day': 24 * 60 * 60,
+    'week': 7 * 24 * 60 * 60,
+    'month': 30 * 24 * 60 * 60,
+}
+
+
+def _normalize_usage_range(range_key: Optional[str]) -> str:
+    normalized = str(range_key or '').strip().lower()
+    return normalized if normalized in _USAGE_RANGE_SECONDS else 'month'
+
+
+def _build_usage_payload(range_key: Optional[str]) -> dict[str, Any]:
+    """Build the usage dashboard payload for the requested range."""
+    import time
+
+    normalized_range = _normalize_usage_range(range_key)
+    now_ts = time.time()
+    start_ts = now_ts - _USAGE_RANGE_SECONDS[normalized_range]
+    events = db.list_model_usage_events(start_at=start_ts, end_at=now_ts, newest_first=False)
+    recent_events = db.list_model_usage_events(start_at=start_ts, end_at=now_ts, newest_first=True, limit=200)
+    return build_usage_dashboard_payload(
+        events,
+        range_key=normalized_range,
+        recent_events=recent_events,
+    )
+
+
+@app.route('/api/usage', methods=['GET'])
+def get_usage_data():
+    """Return usage summary, buckets, and recent events for the Usage page."""
+    try:
+        payload = _build_usage_payload(request.args.get('range'))
+        return jsonify(payload)
+    except Exception as e:
+        flask_logger.error("Error loading usage data: %s", e, exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/usage/export.csv', methods=['GET'])
+def export_usage_csv():
+    """Export raw usage events as CSV for the selected time range."""
+    try:
+        import time
+
+        normalized_range = _normalize_usage_range(request.args.get('range'))
+        now_ts = time.time()
+        start_ts = now_ts - _USAGE_RANGE_SECONDS[normalized_range]
+        rows = db.list_model_usage_events(start_at=start_ts, end_at=now_ts, newest_first=True)
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow([
+            'timestamp',
+            'provider_name',
+            'model_name',
+            'api_model_name',
+            'source',
+            'input_tokens',
+            'output_tokens',
+            'total_tokens',
+            'estimated_cost_usd',
+            'latency_ms',
+            'was_success',
+        ])
+        for row in rows:
+            writer.writerow([
+                row.get('created_at'),
+                row.get('provider_name'),
+                row.get('model_name'),
+                row.get('api_model_name'),
+                row.get('source'),
+                row.get('input_tokens'),
+                row.get('output_tokens'),
+                row.get('total_tokens'),
+                row.get('estimated_cost_usd'),
+                row.get('latency_ms'),
+                row.get('was_success'),
+            ])
+
+        return Response(
+            buffer.getvalue(),
+            mimetype='text/csv',
+            headers={
+                'Content-Disposition': f'attachment; filename="videomemory-usage-{normalized_range}.csv"',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+            },
+        )
+    except Exception as e:
+        flask_logger.error("Error exporting usage CSV: %s", e, exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
 # ── Health & OpenAPI ──────────────────────────────────────────
@@ -1446,6 +1549,27 @@ def _current_ingestor_model_name() -> str:
     return normalize_model_name(os.getenv('VIDEO_INGESTOR_MODEL')) or 'local-vllm'
 
 
+def _looks_like_invalid_api_key_error(message: str) -> bool:
+    """Best-effort detection for upstream auth failures caused by bad API keys."""
+    normalized = str(message or '').strip().lower()
+    if not normalized:
+        return False
+
+    key_markers = (
+        'invalid x-api-key',
+        'invalid api key',
+        'invalid api-key',
+        'incorrect api key',
+        'incorrect api-key',
+        'authentication_error',
+        'invalid authentication',
+    )
+    if any(marker in normalized for marker in key_markers):
+        return True
+
+    return '401' in normalized and ('key' in normalized or 'auth' in normalized)
+
+
 def _build_caption_frame_provider_error(exc: Exception, *, provider_name: str) -> tuple[dict, int]:
     """Turn provider/configuration failures into actionable API errors."""
     model_name = _current_ingestor_model_name()
@@ -1477,15 +1601,28 @@ def _build_caption_frame_provider_error(exc: Exception, *, provider_name: str) -
                 body['required_setting'] = 'OPENAI_API_KEY | GOOGLE_API_KEY | ANTHROPIC_API_KEY | OPENROUTER_API_KEY'
             return body, 503
 
-    if required_setting and ('api key' in message.lower() or 'not initialized' in message.lower() or required_setting in message):
-        return {
-            'status': 'error',
-            'error': f"Model '{model_name}' requires {required_setting}, but it is not configured.",
-            'hint': f"Save {required_setting} in Settings or switch VIDEO_INGESTOR_MODEL to another configured model.",
-            'current_model': model_name,
-            'model_provider': provider_name,
-            'required_setting': required_setting,
-        }, 503
+    if required_setting:
+        normalized_message = message.lower()
+        invalid_key = _looks_like_invalid_api_key_error(message)
+        missing_or_invalid_key = (
+            invalid_key
+            or 'api key' in normalized_message
+            or 'not initialized' in normalized_message
+            or required_setting.lower() in normalized_message
+        )
+        if missing_or_invalid_key:
+            if invalid_key:
+                error = f"Model '{model_name}' requires a valid {required_setting}, but the configured key was rejected by the provider."
+            else:
+                error = f"Model '{model_name}' requires {required_setting}, but it is not configured."
+            return {
+                'status': 'error',
+                'error': error,
+                'hint': f"Save a valid {required_setting} in Settings or switch VIDEO_INGESTOR_MODEL to another configured model.",
+                'current_model': model_name,
+                'model_provider': provider_name,
+                'required_setting': required_setting,
+            }, 503
 
     return {
         'status': 'error',

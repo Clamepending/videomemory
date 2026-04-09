@@ -20,7 +20,14 @@ _AVERAGE_PIXEL_DIFF_UNIT = "average_pixel_difference_0_to_255"
 class TaskManager:
     """Manages tasks and their associations with IO streams."""
     
-    def __init__(self, io_manager: IOmanager = None, model_provider: Optional[BaseModelProvider] = None, db: Optional[TaskDatabase] = None, on_detection_event: Optional[Callable[[Task, Optional[NoteEntry]], None]] = None):
+    def __init__(
+        self,
+        io_manager: IOmanager = None,
+        model_provider: Optional[BaseModelProvider] = None,
+        db: Optional[TaskDatabase] = None,
+        on_detection_event: Optional[Callable[[Task, Optional[NoteEntry]], None]] = None,
+        on_model_usage: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ):
         """Initialize the task manager.
         
         Args:
@@ -28,6 +35,7 @@ class TaskManager:
             model_provider: Optional model provider for ML inference. If None, defaults to Gemini25FlashProvider.
             db: Optional TaskDatabase instance for persistent storage. If None, tasks are in-memory only.
             on_detection_event: Optional callback(task, new_note) fired when VLM emits a task update.
+            on_model_usage: Optional callback(event_dict) fired when a model invocation completes.
         """
         self._tasks: Dict[str, Task] = {}  # task_id -> Task object
         self._io_manager = io_manager
@@ -35,11 +43,13 @@ class TaskManager:
         self._task_counter = 0  # Counter for task IDs, starting from 0
         self._db = db
         self._on_detection_event_cb = on_detection_event
+        self._on_model_usage_cb = on_model_usage
         
         # Get model provider from environment variable if not provided
         if model_provider is None:
             model_provider = get_VLM_provider()
         self._model_provider = model_provider
+        self._attach_usage_callback(self._model_provider)
         
         # Load persisted tasks from database
         if self._db is not None:
@@ -146,6 +156,16 @@ class TaskManager:
             return False
         logger.warning("Unrecognized %s value %r; defaulting to enabled", _NOTE_FRAME_SETTING_KEY, raw_value)
         return True
+
+    def _attach_usage_callback(self, provider: Optional[BaseModelProvider]) -> None:
+        """Attach the configured usage callback to a provider when supported."""
+        if provider is None or self._on_model_usage_cb is None:
+            return
+        if hasattr(provider, "set_usage_callback"):
+            try:
+                provider.set_usage_callback(self._on_model_usage_cb)
+            except Exception as e:
+                logger.error("Failed to attach usage callback to %s: %s", type(provider).__name__, e, exc_info=True)
 
     def _apply_saved_ingestor_preferences(self, io_id: str, ingestor: VideoStreamIngestor) -> None:
         """Apply any persisted per-device ingestor settings to a live ingestor."""
@@ -568,6 +588,7 @@ class TaskManager:
         """
         requested_model = (model_name or "").strip() or None
         provider = get_VLM_provider(model_name=requested_model)
+        self._attach_usage_callback(provider)
         self._model_provider = provider
 
         updated_ingestors = 0

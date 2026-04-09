@@ -25,6 +25,25 @@ class TaskManagerRuntimeReloadTests(unittest.TestCase):
         self.assertEqual(result["updated_ingestors"], 2)
         self.assertEqual(result["provider"], "object")
 
+    @patch("videomemory.system.task_manager.get_VLM_provider")
+    def test_reload_model_provider_re_attaches_usage_callback(self, mock_get_provider):
+        usage_callback = Mock()
+        old_provider = Mock()
+        new_provider = Mock()
+        mock_get_provider.return_value = new_provider
+
+        manager = TaskManager(
+            io_manager=None,
+            model_provider=old_provider,
+            db=None,
+            on_model_usage=usage_callback,
+        )
+
+        manager.reload_model_provider(model_name="gpt-4o-mini")
+
+        old_provider.set_usage_callback.assert_called_once_with(usage_callback)
+        new_provider.set_usage_callback.assert_called_once_with(usage_callback)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@
 
 import os
 import logging
+import time
 from typing import Type, Optional
 import httpx
 from pydantic import BaseModel
@@ -34,6 +35,8 @@ class LocalVLLMProvider(BaseModelProvider):
         # Fallback when /v1/models is unreachable. Match start_vllm.sh default.
         self._fallback_model = os.getenv("VLLM_LOCAL_MODEL", "Qwen/Qwen3-VL-8B-Instruct-FP8")
         self._model_id: Optional[str] = None  # Resolved from server on first request
+        self._canonical_model_name = "local-vllm"
+        self._api_model_name = self._fallback_model
         # Signal "initialized" so VideoStreamIngestor doesn't falsely warn.
         self._client = True
         logger.info("Initialized local vLLM provider at %s", self._base_url)
@@ -52,6 +55,7 @@ class LocalVLLMProvider(BaseModelProvider):
                 model_id = models[0].get("id")
                 if model_id:
                     self._model_id = model_id
+                    self._api_model_name = model_id
                     logger.info("Resolved vLLM model id: %s", model_id)
                     return model_id
         except Exception as e:
@@ -59,7 +63,11 @@ class LocalVLLMProvider(BaseModelProvider):
         return self._fallback_model
 
     def _sync_generate_content(
-        self, image_base64: str, prompt: str, response_model: Type[BaseModel]
+        self,
+        image_base64: str,
+        prompt: str,
+        response_model: Type[BaseModel],
+        usage_context: Optional[dict[str, object]] = None,
     ) -> BaseModel:
         """Generate content using local vLLM OpenAI-compatible API."""
         schema = response_model.model_json_schema()
@@ -74,6 +82,7 @@ class LocalVLLMProvider(BaseModelProvider):
 
         url = f"{self._base_url}/v1/chat/completions"
         logger.debug("Local vLLM request to %s (image %d chars, prompt %d chars)", url, len(image_base64), len(prompt))
+        started_at = time.time()
         with httpx.Client(timeout=30.0) as client:
             model_id = self._resolve_model_id(client)
             response = client.post(
@@ -99,6 +108,11 @@ class LocalVLLMProvider(BaseModelProvider):
                 )
             response.raise_for_status()
             result = response.json()
+        latency_ms = round((time.time() - started_at) * 1000.0, 3)
+        usage = result.get("usage") or {}
+        input_tokens = self._coerce_optional_int(usage.get("prompt_tokens"))
+        output_tokens = self._coerce_optional_int(usage.get("completion_tokens"))
+        total_tokens = self._coerce_optional_int(usage.get("total_tokens"))
 
         message = (result.get("choices") or [{}])[0].get("message") or {}
         content = message.get("content")
@@ -112,6 +126,14 @@ class LocalVLLMProvider(BaseModelProvider):
                 message,
                 (result.get("choices") or [{}])[0].get("finish_reason") if result.get("choices") else None,
             )
+            self._emit_usage_event(
+                usage_context=usage_context,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                latency_ms=latency_ms,
+                was_success=False,
+            )
             raise RuntimeError("Local vLLM returned empty content.")
 
         s = str(content).strip()
@@ -121,7 +143,7 @@ class LocalVLLMProvider(BaseModelProvider):
                 s = "\n".join(lines[1:-1]).strip()
 
         try:
-            return response_model.model_validate_json(s)
+            parsed = response_model.model_validate_json(s)
         except Exception as parse_err:
             logger.error(
                 "Local vLLM returned invalid JSON for %s. Raw content (first 800 chars): %r. Parse error: %s",
@@ -129,4 +151,21 @@ class LocalVLLMProvider(BaseModelProvider):
                 s[:800] if s else "(empty)",
                 parse_err,
             )
+            self._emit_usage_event(
+                usage_context=usage_context,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                latency_ms=latency_ms,
+                was_success=False,
+            )
             raise
+        self._emit_usage_event(
+            usage_context=usage_context,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            latency_ms=latency_ms,
+            was_success=True,
+        )
+        return parsed

@@ -5,7 +5,7 @@ import os
 import sqlite3
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger('Database')
 
@@ -102,6 +102,27 @@ class TaskDatabase:
                     url TEXT NOT NULL,
                     created_at REAL NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS model_usage_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at REAL NOT NULL,
+                    provider_name TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    api_model_name TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    total_tokens INTEGER,
+                    estimated_cost_usd REAL,
+                    latency_ms REAL,
+                    was_success INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_model_usage_events_created_at
+                    ON model_usage_events(created_at);
+
+                CREATE INDEX IF NOT EXISTS idx_model_usage_events_model_created_at
+                    ON model_usage_events(model_name, created_at);
             """)
             
             # Migration: add status column if missing (for existing DBs)
@@ -119,6 +140,11 @@ class TaskDatabase:
             if 'frame_path' not in note_columns:
                 conn.execute("ALTER TABLE task_notes ADD COLUMN frame_path TEXT")
                 logger.info("Migrated task_notes table: added frame_path column")
+
+            usage_columns = [row[1] for row in conn.execute("PRAGMA table_info(model_usage_events)").fetchall()]
+            if usage_columns and 'was_success' not in usage_columns:
+                conn.execute("ALTER TABLE model_usage_events ADD COLUMN was_success INTEGER NOT NULL DEFAULT 1")
+                logger.info("Migrated model_usage_events table: added was_success column")
 
     def _note_frame_relpath(self, task_id: str, note_id: int) -> Path:
         """Build a relative file path for a task note frame."""
@@ -399,6 +425,96 @@ class TaskDatabase:
             while idx in existing:
                 idx += 1
             return f"net{idx}"
+
+    # ── Usage methods ────────────────────────────────────────────
+
+    def save_model_usage_event(self, event: Dict[str, Any]) -> int:
+        """Persist one model usage event."""
+        created_at = float(event.get('created_at') or time.time())
+        input_tokens = event.get('input_tokens')
+        output_tokens = event.get('output_tokens')
+        total_tokens = event.get('total_tokens')
+        if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+            total_tokens = int(input_tokens or 0) + int(output_tokens or 0)
+
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO model_usage_events (
+                    created_at,
+                    provider_name,
+                    model_name,
+                    api_model_name,
+                    source,
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    estimated_cost_usd,
+                    latency_ms,
+                    was_success
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    created_at,
+                    str(event.get('provider_name') or ''),
+                    str(event.get('model_name') or ''),
+                    str(event.get('api_model_name') or event.get('model_name') or ''),
+                    str(event.get('source') or 'unknown'),
+                    int(input_tokens) if input_tokens is not None else None,
+                    int(output_tokens) if output_tokens is not None else None,
+                    int(total_tokens) if total_tokens is not None else None,
+                    float(event['estimated_cost_usd']) if event.get('estimated_cost_usd') is not None else None,
+                    float(event['latency_ms']) if event.get('latency_ms') is not None else None,
+                    1 if bool(event.get('was_success', True)) else 0,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def list_model_usage_events(
+        self,
+        *,
+        start_at: Optional[float] = None,
+        end_at: Optional[float] = None,
+        limit: Optional[int] = None,
+        newest_first: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Load model usage events filtered by time window."""
+        where_clauses = []
+        params: list[Any] = []
+        if start_at is not None:
+            where_clauses.append("created_at >= ?")
+            params.append(float(start_at))
+        if end_at is not None:
+            where_clauses.append("created_at <= ?")
+            params.append(float(end_at))
+
+        query = "SELECT * FROM model_usage_events"
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+        query += " ORDER BY created_at " + ("DESC" if newest_first else "ASC")
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(int(limit))
+
+        with self._get_conn() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [
+                {
+                    'id': r['id'],
+                    'created_at': r['created_at'],
+                    'provider_name': r['provider_name'],
+                    'model_name': r['model_name'],
+                    'api_model_name': r['api_model_name'],
+                    'source': r['source'],
+                    'input_tokens': r['input_tokens'],
+                    'output_tokens': r['output_tokens'],
+                    'total_tokens': r['total_tokens'],
+                    'estimated_cost_usd': r['estimated_cost_usd'],
+                    'latency_ms': r['latency_ms'],
+                    'was_success': bool(r['was_success']),
+                }
+                for r in rows
+            ]
 
     # ── Settings methods ─────────────────────────────────────────
 
