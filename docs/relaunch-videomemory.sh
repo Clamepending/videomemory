@@ -83,7 +83,7 @@ find_bin() {
 GIT_BIN="$(find_bin git || true)"
 CURL_BIN="$(find_bin curl || true)"
 PYTHON_BIN="$(find_bin python3 || true)"
-UV_BIN="$(find_bin uv || true)"
+UV_BIN="$(find_bin "$HOME/.local/bin/uv" /home/linuxbrew/.linuxbrew/bin/uv uv || true)"
 TAILSCALE_BIN="$(find_bin tailscale || true)"
 
 [ -n "$CURL_BIN" ] || fail "curl is required"
@@ -140,6 +140,11 @@ prepare_runtime() {
   if [ ! -x "$VENV_PYTHON" ]; then
     log "Creating Python virtual environment at $REPO_DIR/.venv"
     "$PYTHON_BIN" -m venv "$REPO_DIR/.venv" >>"$LOG_FILE" 2>&1 || fail "python3 -m venv failed; check $LOG_FILE"
+  fi
+
+  if ! "$VENV_PYTHON" -m pip --version >/dev/null 2>&1; then
+    log "Bootstrapping pip inside $REPO_DIR/.venv"
+    "$VENV_PYTHON" -m ensurepip --upgrade >>"$LOG_FILE" 2>&1 || fail "ensurepip failed; check $LOG_FILE"
   fi
 
   log "Installing VideoMemory dependencies into $REPO_DIR/.venv"
