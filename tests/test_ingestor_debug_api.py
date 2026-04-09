@@ -1,5 +1,8 @@
 import tempfile
 import unittest
+import re
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -157,6 +160,31 @@ class IngestorDebugApiTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.get_data(as_text=True)
         self.assertNotIn("??", html)
+
+    def test_debug_page_inline_scripts_are_valid_javascript(self):
+        if shutil.which("node") is None:
+            self.skipTest("node is required for JS syntax validation")
+
+        resp = self.client.get("/device/net0/debug")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+        scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.DOTALL)
+        self.assertGreaterEqual(len(scripts), 1)
+
+        for script in scripts:
+            with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
+                handle.write(script)
+                temp_path = handle.name
+            try:
+                result = subprocess.run(
+                    ["node", "--check", temp_path],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            finally:
+                Path(temp_path).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

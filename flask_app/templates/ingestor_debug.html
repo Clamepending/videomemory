@@ -141,6 +141,15 @@
             font-size: 12px;
         }
 
+        .frame-controls-help code {
+            background: #242424;
+            border: 1px solid #333;
+            border-radius: 4px;
+            color: #ececec;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            padding: 1px 4px;
+        }
+
         .frame-skip-slider {
             width: 100%;
             accent-color: #19c37d;
@@ -370,7 +379,7 @@
                         <div class="frame-controls">
                             <div class="frame-controls-header">
                                 <div class="frame-controls-title">Frame skip threshold</div>
-                                <div class="frame-controls-help">Measured as average pixel difference on a 0-255 scale. For example, `25` means the average pixel changed by about `25`.</div>
+                                <div class="frame-controls-help">Measured as average pixel difference on a 0-255 scale. For example, <code>25</code> means the average pixel changed by about <code>25</code>.</div>
                             </div>
                             <input
                                 id="frameSkipThresholdSlider"
