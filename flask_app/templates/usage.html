@@ -713,7 +713,7 @@
         const chartWrap = document.getElementById('chartWrap');
         const chartLegend = document.getElementById('chartLegend');
         const summary = payload.summary || {};
-        document.getElementById('chartSubtitle').textContent = `${summary.range_name || 'Selected range'} · ${metricLabel(state.metric)} by time`;
+        document.getElementById('chartSubtitle').textContent = `${summary.range_name || 'Selected range'} · ${metricLabel(state.metric)} by time · stacked by model`;
 
         if (!buckets.length) {
             chartWrap.innerHTML = '<div class="chart-empty">No usage data yet.</div>';
@@ -722,6 +722,8 @@
         }
 
         const series = getChartSeries(payload);
+        const seriesTotal = (item) => item.values.reduce((sum, value) => sum + Number(value || 0), 0);
+        const stackedSeries = [...series].sort((left, right) => seriesTotal(left) - seriesTotal(right));
         const totals = buckets.map((bucket, idx) => {
             if (series.length) {
                 return series.reduce((sum, item) => sum + Number(item.values[idx] || 0), 0);
@@ -757,7 +759,7 @@
 
         const areas = [];
         const cumulative = new Array(buckets.length).fill(0);
-        series.forEach((item) => {
+        stackedSeries.forEach((item) => {
             const lower = [...cumulative];
             const upper = cumulative.map((value, idx) => value + Number(item.values[idx] || 0));
             const topPoints = upper.map((value, idx) => `${xForIndex(idx)},${yForValue(value)}`).join(' ');

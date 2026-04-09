@@ -93,8 +93,16 @@
             font-size: 18px;
             font-weight: 500;
             color: #ececec;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
             word-break: break-word;
+        }
+
+        .device-meta-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 12px;
         }
         
         .device-id {
@@ -340,13 +348,14 @@
         .form-message.error { color: #ff6b6b; text-align: left; padding: 0; }
 
         .device-badge {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             font-size: 10px;
             padding: 2px 8px;
             border-radius: 10px;
             font-weight: 600;
             text-transform: uppercase;
-            margin-left: 8px;
             vertical-align: middle;
         }
 
@@ -360,6 +369,32 @@
             background: #19c37d22;
             color: #19c37d;
             border: 1px solid #19c37d44;
+        }
+
+        .badge-ingestor-running {
+            background: rgba(25, 195, 125, 0.15);
+            color: #8ff0b8;
+            border: 1px solid rgba(25, 195, 125, 0.32);
+        }
+
+        .badge-ingestor-stopped {
+            background: rgba(255, 209, 102, 0.12);
+            color: #ffd166;
+            border: 1px solid rgba(255, 209, 102, 0.28);
+        }
+
+        .badge-ingestor-idle {
+            background: rgba(255, 255, 255, 0.06);
+            color: #a4adad;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .badge-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: currentColor;
+            flex: 0 0 auto;
         }
 
         .remove-btn {
@@ -571,9 +606,15 @@
                     devices.forEach(device => {
                         const isCamera = category.toLowerCase().includes('camera');
                         const isNetwork = device.source === 'network';
-                        const badgeHtml = isNetwork
+                        const sourceBadgeHtml = isNetwork
                             ? '<span class="device-badge badge-network">Network</span>'
                             : '<span class="device-badge badge-local">Local</span>';
+                        let ingestorBadgeHtml = '<span class="device-badge badge-ingestor-idle"><span class="badge-dot"></span>Not running</span>';
+                        if (device.ingestor_state === 'running') {
+                            ingestorBadgeHtml = '<span class="device-badge badge-ingestor-running"><span class="badge-dot"></span>Ingesting</span>';
+                        } else if (device.ingestor_state === 'stopped') {
+                            ingestorBadgeHtml = '<span class="device-badge badge-ingestor-stopped"><span class="badge-dot"></span>Stopped</span>';
+                        }
                         const networkUrlHtml = isNetwork && device.url
                             ? `
                                 <div class="device-url">
@@ -606,7 +647,8 @@
                         html += `
                             <div class="device-card">
                                 ${previewHtml}
-                                <div class="device-name">${escapeHtml(device.name || 'Unknown Device')}${badgeHtml}</div>
+                                <div class="device-name">${escapeHtml(device.name || 'Unknown Device')}</div>
+                                <div class="device-meta-badges">${sourceBadgeHtml}${ingestorBadgeHtml}</div>
                                 <div class="device-id-label">IO ID</div>
                                 <div class="device-id">${escapeHtml(device.io_id || 'N/A')}</div>
                                 ${networkUrlHtml}

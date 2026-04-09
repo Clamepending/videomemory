@@ -539,10 +539,15 @@ def get_devices():
             category = device.get('category', 'unknown')
             if category not in by_category:
                 by_category[category] = []
+            ingestor = task_manager.get_ingestor(device.get('io_id', ''))
+            ingestor_running = bool(ingestor and getattr(ingestor, '_running', False))
+            ingestor_state = 'running' if ingestor_running else ('stopped' if ingestor is not None else 'idle')
             entry = {
                 'io_id': device.get('io_id', ''),
                 'name': device.get('name', 'Unknown'),
                 'source': device.get('source', 'local'),
+                'ingestor_running': ingestor_running,
+                'ingestor_state': ingestor_state,
             }
             if device.get('url'):
                 entry['url'] = device['url']
