@@ -431,6 +431,12 @@ class TaskManager:
         if io_id:
             return [task.to_dict() for task in self._tasks.values() if task.io_id == io_id]
         return [task.to_dict() for task in self._tasks.values()]
+
+    def get_task_objects(self, io_id: Optional[str] = None) -> List[Task]:
+        """Return live Task objects, optionally filtered by io_id."""
+        if io_id:
+            return [task for task in self._tasks.values() if task.io_id == io_id]
+        return list(self._tasks.values())
     
     def update_task_status(self, task_id: str, done: bool) -> bool:
         """Update the status of a task.

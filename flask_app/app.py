@@ -2,12 +2,14 @@
 """Flask app for VideoMemory core APIs and UI."""
 
 import asyncio
+import base64
 import csv
 import hashlib
 import io
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -20,6 +22,7 @@ import videomemory.system
 import videomemory.tools
 from videomemory.system.logging_config import setup_logging
 from videomemory.system.model_providers import get_VLM_provider
+from videomemory.system.stream_ingestors.video_stream_ingestor import build_video_ingestor_prompt
 from videomemory.system.model_providers.factory import (
     choose_default_model_for_available_keys,
     get_required_api_key_env,
@@ -115,6 +118,60 @@ def _get_preview_fps(io_id: str) -> float:
         if last_age > 3.0:
             return 0.0
         return float(state.get("fps", 0.0))
+
+
+def _get_latest_persisted_debug_snapshot(io_id: str) -> Optional[Dict[str, Any]]:
+    """Load the newest persisted note-backed frame for a device, if available."""
+    latest_task = None
+    latest_note = None
+
+    for task in task_manager.get_task_objects(io_id):
+        for note in getattr(task, "task_note", []) or []:
+            note_id = getattr(note, "note_id", None)
+            frame_path = getattr(note, "frame_path", None)
+            if note_id is None or not frame_path:
+                continue
+            if latest_note is None or note_id > latest_note.note_id:
+                latest_task = task
+                latest_note = note
+
+    if latest_note is None:
+        return None
+
+    frame_path = db.get_note_frame_path(latest_note.note_id)
+    if frame_path is None or not frame_path.exists():
+        return None
+
+    try:
+        frame_bytes = frame_path.read_bytes()
+    except OSError as exc:
+        flask_logger.warning("Failed to read persisted debug frame for io_id=%s note_id=%s: %s", io_id, latest_note.note_id, exc)
+        return None
+
+    return {
+        "task": latest_task,
+        "note": latest_note,
+        "frame_bytes": frame_bytes,
+    }
+
+
+def _build_device_debug_prompt(io_id: str, ingestor: Optional[Any] = None) -> str:
+    """Return the canonical debug prompt for a device when task context exists."""
+    tasks = []
+    if ingestor is not None:
+        try:
+            tasks = ingestor.get_tasks_list() or []
+        except Exception:
+            tasks = []
+    if not tasks:
+        tasks = task_manager.get_task_objects(io_id)
+    if not tasks:
+        return ""
+
+    prompt = build_video_ingestor_prompt(tasks, context_label=io_id)
+    if prompt:
+        return prompt
+    return build_video_ingestor_prompt(tasks, context_label=io_id, include_done=True)
 
 # Create a persistent event loop in a background thread
 # This allows async tasks (like video ingestor) to run continuously
@@ -911,9 +968,11 @@ def get_ingestor_status(io_id):
         has = task_manager.has_ingestor(io_id)
         ingestor = task_manager.get_ingestor(io_id) if has else None
         running = ingestor._running if ingestor else False
+        has_debug_artifact = _get_latest_persisted_debug_snapshot(io_id) is not None
         return jsonify({
             'has_ingestor': has,
             'running': running,
+            'has_debug_artifact': has_debug_artifact,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -951,34 +1010,64 @@ def ingestor_frame_skip_threshold(io_id):
 @app.route('/api/device/<io_id>/debug/frame-and-prompt', methods=['GET'])
 def get_ingestor_frame_and_prompt(io_id):
     """Get the latest frame and prompt from a device's ingestor."""
-    import base64
     try:
         ingestor = task_manager.get_ingestor(io_id)
-        if ingestor is None:
-            return jsonify({'error': 'No active ingestor for this device', 'frame_base64': None, 'prompt': ''}), 200
-        if not ingestor._running:
-            return jsonify({'error': 'Ingestor not running', 'frame_base64': None, 'prompt': ''}), 200
-        
-        latest_output = ingestor.get_latest_output()
-        if not latest_output:
-            return jsonify({'error': 'No output available yet', 'frame_base64': None, 'prompt': ''}), 200
+        latest_output = ingestor.get_latest_output() if ingestor is not None else None
+        dedup = ingestor.get_dedup_status() if ingestor is not None else None
+        prompt = _build_device_debug_prompt(io_id, ingestor=ingestor)
 
-        latest_frame = latest_output.get('frame')
-        latest_prompt = latest_output.get('prompt', '')
-        
-        if latest_frame is None:
-            return jsonify({'error': 'No frame available', 'frame_base64': None, 'prompt': latest_prompt or ''}), 200
-        
-        # Convert frame to base64
-        _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        image_base64 = base64.b64encode(buffer).decode('utf-8')
-        
-        dedup = ingestor.get_dedup_status()
+        if latest_output:
+            latest_frame = latest_output.get('frame')
+            latest_prompt = latest_output.get('prompt') or prompt
+            if latest_frame is not None:
+                _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                image_base64 = base64.b64encode(buffer).decode('utf-8')
+                source_label = 'Showing last VLM call'
+                if ingestor is not None and not ingestor._running:
+                    source_label = 'Showing last VLM call from before the ingestor stopped'
+                return jsonify({
+                    'frame_base64': image_base64,
+                    'prompt': latest_prompt or '',
+                    'dedup_status': dedup,
+                    'source': 'live_output',
+                    'source_label': source_label,
+                })
+
+        persisted_snapshot = _get_latest_persisted_debug_snapshot(io_id)
+        if persisted_snapshot is not None:
+            note = persisted_snapshot['note']
+            task = persisted_snapshot['task']
+            note_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(note.timestamp))
+            prompt_notice = ''
+            if prompt:
+                prompt_notice = 'Prompt reconstructed from current task context. Showing the most recent note-backed VLM frame.'
+            return jsonify({
+                'frame_base64': base64.b64encode(persisted_snapshot['frame_bytes']).decode('utf-8'),
+                'prompt': prompt or '',
+                'prompt_notice': prompt_notice,
+                'dedup_status': dedup,
+                'source': 'persisted_note_frame',
+                'source_label': f'Showing most recent note-backed frame from {note_time}',
+                'note_content': note.content,
+                'note_id': note.note_id,
+                'task_desc': getattr(task, 'task_desc', ''),
+            })
+
+        if ingestor is None:
+            error = 'No active ingestor or persisted debug frame for this device'
+        elif not ingestor._running:
+            error = 'Ingestor not running and no persisted debug frame is available'
+        elif not latest_output:
+            error = 'No VLM output available yet'
+        else:
+            error = 'Last VLM call did not include a frame'
+
         return jsonify({
-            'frame_base64': image_base64,
-            'prompt': latest_prompt or '',
+            'error': error,
+            'frame_base64': None,
+            'prompt': prompt or '',
             'dedup_status': dedup,
-        })
+        }), 200
     except Exception as e:
         flask_logger.error(f"Error in debug frame-and-prompt for {io_id}: {e}", exc_info=True)
         return jsonify({'error': str(e), 'frame_base64': None, 'prompt': ''}), 500
