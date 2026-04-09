@@ -216,6 +216,13 @@ def openclaw_install_videomemory():
     script_path = Path(__file__).parent.parent / 'docs' / 'install-videomemory.sh'
     return send_file(script_path, mimetype='text/x-shellscript')
 
+
+@app.route('/openclaw/relaunch-videomemory.sh')
+def openclaw_relaunch_videomemory():
+    """Serve the host-side relaunch script used for upgrade + restart flows."""
+    script_path = Path(__file__).parent.parent / 'docs' / 'relaunch-videomemory.sh'
+    return send_file(script_path, mimetype='text/x-shellscript')
+
 @app.route('/device/<io_id>/debug')
 def device_debug(io_id):
     """Render the ingestor debug page for a device."""

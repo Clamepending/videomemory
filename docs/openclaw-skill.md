@@ -71,6 +71,28 @@ VIDEOMEMORY_TAILSCALE_AUTHKEY=tskey-auth-... \
 bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
 ```
 
+## Relaunch / upgrade
+
+If the user asks to relaunch, restart, or update VideoMemory, do not improvise with ad hoc `git pull` plus process commands.
+Run the current relaunch script from GitHub so the repo is upgraded first, the local host-managed process is restarted, and the user gets the current UI link plus commit:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/relaunch-videomemory.sh)
+```
+
+What this relaunch does:
+- upgrades the local repo to the latest fast-forward commit on the configured ref when the checkout is clean
+- refreshes the Python runtime
+- restarts the host-managed VideoMemory process from the bootstrap/install path
+- waits for `/api/health`
+- prints the user-facing UI link and the running repo commit
+
+After it succeeds, reply to the user with:
+- the user-facing VideoMemory UI link
+- the running repo commit shown by the script
+
+If the relaunch script says the repo has local changes or that VideoMemory is running outside the managed PID path, report that exact message instead of claiming the update succeeded.
+
 If OpenClaw needs to handle "watch for X, then do Y" requests, install the helper once:
 
 ```bash
@@ -93,6 +115,7 @@ Do not precompute those results during setup unless the user explicitly asked fo
 - During onboarding, if the user wants to use an Android phone camera from outside the same local network, tell them to install Tailscale on both the VideoMemory machine and the phone first.
 - If the user provides a `100.x.y.z` phone address, treat it as a Tailscale address and check that Tailscale is installed and connected on the VideoMemory host before trying to use that phone camera.
 - After successful onboarding, reply to the user with the user-facing VideoMemory UI link from bootstrap output. Prefer the Tailscale UI URL when one is available.
+- If the user asks for a relaunch or restart, use the current `relaunch-videomemory.sh` script from GitHub so the command upgrades before restarting.
 - If the user asks to rerun the bootstrap or install step, fetch and execute the current script instead of assuming an earlier failure still applies.
 - When a bootstrap or install command fails, report the actual failing command or stderr before proposing a fix.
 - Include `Content-Type: application/json` on `POST`, `PUT`, and `DELETE` calls that send JSON.
