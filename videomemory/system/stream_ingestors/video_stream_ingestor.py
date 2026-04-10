@@ -5,7 +5,10 @@ import logging
 import base64
 import json
 import os
+import platform
+import re
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Dict, Optional, Any, List, Tuple
@@ -26,6 +29,56 @@ load_dotenv()
 
 # Set up logger for this module
 logger = logging.getLogger('VideoStreamIngestor')
+
+_flask_background_loop: Optional[asyncio.AbstractEventLoop] = None
+_background_loop_thread: Optional[threading.Thread] = None
+_background_loop_lock = threading.Lock()
+
+
+def _run_background_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Run a persistent event loop in a daemon thread."""
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+
+def get_background_loop() -> Optional[asyncio.AbstractEventLoop]:
+    """Return a running background loop, creating a fallback one if needed."""
+    global _flask_background_loop, _background_loop_thread
+
+    loop = _flask_background_loop
+    if loop is not None and not loop.is_closed() and loop.is_running():
+        return loop
+
+    with _background_loop_lock:
+        loop = _flask_background_loop
+        if loop is not None and not loop.is_closed() and loop.is_running():
+            return loop
+
+        loop = asyncio.new_event_loop()
+        thread = threading.Thread(
+            target=_run_background_loop,
+            args=(loop,),
+            daemon=True,
+            name="VideoMemoryBackgroundLoop",
+        )
+        thread.start()
+
+        deadline = time.monotonic() + 0.5
+        while not loop.is_running() and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        if not loop.is_running():
+            logger.error("Failed to start fallback background event loop")
+            try:
+                loop.close()
+            except Exception:
+                pass
+            return None
+
+        _flask_background_loop = loop
+        _background_loop_thread = thread
+        logger.info("Started fallback background event loop for VideoStreamIngestor")
+        return loop
 
 # Pydantic models for structured output
 class TaskUpdate(BaseModel):
@@ -158,6 +211,7 @@ class VideoStreamIngestor:
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
         self._snapshot_client: Optional[httpx.Client] = None
         self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
+        self._latest_frame_timestamp: Optional[float] = None
         self._target_resolution = target_resolution # Default to 640x480
         self._keep_alive_without_tasks = False
         
@@ -165,6 +219,7 @@ class VideoStreamIngestor:
         self._output_history: deque = deque(maxlen=20)  # Store last 20 model outputs
         self._total_output_count: int = 0  # Track total number of outputs processed (for debugging)
         self._process_loop_ticks: int = 0
+        self._latest_inference_error: Optional[Dict[str, Any]] = None
         
         # Frame deduplication: skip VLM calls when the average pixel difference stays below threshold
         self._last_processed_frame: Optional[Any] = None  # Last frame sent to VLM
@@ -187,6 +242,40 @@ class VideoStreamIngestor:
         
         logger.info(f"Initialized for camera index={self.camera_index}")
 
+    def _local_camera_error_message(self) -> str:
+        """Return a platform-appropriate message for local camera open failures."""
+        if platform.system() == "Darwin":
+            return (
+                f"ERROR: Could not open camera {self.camera_source} for camera index={self.camera_index}\n"
+                f"  This is likely a macOS camera permission issue.\n"
+                f"  To fix:\n"
+                f"  1. Go to System Settings > Privacy & Security > Camera\n"
+                f"  2. Enable camera access for Terminal (or Python/your IDE)\n"
+                f"  3. Restart the application\n"
+                f"  Alternatively, the camera may be in use by another application."
+            )
+
+        device_hint = (
+            f"/dev/video{self.camera_source}"
+            if isinstance(self.camera_source, int)
+            else str(self.camera_source)
+        )
+        return (
+            f"ERROR: Could not open local camera {self.camera_source} for camera index={self.camera_index}\n"
+            f"  On {platform.system()}, this usually means the device is busy, disconnected, or not readable by the current user.\n"
+            f"  Device hint: {device_hint}\n"
+            f"  Check:\n"
+            f"  1. The camera is still connected and listed in /dev/video*\n"
+            f"  2. No other app is exclusively holding the device\n"
+            f"  3. The current user can read the device"
+        )
+
+    def _local_camera_error_note(self) -> str:
+        """Return a short task note for local camera open failures."""
+        if platform.system() == "Darwin":
+            return "Camera access denied. Please grant camera permissions in System Settings."
+        return "Local camera could not be opened. It may be busy, disconnected, or temporarily unavailable."
+
     def set_model_provider(self, model_provider: BaseModelProvider) -> None:
         """Swap the model provider used for future inference calls."""
         self._model_provider = model_provider
@@ -195,6 +284,50 @@ class VideoStreamIngestor:
                 "Model provider %s is not initialized after hot-reload; inference calls may fail.",
                 type(self._model_provider).__name__,
             )
+
+    def _build_inference_error_info(self, error: Exception) -> Dict[str, Any]:
+        """Build a small debug payload describing the latest inference failure."""
+        message = str(error).strip()
+        lowered = message.lower()
+        status_code = None
+        retry_delay_seconds = None
+
+        status_match = re.match(r"^\s*(\d{3})\b", message)
+        if status_match:
+            try:
+                status_code = int(status_match.group(1))
+            except ValueError:
+                status_code = None
+
+        retry_match = re.search(r"retry in ([0-9]+(?:\.[0-9]+)?)s", lowered)
+        if retry_match:
+            try:
+                retry_delay_seconds = float(retry_match.group(1))
+            except ValueError:
+                retry_delay_seconds = None
+
+        user_message = f"Model call failed: {message}"
+        if "resource_exhausted" in lowered or "quota exceeded" in lowered:
+            user_message = "Model quota exceeded. VideoMemory is still running, but new VLM updates are paused until quota resets or you switch models."
+            if retry_delay_seconds is not None:
+                user_message += f" Retry in about {int(round(retry_delay_seconds))}s."
+        elif status_code == 429:
+            user_message = "Model rate limit hit. VideoMemory is still running, but new VLM updates are temporarily paused."
+            if retry_delay_seconds is not None:
+                user_message += f" Retry in about {int(round(retry_delay_seconds))}s."
+        elif status_code and status_code >= 500:
+            user_message = "The model provider returned a server error. VideoMemory will keep capturing frames and retry automatically."
+        elif "connect" in lowered or "timeout" in lowered or "network" in lowered:
+            user_message = "VideoMemory could not reach the model provider. It will keep capturing frames and retry automatically."
+
+        return {
+            "timestamp": time.time(),
+            "message": message,
+            "user_message": user_message,
+            "status_code": status_code,
+            "retry_delay_seconds": retry_delay_seconds,
+            "error_type": type(error).__name__,
+        }
  
     async def start(self):
         """Start the video stream ingestor and all processing loops."""
@@ -216,6 +349,8 @@ class VideoStreamIngestor:
     
     def _open_camera(self) -> bool:
         """Open the camera (local or network). Returns True on success."""
+        self._release_camera()
+
         if self.is_snapshot_source:
             if self._snapshot_client is None:
                 timeout = httpx.Timeout(
@@ -251,14 +386,16 @@ class VideoStreamIngestor:
             else:
                 self._camera.open(self.camera_source)
         else:
-            import platform
             if platform.system() == 'Darwin':
                 self._camera = cv2.VideoCapture(self.camera_source, cv2.CAP_AVFOUNDATION)
             elif platform.system() == 'Linux':
                 self._camera = cv2.VideoCapture(self.camera_source, cv2.CAP_V4L2)
             else:
                 self._camera = cv2.VideoCapture(self.camera_source)
-        return self._camera.isOpened()
+        opened = self._camera.isOpened()
+        if not opened:
+            self._release_camera()
+        return opened
 
     def _release_camera(self):
         """Release current capture handle if open."""
@@ -296,17 +433,32 @@ class VideoStreamIngestor:
                     return True
             return False
 
-        error_msg = (
-            f"ERROR: Could not open camera {self.camera_source} for camera index={self.camera_index}\n"
-            f"  This is likely a macOS camera permission issue.\n"
-            f"  To fix:\n"
-            f"  1. Go to System Settings > Privacy & Security > Camera\n"
-            f"  2. Enable camera access for Terminal (or Python/your IDE)\n"
-            f"  3. Restart the application\n"
-            f"  Alternatively, the camera may be in use by another application."
-        )
-        logger.error(error_msg)
-        self._append_note_to_tasks("Camera access denied. Please grant camera permissions in System Settings.")
+        local_retry_count = max(0, int(os.environ.get("VIDEOMEMORY_LOCAL_CAMERA_OPEN_RETRY_COUNT", "10")))
+        local_retry_interval = max(0.0, float(os.environ.get("VIDEOMEMORY_LOCAL_CAMERA_RETRY_SECONDS", "0.5")))
+
+        for attempt in range(1, local_retry_count + 1):
+            if not self._running:
+                return False
+            logger.warning(
+                "Local camera open failed for camera index=%s; retrying (%s/%s) in %.2fs",
+                self.camera_index,
+                attempt,
+                local_retry_count,
+                local_retry_interval,
+            )
+            await asyncio.sleep(local_retry_interval)
+            opened = await asyncio.to_thread(self._open_camera)
+            if opened:
+                logger.info(
+                    "Opened local camera %s after retry %s/%s",
+                    self.camera_index,
+                    attempt,
+                    local_retry_count,
+                )
+                return True
+
+        logger.error(self._local_camera_error_message())
+        self._append_note_to_tasks(self._local_camera_error_note())
         return False
 
     async def _reconnect_network_stream(self) -> bool:
@@ -383,6 +535,7 @@ class VideoStreamIngestor:
 
         if current_frame.size > 0:
             self._latest_frame = current_frame.copy()
+            self._latest_frame_timestamp = time.time()
 
         return current_frame
 
@@ -451,8 +604,10 @@ class VideoStreamIngestor:
                 usage_context={"source": "task_ingestor"},
             )
             results = response.model_dump()
+            self._latest_inference_error = None
         except Exception as e:
             import httpx
+            self._latest_inference_error = self._build_inference_error_info(e)
             if isinstance(e, (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
                 logger.warning(
                     "LLM inference network error (will skip this frame) [camera=%s]: %s: %s.",
@@ -467,6 +622,7 @@ class VideoStreamIngestor:
 
         if results:
             results["processing_time_ms"] = round((time.time() - t0) * 1000)
+            results["timestamp"] = time.time()
             results["frame"] = frame.copy()
             results["prompt"] = prompt
             self._output_history.append(results)
@@ -535,6 +691,10 @@ class VideoStreamIngestor:
             logger.error(f"Error in capture loop for camera index={self.camera_index}: {e}", exc_info=True)
             self._running = False
         finally:
+            self._running = False
+            current_task = asyncio.current_task()
+            if self._loop is current_task:
+                self._loop = None
             self._release_camera()
     
     def _is_frame_duplicate(self, frame: Any) -> bool:
@@ -588,7 +748,7 @@ class VideoStreamIngestor:
             loop = asyncio.get_running_loop()
             asyncio.create_task(self.stop())
         except RuntimeError:
-            bg_loop = getattr(sys.modules[__name__], '_flask_background_loop', None)
+            bg_loop = get_background_loop()
             if bg_loop and bg_loop.is_running():
                 asyncio.run_coroutine_threadsafe(self.stop(), bg_loop)
             else:
@@ -840,6 +1000,16 @@ class VideoStreamIngestor:
     def get_latest_output(self) -> Optional[Dict]:
         """Get the latest LLM output (includes frame and prompt from the same LLM call)."""
         return self._output_history[-1] if self._output_history else None
+
+    def get_latest_inference_error(self) -> Optional[Dict[str, Any]]:
+        """Return the latest inference error for debug surfaces."""
+        if self._latest_inference_error is None:
+            return None
+        return dict(self._latest_inference_error)
+
+    def get_latest_frame_timestamp(self) -> Optional[float]:
+        """Return when the latest frame was captured."""
+        return self._latest_frame_timestamp
     
     def get_total_output_count(self) -> int:
         """Get the total number of outputs processed (for debugging)."""
@@ -857,6 +1027,14 @@ class VideoStreamIngestor:
 
     def ensure_started(self) -> None:
         """Start the ingestor if needed using the active event loop strategy."""
+        if self._running and self._loop is not None and self._loop.done():
+            logger.warning(
+                "Detected stale running state for camera index=%s; clearing finished capture task",
+                self.camera_index,
+            )
+            self._running = False
+            self._loop = None
+
         if self._running:
             logger.debug(
                 "[DEBUG] VideoStreamIngestor.ensure_started: Ingestor already running for camera_index=%s",
@@ -883,15 +1061,15 @@ class VideoStreamIngestor:
             asyncio.get_running_loop()
             asyncio.create_task(start_with_error_handling())
         except RuntimeError:
-            # Not inside an async context — use the Flask background loop if available
-            bg_loop = getattr(sys.modules[__name__], '_flask_background_loop', None)
+            # Not inside an async context — use the shared background loop.
+            bg_loop = get_background_loop()
             if bg_loop and bg_loop.is_running():
                 asyncio.run_coroutine_threadsafe(start_with_error_handling(), bg_loop)
                 logger.debug(
                     "[DEBUG] VideoStreamIngestor.ensure_started: Scheduled start() on Flask background loop"
                 )
             else:
-                logger.warning("No event loop available. Call start() manually.")
+                logger.warning("No event loop available. Could not start ingestor automatically.")
 
     def get_dedup_status(self) -> Dict[str, Any]:
         """Get frame deduplication status for UI display.

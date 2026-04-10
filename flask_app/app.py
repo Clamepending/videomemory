@@ -72,6 +72,42 @@ def add_no_store_headers_for_debug_routes(response: Response) -> Response:
         return _apply_no_store_headers(response)
     return response
 
+
+# Create a persistent event loop in a background thread before TaskManager startup.
+# Persisted active tasks may resume during TaskManager initialization, so the
+# ingestor module needs a running loop available immediately.
+background_loop = None
+background_thread = None
+
+
+def run_background_loop(loop):
+    """Run the event loop in a background thread."""
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+
+def get_background_loop():
+    """Get or create the background event loop."""
+    global background_loop, background_thread
+    if background_loop is None or background_loop.is_closed():
+        background_loop = asyncio.new_event_loop()
+        background_thread = threading.Thread(
+            target=run_background_loop,
+            args=(background_loop,),
+            daemon=True,
+            name="FlaskBackgroundEventLoop"
+        )
+        background_thread.start()
+        time.sleep(0.1)
+    return background_loop
+
+
+# Initialize the background loop and expose it to the ingestor module before
+# any tasks are resumed from the database.
+background_loop = get_background_loop()
+import videomemory.system.stream_ingestors.video_stream_ingestor as vsi_module
+vsi_module._flask_background_loop = background_loop
+
 # ── Database setup ────────────────────────────────────────────
 data_dir = get_default_data_dir()
 data_dir.mkdir(parents=True, exist_ok=True)
@@ -191,41 +227,6 @@ def _build_device_debug_prompt(io_id: str, ingestor: Optional[Any] = None) -> st
     if prompt:
         return prompt
     return build_video_ingestor_prompt(tasks, context_label=io_id, include_done=True)
-
-# Create a persistent event loop in a background thread
-# This allows async tasks (like video ingestor) to run continuously
-background_loop = None
-background_thread = None
-
-def run_background_loop(loop):
-    """Run the event loop in a background thread."""
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
-
-def get_background_loop():
-    """Get or create the background event loop."""
-    global background_loop, background_thread
-    if background_loop is None or background_loop.is_closed():
-        background_loop = asyncio.new_event_loop()
-        background_thread = threading.Thread(
-            target=run_background_loop,
-            args=(background_loop,),
-            daemon=True,
-            name="FlaskBackgroundEventLoop"
-        )
-        background_thread.start()
-        # Wait a moment for the loop to start
-        import time
-        time.sleep(0.1)
-    return background_loop
-
-# Initialize the background loop
-background_loop = get_background_loop()
-
-# Store the background loop in a module that video ingestor can access
-# This allows the video ingestor to schedule tasks in the persistent loop
-import videomemory.system.stream_ingestors.video_stream_ingestor as vsi_module
-vsi_module._flask_background_loop = background_loop
 
 # ── Page routes ───────────────────────────────────────────────
 
@@ -993,10 +994,12 @@ def get_ingestor_status(io_id):
         ingestor = task_manager.get_ingestor(io_id) if has else None
         running = ingestor._running if ingestor else False
         has_debug_artifact = _get_latest_persisted_debug_snapshot(io_id) is not None
+        latest_inference_error = ingestor.get_latest_inference_error() if ingestor is not None else None
         return jsonify({
             'has_ingestor': has,
             'running': running,
             'has_debug_artifact': has_debug_artifact,
+            'latest_inference_error': latest_inference_error,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1037,14 +1040,30 @@ def get_ingestor_frame_and_prompt(io_id):
     try:
         ingestor = task_manager.get_ingestor(io_id)
         latest_output = ingestor.get_latest_output() if ingestor is not None else None
+        latest_frame = ingestor.get_latest_frame() if ingestor is not None else None
+        latest_frame_timestamp = ingestor.get_latest_frame_timestamp() if ingestor is not None else None
+        latest_error = ingestor.get_latest_inference_error() if ingestor is not None else None
         dedup = ingestor.get_dedup_status() if ingestor is not None else None
         prompt = _build_device_debug_prompt(io_id, ingestor=ingestor)
-
+        latest_output_timestamp = None
         if latest_output:
-            latest_frame = latest_output.get('frame')
+            latest_output_timestamp = latest_output.get('timestamp')
+        latest_error_timestamp = latest_error.get('timestamp') if latest_error else None
+        prefer_live_frame = (
+            latest_frame is not None
+            and getattr(latest_frame, "size", 0) > 0
+            and (
+                latest_output is None
+                or (latest_frame_timestamp is not None and latest_output_timestamp is not None and latest_frame_timestamp > latest_output_timestamp)
+                or (latest_error_timestamp is not None and (latest_output_timestamp is None or latest_error_timestamp >= latest_output_timestamp))
+            )
+        )
+
+        if latest_output and not prefer_live_frame:
+            output_frame = latest_output.get('frame')
             latest_prompt = latest_output.get('prompt') or prompt
-            if latest_frame is not None:
-                _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if output_frame is not None:
+                _, buffer = cv2.imencode('.jpg', output_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 image_base64 = base64.b64encode(buffer).decode('utf-8')
                 source_label = 'Showing last VLM call'
                 if ingestor is not None and not ingestor._running:
@@ -1055,26 +1074,59 @@ def get_ingestor_frame_and_prompt(io_id):
                     'dedup_status': dedup,
                     'source': 'live_output',
                     'source_label': source_label,
+                    'inference_error': latest_error,
                 })
+
+        if latest_frame is not None and getattr(latest_frame, "size", 0) > 0:
+            _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            image_base64 = base64.b64encode(buffer).decode('utf-8')
+            source_label = 'Showing latest live frame before the first VLM call'
+            prompt_notice_parts = []
+            if ingestor is not None and not ingestor._running:
+                source_label = 'Showing latest captured frame from before the ingestor stopped'
+            if latest_error_timestamp is not None and (latest_output_timestamp is None or latest_error_timestamp >= latest_output_timestamp):
+                error_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest_error_timestamp))
+                source_label = f"Showing latest live frame. Last model call failed at {error_time}"
+                if latest_error and latest_error.get('user_message'):
+                    prompt_notice_parts.append(latest_error['user_message'])
+                prompt_notice_parts.append('Showing the current camera frame even though the latest VLM call failed.')
+            elif latest_output_timestamp is not None and latest_frame_timestamp is not None and latest_frame_timestamp > latest_output_timestamp:
+                source_label = 'Showing latest live frame (newer than the last recorded VLM call)'
+                prompt_notice_parts.append('Showing the current camera frame. The latest successful VLM result is older than this frame.')
+            elif latest_output is None:
+                prompt_notice_parts.append('Prompt shown for the active tasks. A model result has not been recorded yet.')
+
+            return jsonify({
+                'frame_base64': image_base64,
+                'prompt': prompt or '',
+                'prompt_notice': '\n\n'.join(prompt_notice_parts),
+                'dedup_status': dedup,
+                'source': 'live_frame',
+                'source_label': source_label,
+                'inference_error': latest_error,
+            })
 
         persisted_snapshot = _get_latest_persisted_debug_snapshot(io_id)
         if persisted_snapshot is not None:
             note = persisted_snapshot['note']
             task = persisted_snapshot['task']
             note_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(note.timestamp))
-            prompt_notice = ''
+            prompt_notice_parts = []
+            if latest_error and latest_error.get('user_message'):
+                prompt_notice_parts.append(latest_error['user_message'])
             if prompt:
-                prompt_notice = 'Prompt reconstructed from current task context. Showing the most recent note-backed VLM frame.'
+                prompt_notice_parts.append('Prompt reconstructed from current task context. Showing the most recent note-backed VLM frame.')
             return jsonify({
                 'frame_base64': base64.b64encode(persisted_snapshot['frame_bytes']).decode('utf-8'),
                 'prompt': prompt or '',
-                'prompt_notice': prompt_notice,
+                'prompt_notice': '\n\n'.join(prompt_notice_parts),
                 'dedup_status': dedup,
                 'source': 'persisted_note_frame',
                 'source_label': f'Showing most recent note-backed frame from {note_time}',
                 'note_content': note.content,
                 'note_id': note.note_id,
                 'task_desc': getattr(task, 'task_desc', ''),
+                'inference_error': latest_error,
             })
 
         if ingestor is None:
@@ -1091,6 +1143,7 @@ def get_ingestor_frame_and_prompt(io_id):
             'frame_base64': None,
             'prompt': prompt or '',
             'dedup_status': dedup,
+            'inference_error': latest_error,
         }), 200
     except Exception as e:
         flask_logger.error(f"Error in debug frame-and-prompt for {io_id}: {e}", exc_info=True)
@@ -1111,7 +1164,8 @@ def get_ingestor_history(io_id):
         return jsonify({
             'history': history_clean,
             'count': len(history_clean),
-            'total_count': total_count
+            'total_count': total_count,
+            'latest_inference_error': ingestor.get_latest_inference_error(),
         })
     except Exception as e:
         flask_logger.error(f"Error in debug history for {io_id}: {e}", exc_info=True)

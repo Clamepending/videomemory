@@ -58,15 +58,17 @@ class TaskManager:
     def _load_tasks_from_db(self):
         """Load previously persisted tasks from the database on startup.
         
-        Any tasks that were still active (not done) are marked as 'terminated'
-        since no ingestor is running for them after a restart.
+        When an IO manager is available, active camera tasks are resumed by
+        recreating their ingestors. If a task cannot be resumed, it is marked
+        as terminated. Without an IO manager, active tasks are terminated.
         """
         try:
-            # First, mark all active tasks in the DB as terminated
-            terminated_count = self._db.terminate_active_tasks()
-            
-            # Now load all tasks (with updated statuses)
+            terminated_count = 0
+            if self._io_manager is None:
+                terminated_count = self._db.terminate_active_tasks()
+
             saved_tasks = self._db.load_all_tasks()
+            resumable_tasks: List[Task] = []
             for t in saved_tasks:
                 notes = [
                     NoteEntry(
@@ -88,6 +90,13 @@ class TaskManager:
                     bot_id=t.get('bot_id'),
                 )
                 self._tasks[t['task_id']] = task
+                if self._io_manager is not None and task.status == STATUS_ACTIVE and not task.done:
+                    resumable_tasks.append(task)
+
+            resumed_count = 0
+            if resumable_tasks:
+                resumed_count, extra_terminated = self._resume_tasks_from_db(resumable_tasks)
+                terminated_count += extra_terminated
             
             # Resume counter from the highest existing task ID
             max_id = self._db.get_max_task_id()
@@ -96,10 +105,106 @@ class TaskManager:
             if saved_tasks:
                 logger.info(
                     f"Loaded {len(saved_tasks)} tasks from database "
-                    f"(counter at {self._task_counter}, {terminated_count} terminated)"
+                    f"(counter at {self._task_counter}, {resumed_count} resumed, {terminated_count} terminated)"
                 )
         except Exception as e:
             logger.error(f"Failed to load tasks from database: {e}", exc_info=True)
+
+    def _mark_task_terminated(self, task: Task) -> None:
+        """Mark an active task as terminated when it cannot be resumed."""
+        task.status = STATUS_TERMINATED
+        if self._db is None:
+            return
+        try:
+            self._db.update_task_status(task.task_id, STATUS_TERMINATED)
+        except Exception as e:
+            logger.error("Failed to mark task %s terminated: %s", task.task_id, e, exc_info=True)
+
+    def _resume_tasks_from_db(self, tasks: List[Task]) -> tuple[int, int]:
+        """Recreate ingestors for persisted active tasks when possible."""
+        resumed_count = 0
+        terminated_count = 0
+
+        tasks_by_io: Dict[str, List[Task]] = {}
+        for task in tasks:
+            tasks_by_io.setdefault(task.io_id, []).append(task)
+
+        for io_id, io_tasks in tasks_by_io.items():
+            stream_info = self._io_manager.get_stream_info(io_id) if self._io_manager is not None else None
+            if stream_info is None or stream_info.get("category") != "camera":
+                logger.warning("Cannot resume tasks for io_id=%s because no camera stream is available", io_id)
+                for task in io_tasks:
+                    self._mark_task_terminated(task)
+                    terminated_count += 1
+                continue
+
+            try:
+                ingestor = self._create_ingestor_for_stream(io_id, stream_info)
+            except Exception as e:
+                logger.error("Failed to recreate ingestor for io_id=%s during startup: %s", io_id, e, exc_info=True)
+                for task in io_tasks:
+                    self._mark_task_terminated(task)
+                    terminated_count += 1
+                continue
+
+            for task in io_tasks:
+                try:
+                    ingestor.add_task(task)
+                    task.status = STATUS_ACTIVE
+                    resumed_count += 1
+                except Exception as e:
+                    logger.error("Failed to resume task %s on io_id=%s: %s", task.task_id, io_id, e, exc_info=True)
+                    self._mark_task_terminated(task)
+                    terminated_count += 1
+
+        return resumed_count, terminated_count
+
+    def _resume_pending_tasks_for_io(self, io_id: str) -> int:
+        """Best-effort resume of active or restart-terminated tasks for one device."""
+        if self._io_manager is None:
+            return 0
+        if io_id in self._ingestors:
+            return 0
+
+        pending_tasks = [
+            task for task in self._tasks.values()
+            if task.io_id == io_id and not task.done and task.status in {STATUS_ACTIVE, STATUS_TERMINATED}
+        ]
+        if not pending_tasks:
+            return 0
+
+        stream_info = self._io_manager.get_stream_info(io_id)
+        if stream_info is None or stream_info.get("category") != "camera":
+            return 0
+
+        try:
+            ingestor = self._create_ingestor_for_stream(io_id, stream_info)
+        except Exception as e:
+            logger.error("Failed to recreate ingestor for io_id=%s while resuming pending tasks: %s", io_id, e, exc_info=True)
+            return 0
+
+        resumed_count = 0
+        for task in pending_tasks:
+            try:
+                ingestor.add_task(task)
+                task.status = STATUS_ACTIVE
+                if self._db is not None:
+                    self._db.update_task_status(task.task_id, STATUS_ACTIVE)
+                resumed_count += 1
+            except Exception as e:
+                logger.error("Failed to resume task %s for io_id=%s: %s", task.task_id, io_id, e, exc_info=True)
+        return resumed_count
+
+    def _resume_pending_tasks(self, io_id: Optional[str] = None) -> int:
+        """Best-effort resume for pending active/terminated tasks."""
+        if io_id is not None:
+            return self._resume_pending_tasks_for_io(io_id)
+
+        resumed_count = 0
+        io_ids = sorted({task.io_id for task in self._tasks.values() if not task.done and task.status in {STATUS_ACTIVE, STATUS_TERMINATED}})
+        for pending_io_id in io_ids:
+            resumed_count += self._resume_pending_tasks_for_io(pending_io_id)
+        return resumed_count
     
     def _on_task_updated(self, task: Task, new_note: Optional[NoteEntry] = None):
         """Callback for video ingestors to persist task changes.
@@ -428,12 +533,14 @@ class TaskManager:
         Returns:
             List of task dictionaries
         """
+        self._resume_pending_tasks(io_id)
         if io_id:
             return [task.to_dict() for task in self._tasks.values() if task.io_id == io_id]
         return [task.to_dict() for task in self._tasks.values()]
 
     def get_task_objects(self, io_id: Optional[str] = None) -> List[Task]:
         """Return live Task objects, optionally filtered by io_id."""
+        self._resume_pending_tasks(io_id)
         if io_id:
             return [task for task in self._tasks.values() if task.io_id == io_id]
         return list(self._tasks.values())
@@ -641,6 +748,7 @@ class TaskManager:
         Returns:
             The VideoStreamIngestor instance, or None if no ingestor is active for this device
         """
+        self._resume_pending_tasks_for_io(io_id)
         return self._ingestors.get(io_id)
     
     def has_ingestor(self, io_id: str) -> bool:
@@ -652,6 +760,7 @@ class TaskManager:
         Returns:
             True if an active ingestor exists for this device
         """
+        self._resume_pending_tasks_for_io(io_id)
         return io_id in self._ingestors
 
     def get_ingestor_frame_skip_threshold(self, io_id: str) -> Dict[str, Any]:

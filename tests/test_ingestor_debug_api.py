@@ -115,6 +115,9 @@ class IngestorDebugApiTests(unittest.TestCase):
             ingestor = SimpleNamespace(
                 _running=True,
                 get_latest_output=lambda: None,
+                get_latest_frame=lambda: None,
+                get_latest_frame_timestamp=lambda: None,
+                get_latest_inference_error=lambda: None,
                 get_dedup_status=lambda: {"consecutive_skips": 4, "average_pixel_diff_threshold": 3.0},
                 get_tasks_list=lambda: [task],
             )
@@ -131,6 +134,117 @@ class IngestorDebugApiTests(unittest.TestCase):
         self.assertEqual(data["source"], "persisted_note_frame")
         self.assertEqual(data["dedup_status"]["consecutive_skips"], 4)
         self.assertIn("count desk items", data["prompt"])
+
+    def test_debug_frame_endpoint_falls_back_to_latest_live_frame_before_first_vlm_call(self):
+        frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        frame[:, :] = (25, 90, 210)
+        task = Task(
+            task_number=0,
+            task_id="1",
+            task_desc="count desk items",
+            task_note=[],
+            done=False,
+            io_id="0",
+        )
+        ingestor = SimpleNamespace(
+            _running=True,
+            get_latest_output=lambda: None,
+            get_latest_frame=lambda: frame,
+            get_latest_frame_timestamp=lambda: 1712609854.0,
+            get_latest_inference_error=lambda: None,
+            get_dedup_status=lambda: {"consecutive_skips": 0, "average_pixel_diff_threshold": 3.0},
+            get_tasks_list=lambda: [task],
+        )
+
+        with patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor):
+            resp = self.client.get("/api/device/0/debug/frame-and-prompt")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["source"], "live_frame")
+        self.assertTrue(data["frame_base64"])
+        self.assertIn("count desk items", data["prompt"])
+        self.assertIn("first VLM call", data["source_label"])
+        self.assertIn("has not been recorded yet", data["prompt_notice"])
+
+    def test_debug_frame_endpoint_prefers_live_frame_when_latest_inference_failed(self):
+        stale_frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        stale_frame[:, :] = (0, 0, 255)
+        live_frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        live_frame[:, :] = (0, 255, 0)
+        task = Task(
+            task_number=0,
+            task_id="1",
+            task_desc="watch for people",
+            task_note=[],
+            done=False,
+            io_id="0",
+        )
+        ingestor = SimpleNamespace(
+            _running=True,
+            get_latest_output=lambda: {
+                "frame": stale_frame,
+                "prompt": "stale prompt",
+                "timestamp": 1712609800.0,
+                "task_updates": [],
+            },
+            get_latest_frame=lambda: live_frame,
+            get_latest_frame_timestamp=lambda: 1712609860.0,
+            get_latest_inference_error=lambda: {
+                "timestamp": 1712609859.0,
+                "user_message": "Model quota exceeded. Retry in about 30s.",
+                "message": "429 RESOURCE_EXHAUSTED",
+            },
+            get_dedup_status=lambda: {"consecutive_skips": 0, "average_pixel_diff_threshold": 3.0},
+            get_tasks_list=lambda: [task],
+        )
+
+        with patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor):
+            resp = self.client.get("/api/device/0/debug/frame-and-prompt")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["source"], "live_frame")
+        self.assertIn("failed", data["source_label"])
+        self.assertIn("quota exceeded", data["prompt_notice"].lower())
+        self.assertEqual(data["inference_error"]["message"], "429 RESOURCE_EXHAUSTED")
+
+    def test_debug_frame_endpoint_labels_live_frame_as_newer_than_last_vlm_call(self):
+        stale_frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        stale_frame[:, :] = (0, 0, 255)
+        live_frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        live_frame[:, :] = (0, 255, 0)
+        task = Task(
+            task_number=0,
+            task_id="1",
+            task_desc="watch for people",
+            task_note=[],
+            done=False,
+            io_id="0",
+        )
+        ingestor = SimpleNamespace(
+            _running=True,
+            get_latest_output=lambda: {
+                "frame": stale_frame,
+                "prompt": "stale prompt",
+                "timestamp": 1712609800.0,
+                "task_updates": [],
+            },
+            get_latest_frame=lambda: live_frame,
+            get_latest_frame_timestamp=lambda: 1712609860.0,
+            get_latest_inference_error=lambda: None,
+            get_dedup_status=lambda: {"consecutive_skips": 0, "average_pixel_diff_threshold": 3.0},
+            get_tasks_list=lambda: [task],
+        )
+
+        with patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor):
+            resp = self.client.get("/api/device/0/debug/frame-and-prompt")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["source"], "live_frame")
+        self.assertIn("newer than the last recorded VLM call", data["source_label"])
+        self.assertIn("older than this frame", data["prompt_notice"])
 
     def test_debug_tasks_endpoint_falls_back_to_task_manager_when_ingestor_has_no_tasks(self):
         task = Task(
@@ -154,6 +268,37 @@ class IngestorDebugApiTests(unittest.TestCase):
         self.assertEqual(len(data["tasks"]), 1)
         self.assertEqual(data["tasks"][0]["task_desc"], "count desk items")
         self.assertEqual(data["tasks"][0]["latest_note"]["content"], "Desk unchanged")
+
+    def test_debug_status_and_history_include_latest_inference_error(self):
+        ingestor = SimpleNamespace(
+            _running=True,
+            get_output_history=lambda: [],
+            get_total_output_count=lambda: 0,
+            get_latest_inference_error=lambda: {
+                "timestamp": 1712609900.0,
+                "user_message": "Model quota exceeded. Retry in about 30s.",
+                "message": "429 RESOURCE_EXHAUSTED",
+            },
+        )
+
+        with (
+            patch.object(app_module.task_manager, "has_ingestor", return_value=True),
+            patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor),
+            patch.object(app_module, "_get_latest_persisted_debug_snapshot", return_value=None),
+        ):
+            status_resp = self.client.get("/api/device/0/debug/status")
+            history_resp = self.client.get("/api/device/0/debug/history")
+
+        self.assertEqual(status_resp.status_code, 200)
+        self.assertEqual(history_resp.status_code, 200)
+        self.assertEqual(
+            status_resp.get_json()["latest_inference_error"]["message"],
+            "429 RESOURCE_EXHAUSTED",
+        )
+        self.assertEqual(
+            history_resp.get_json()["latest_inference_error"]["message"],
+            "429 RESOURCE_EXHAUSTED",
+        )
 
     def test_debug_page_template_avoids_nullish_coalescing_for_browser_compatibility(self):
         resp = self.client.get("/device/net0/debug")

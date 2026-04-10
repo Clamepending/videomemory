@@ -114,6 +114,17 @@
             border: 1px solid #5c5c00;
         }
 
+        .frame-error-badge {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            background: #4a1f1f;
+            color: #ffb3b3;
+            border: 1px solid #7a2f2f;
+        }
+
         .frame-controls {
             margin-top: 16px;
             padding: 14px;
@@ -380,6 +391,7 @@
                         <h2>Current Frame</h2>
                         <img id="currentFrame" alt="Current frame" />
                         <div class="frame-timestamp" id="frameTimestamp"></div>
+                        <div id="frameErrorBadge" class="frame-error-badge" style="display: none;"></div>
                         <div id="frameDedupBadge" class="frame-dedup-badge" style="display: none;"></div>
                         <div class="frame-controls">
                             <div class="frame-controls-header">
@@ -425,6 +437,7 @@
                 const ts = document.getElementById('frameTimestamp');
                 const prompt = document.getElementById('promptContent');
                 if (!img) return;
+                const errorBadge = document.getElementById('frameErrorBadge');
 
                 if (data.frame_base64) {
                     img.src = 'data:image/jpeg;base64,' + data.frame_base64;
@@ -432,6 +445,12 @@
                 } else {
                     img.src = '';
                     ts.textContent = data.source_label || data.error || 'No frame available';
+                }
+                if (errorBadge && data.inference_error && data.inference_error.user_message) {
+                    errorBadge.style.display = 'inline-block';
+                    errorBadge.textContent = data.inference_error.user_message;
+                } else if (errorBadge) {
+                    errorBadge.style.display = 'none';
                 }
                 const dedupBadge = document.getElementById('frameDedupBadge');
                 if (dedupBadge && data.dedup_status && data.dedup_status.consecutive_skips > 0) {
@@ -584,14 +603,20 @@
 
                 const history = data.history || [];
                 const totalCount = data.total_count || history.length;
+                const latestError = data.latest_inference_error;
                 if (countSpan) countSpan.textContent = `(${totalCount} total)`;
 
-                if (history.length === 0) {
+                if (history.length === 0 && !latestError) {
                     container.innerHTML = '<span class="no-data">No output history yet...</span>';
                     return;
                 }
 
                 let html = '';
+                if (latestError && latestError.user_message) {
+                    html += '<div class="history-entry" style="border-left-color:#c55;">';
+                    html += `<strong>Latest inference error</strong><br>${escapeHtml(latestError.user_message)}`;
+                    html += '</div>';
+                }
                 for (let i = history.length - 1; i >= 0; i--) {
                     const output = history[i];
                     const outputNumber = totalCount - (history.length - 1 - i);

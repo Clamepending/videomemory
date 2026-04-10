@@ -1,3 +1,5 @@
+import os
+from unittest.mock import AsyncMock, Mock, patch
 import unittest
 
 from videomemory.system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
@@ -108,6 +110,75 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
         self.assertIs(ingestor._tasks_list[0], keep_task)
         self.assertEqual(keep_task.task_number, 0)
         self.assertFalse(keep_task.done)
+
+
+class VideoStreamIngestorStartupTests(unittest.IsolatedAsyncioTestCase):
+    def test_open_camera_releases_failed_local_capture_handle(self):
+        ingestor = VideoStreamIngestor(0, model_provider=object())
+        fake_cap = Mock()
+        fake_cap.isOpened.return_value = False
+
+        with (
+            patch("videomemory.system.stream_ingestors.video_stream_ingestor.platform.system", return_value="Linux"),
+            patch("videomemory.system.stream_ingestors.video_stream_ingestor.cv2.VideoCapture", return_value=fake_cap),
+        ):
+            opened = ingestor._open_camera()
+
+        self.assertFalse(opened)
+        fake_cap.release.assert_called_once()
+        self.assertIsNone(ingestor._camera)
+
+    async def test_ensure_camera_open_retries_local_camera_transient_failure(self):
+        ingestor = VideoStreamIngestor(0, model_provider=object())
+        ingestor._running = True
+        attempts = []
+
+        def fake_open_camera():
+            attempts.append(True)
+            return len(attempts) >= 2
+
+        with (
+            patch.object(ingestor, "_open_camera", side_effect=fake_open_camera),
+            patch.dict(
+                os.environ,
+                {
+                    "VIDEOMEMORY_LOCAL_CAMERA_OPEN_RETRY_COUNT": "2",
+                    "VIDEOMEMORY_LOCAL_CAMERA_RETRY_SECONDS": "0",
+                },
+                clear=False,
+            ),
+        ):
+            opened = await ingestor._ensure_camera_open()
+
+        self.assertTrue(opened)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(ingestor.get_tasks_list(), [])
+
+    async def test_start_clears_running_state_when_camera_never_opens(self):
+        ingestor = VideoStreamIngestor(0, model_provider=object())
+
+        with patch.object(ingestor, "_ensure_camera_open", AsyncMock(return_value=False)):
+            await ingestor.start()
+
+        self.assertFalse(ingestor._running)
+        self.assertIsNone(ingestor._loop)
+
+    def test_ensure_started_uses_shared_background_loop_when_no_running_loop(self):
+        ingestor = VideoStreamIngestor(0, model_provider=object())
+        fake_loop = Mock()
+        fake_loop.is_running.return_value = True
+
+        with (
+            patch("videomemory.system.stream_ingestors.video_stream_ingestor.asyncio.get_running_loop", side_effect=RuntimeError),
+            patch("videomemory.system.stream_ingestors.video_stream_ingestor.get_background_loop", return_value=fake_loop),
+            patch("videomemory.system.stream_ingestors.video_stream_ingestor.asyncio.run_coroutine_threadsafe") as mock_run_threadsafe,
+        ):
+            ingestor.ensure_started()
+
+        mock_run_threadsafe.assert_called_once()
+        scheduled_coro = mock_run_threadsafe.call_args.args[0]
+        self.assertIs(mock_run_threadsafe.call_args.args[1], fake_loop)
+        scheduled_coro.close()
 
 
 if __name__ == "__main__":
