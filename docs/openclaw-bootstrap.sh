@@ -424,6 +424,129 @@ notify_user_with_ui_link() {
   log "Reply to the user with this VideoMemory UI link: $ui_url"
 }
 
+read_openclaw_webhook_config() {
+  CONFIG_PATH="$OPENCLAW_HOME/openclaw.json"
+  [ -f "$CONFIG_PATH" ] || return 0
+
+  if [ -n "$NODE_BIN" ]; then
+    OPENCLAW_CONFIG_PATH="$CONFIG_PATH" OPENCLAW_BOOTSTRAP_BOT_ID="$BOT_ID" "$NODE_BIN" <<'EOF'
+const fs = require("node:fs");
+
+try {
+  const config = JSON.parse(fs.readFileSync(process.env.OPENCLAW_CONFIG_PATH, "utf8"));
+  const gateway = typeof config?.gateway === "object" && config.gateway ? config.gateway : {};
+  const hooks = typeof config?.hooks === "object" && config.hooks ? config.hooks : {};
+  const mappings = Array.isArray(hooks.mappings) ? hooks.mappings : [];
+  const mapping =
+    mappings.find((entry) => entry && entry.id === "videomemory-alert") ||
+    mappings.find((entry) => entry && entry.match && entry.match.path);
+  const port = Number.isFinite(Number(gateway.port)) && Number(gateway.port) > 0 ? Number(gateway.port) : 18789;
+  const hooksPath = typeof hooks.path === "string" && hooks.path.trim() ? hooks.path.trim() : "/hooks";
+  const mappingPath =
+    typeof mapping?.match?.path === "string" && mapping.match.path.trim()
+      ? mapping.match.path.trim()
+      : "videomemory-alert";
+  const normalizedHooksPath = hooksPath.startsWith("/") ? hooksPath : `/${hooksPath}`;
+  const normalizedMappingPath = mappingPath.replace(/^\/+/, "");
+  const url = `http://127.0.0.1:${port}${normalizedHooksPath}/${normalizedMappingPath}`;
+  const token = typeof hooks.token === "string" ? hooks.token.trim() : "";
+  const botId = (process.env.OPENCLAW_BOOTSTRAP_BOT_ID || "").trim();
+  process.stdout.write([url, token, botId].join("\n"));
+} catch (_) {}
+EOF
+    return 0
+  fi
+
+  OPENCLAW_CONFIG_PATH="$CONFIG_PATH" OPENCLAW_BOOTSTRAP_BOT_ID="$BOT_ID" "$PYTHON_BIN" <<'EOF'
+import json
+import os
+from pathlib import Path
+
+try:
+    config = json.loads(Path(os.environ["OPENCLAW_CONFIG_PATH"]).read_text())
+    gateway = config.get("gateway")
+    if not isinstance(gateway, dict):
+        gateway = {}
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    mappings = hooks.get("mappings")
+    if not isinstance(mappings, list):
+        mappings = []
+
+    mapping = None
+    for entry in mappings:
+        if isinstance(entry, dict) and entry.get("id") == "videomemory-alert":
+            mapping = entry
+            break
+    if mapping is None:
+        for entry in mappings:
+            if isinstance(entry, dict) and isinstance(entry.get("match"), dict) and entry["match"].get("path"):
+                mapping = entry
+                break
+
+    try:
+        port = int(gateway.get("port") or 18789)
+    except (TypeError, ValueError):
+        port = 18789
+
+    hooks_path = str(hooks.get("path") or "/hooks").strip() or "/hooks"
+    mapping_path = "videomemory-alert"
+    if isinstance(mapping, dict):
+        match = mapping.get("match")
+        if isinstance(match, dict) and str(match.get("path") or "").strip():
+            mapping_path = str(match.get("path")).strip()
+
+    if not hooks_path.startswith("/"):
+        hooks_path = "/" + hooks_path
+    mapping_path = mapping_path.lstrip("/")
+
+    url = f"http://127.0.0.1:{port}{hooks_path}/{mapping_path}"
+    token = str(hooks.get("token") or "").strip()
+    bot_id = str(os.environ.get("OPENCLAW_BOOTSTRAP_BOT_ID") or "").strip()
+    print(url)
+    print(token)
+    print(bot_id, end="")
+except Exception:
+    pass
+EOF
+}
+
+sync_openclaw_webhook_settings() {
+  CONFIG_PATH="$OPENCLAW_HOME/openclaw.json"
+  if [ ! -f "$CONFIG_PATH" ]; then
+    log "OpenClaw config not found at $CONFIG_PATH; skipping webhook sync"
+    return 0
+  fi
+
+  webhook_info="$(read_openclaw_webhook_config || true)"
+  webhook_url="$(printf '%s\n' "$webhook_info" | sed -n '1p')"
+  webhook_token="$(printf '%s\n' "$webhook_info" | sed -n '2p')"
+  webhook_bot_id="$(printf '%s\n' "$webhook_info" | sed -n '3p')"
+
+  if [ -z "$webhook_url" ]; then
+    log "Warning: could not derive the OpenClaw webhook URL from $CONFIG_PATH"
+    return 0
+  fi
+
+  log "Copying OpenClaw webhook settings into VideoMemory"
+  "$CURL_BIN" -fsS -X PUT "$VIDEOMEMORY_BASE/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_URL" \
+    -H 'Content-Type: application/json' \
+    -d "{\"value\":\"$webhook_url\"}" >/dev/null || log "Warning: failed to set VIDEOMEMORY_OPENCLAW_WEBHOOK_URL"
+
+  if [ -n "$webhook_token" ]; then
+    "$CURL_BIN" -fsS -X PUT "$VIDEOMEMORY_BASE/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d "{\"value\":\"$webhook_token\"}" >/dev/null || log "Warning: failed to set VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN"
+  fi
+
+  if [ -n "$webhook_bot_id" ]; then
+    "$CURL_BIN" -fsS -X PUT "$VIDEOMEMORY_BASE/api/settings/VIDEOMEMORY_OPENCLAW_BOT_ID" \
+      -H 'Content-Type: application/json' \
+      -d "{\"value\":\"$webhook_bot_id\"}" >/dev/null || log "Warning: failed to set VIDEOMEMORY_OPENCLAW_BOT_ID"
+  fi
+}
+
 copy_if_exists() {
   src="$1"
   dest="$2"
@@ -660,6 +783,7 @@ start_videomemory_if_needed
 setup_tailscale_if_needed
 install_openclaw_files
 merge_openclaw_config
+sync_openclaw_webhook_settings
 sync_model_keys
 
 USER_FACING_UI_URL="$VIDEOMEMORY_BASE/devices"

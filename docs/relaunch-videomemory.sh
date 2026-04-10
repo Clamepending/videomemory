@@ -14,6 +14,7 @@ fail() {
 REPO_URL="${VIDEOMEMORY_REPO_URL:-https://github.com/Clamepending/videomemory.git}"
 REPO_REF="${VIDEOMEMORY_REPO_REF:-main}"
 REPO_DIR="${VIDEOMEMORY_REPO_DIR:-$HOME/videomemory}"
+OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 VIDEOMEMORY_BASE="${VIDEOMEMORY_BASE:-http://127.0.0.1:5050}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 STATE_DIR="${VIDEOMEMORY_STATE_DIR:-$STATE_HOME/videomemory}"
@@ -35,6 +36,10 @@ while [ "$#" -gt 0 ]; do
       REPO_DIR="$2"
       shift 2
       ;;
+    --openclaw-home)
+      OPENCLAW_HOME="$2"
+      shift 2
+      ;;
     --videomemory-base)
       VIDEOMEMORY_BASE="$2"
       shift 2
@@ -51,6 +56,7 @@ Options:
   --repo-url URL          VideoMemory git URL
   --repo-ref REF          Git branch/tag to use
   --repo-dir DIR          Checkout location
+  --openclaw-home DIR     OpenClaw home directory
   --videomemory-base URL  Host URL where VideoMemory should be reachable
   --skip-keys             Do not copy model API keys into VideoMemory after restart
 EOF
@@ -274,6 +280,102 @@ sync_model_keys() {
   fi
 }
 
+read_openclaw_webhook_config() {
+  CONFIG_PATH="$OPENCLAW_HOME/openclaw.json"
+  [ -f "$CONFIG_PATH" ] || return 0
+
+  if [ -n "$PYTHON_BIN" ]; then
+    OPENCLAW_CONFIG_PATH="$CONFIG_PATH" "$PYTHON_BIN" <<'EOF'
+import json
+import os
+from pathlib import Path
+
+try:
+    config = json.loads(Path(os.environ["OPENCLAW_CONFIG_PATH"]).read_text())
+    gateway = config.get("gateway")
+    if not isinstance(gateway, dict):
+        gateway = {}
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    mappings = hooks.get("mappings")
+    if not isinstance(mappings, list):
+        mappings = []
+
+    mapping = None
+    for entry in mappings:
+        if isinstance(entry, dict) and entry.get("id") == "videomemory-alert":
+            mapping = entry
+            break
+    if mapping is None:
+        for entry in mappings:
+            if isinstance(entry, dict) and isinstance(entry.get("match"), dict) and entry["match"].get("path"):
+                mapping = entry
+                break
+
+    try:
+        port = int(gateway.get("port") or 18789)
+    except (TypeError, ValueError):
+        port = 18789
+
+    hooks_path = str(hooks.get("path") or "/hooks").strip() or "/hooks"
+    mapping_path = "videomemory-alert"
+    if isinstance(mapping, dict):
+        match = mapping.get("match")
+        if isinstance(match, dict) and str(match.get("path") or "").strip():
+            mapping_path = str(match.get("path")).strip()
+
+    if not hooks_path.startswith("/"):
+        hooks_path = "/" + hooks_path
+    mapping_path = mapping_path.lstrip("/")
+
+    url = f"http://127.0.0.1:{port}{hooks_path}/{mapping_path}"
+    token = str(hooks.get("token") or "").strip()
+    print(url)
+    print(token)
+    print("openclaw", end="")
+except Exception:
+    pass
+EOF
+    return 0
+  fi
+}
+
+sync_openclaw_webhook_settings() {
+  CONFIG_PATH="$OPENCLAW_HOME/openclaw.json"
+  if [ ! -f "$CONFIG_PATH" ]; then
+    log "OpenClaw config not found at $CONFIG_PATH; skipping webhook sync"
+    return 0
+  fi
+
+  webhook_info="$(read_openclaw_webhook_config || true)"
+  webhook_url="$(printf '%s\n' "$webhook_info" | sed -n '1p')"
+  webhook_token="$(printf '%s\n' "$webhook_info" | sed -n '2p')"
+  webhook_bot_id="$(printf '%s\n' "$webhook_info" | sed -n '3p')"
+
+  if [ -z "$webhook_url" ]; then
+    log "Warning: could not derive the OpenClaw webhook URL from $CONFIG_PATH"
+    return 0
+  fi
+
+  log "Copying OpenClaw webhook settings into VideoMemory"
+  "$CURL_BIN" -fsS -X PUT "$VIDEOMEMORY_BASE/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_URL" \
+    -H 'Content-Type: application/json' \
+    -d "{\"value\":\"$webhook_url\"}" >/dev/null || log "Warning: failed to set VIDEOMEMORY_OPENCLAW_WEBHOOK_URL"
+
+  if [ -n "$webhook_token" ]; then
+    "$CURL_BIN" -fsS -X PUT "$VIDEOMEMORY_BASE/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d "{\"value\":\"$webhook_token\"}" >/dev/null || log "Warning: failed to set VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN"
+  fi
+
+  if [ -n "$webhook_bot_id" ]; then
+    "$CURL_BIN" -fsS -X PUT "$VIDEOMEMORY_BASE/api/settings/VIDEOMEMORY_OPENCLAW_BOT_ID" \
+      -H 'Content-Type: application/json' \
+      -d "{\"value\":\"$webhook_bot_id\"}" >/dev/null || log "Warning: failed to set VIDEOMEMORY_OPENCLAW_BOT_ID"
+  fi
+}
+
 pick_user_facing_ui_url() {
   if [ -n "$TAILSCALE_BIN" ]; then
     tailscale_ip="$("$TAILSCALE_BIN" ip -4 2>/dev/null | sed -n '1p' || true)"
@@ -292,6 +394,7 @@ stop_local_videomemory
 start_local_videomemory
 wait_for_health
 sync_model_keys
+sync_openclaw_webhook_settings
 
 USER_FACING_UI_URL="$(pick_user_facing_ui_url)"
 
