@@ -750,6 +750,7 @@ Typical registry entry fields:
 - `delivery_sender_id`
 - `delivery_target`
 - `delivery_session_key`
+- `include_note_frame`
 - `original_request`
 - `created_at`
 - `updated_at`
@@ -781,6 +782,8 @@ Interpretation:
 - `session`: route into a specific OpenClaw session
 - `webchat`: same as session, but semantically tied to current chat/UI
 - `internal`: keep it in hook flow without replying outward
+
+`include_note_frame` is the explicit switch for "use the saved triggering frame in the follow-up." It should be set at task creation/update time, not inferred later from natural-language regexes.
 
 #### Original request context
 

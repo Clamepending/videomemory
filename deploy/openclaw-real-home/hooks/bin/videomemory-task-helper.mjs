@@ -12,8 +12,8 @@ const registryPath =
 function usage() {
   return [
     "Usage:",
-    "  node videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--delivery telegram|session|webchat|internal] [--session-key agent:main:main] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
-    "  node videomemory-task-helper.mjs update --task-id 0 --trigger 'Watch for backpacks...' [--action 'Tell one short backpack joke...'] [--delivery telegram|session|webchat|internal] [--session-key agent:main:main] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request '...'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
+    "  node videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--session-key agent:main:main] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
+    "  node videomemory-task-helper.mjs update --task-id 0 --trigger 'Watch for backpacks...' [--action 'Tell one short backpack joke...'] [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--session-key agent:main:main] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request '...'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
     "  node videomemory-task-helper.mjs stop --task-id 0 [--base-url http://videomemory:5050]",
     "  node videomemory-task-helper.mjs delete --task-id 0 [--base-url http://videomemory:5050]",
     "",
@@ -22,6 +22,7 @@ function usage() {
     "  session routes the follow-up action into a specific OpenClaw session without external channel delivery.",
     "  webchat is an alias for session delivery and should point at the originating OpenClaw session.",
     "  internal keeps the follow-up action inside the hook flow and does not reply in the current web chat.",
+    "  --include-frame true explicitly tells OpenClaw to fetch and use the saved triggering note frame.",
   ].join("\n");
 }
 
@@ -70,6 +71,20 @@ function normalizeDelivery(rawValue) {
   throw new Error(
     `Unsupported delivery mode: ${rawValue}. Supported modes are telegram, session, webchat, or internal.`,
   );
+}
+
+function parseBooleanOption(rawValue, fallback = false) {
+  const value = cleanText(rawValue).toLowerCase();
+  if (!value) {
+    return fallback;
+  }
+  if (value === "1" || value === "true" || value === "yes" || value === "on") {
+    return true;
+  }
+  if (value === "0" || value === "false" || value === "no" || value === "off") {
+    return false;
+  }
+  throw new Error(`Unsupported boolean value: ${rawValue}. Use true or false.`);
 }
 
 function resolveCommandSource(options, previousEntry) {
@@ -318,6 +333,13 @@ function buildOriginalRequestContext(trigger, action, explicitOriginalRequest, p
   return cleanText(previousEntry?.original_request) || normalizedTrigger;
 }
 
+function resolveIncludeFrame(options, previousEntry) {
+  if (Object.prototype.hasOwnProperty.call(options, "include-frame")) {
+    return parseBooleanOption(options["include-frame"], false);
+  }
+  return Boolean(previousEntry?.include_note_frame);
+}
+
 async function createTask(options) {
   const ioId = requireOption(options, "io-id");
   const trigger = requireOption(options, "trigger");
@@ -326,6 +348,7 @@ async function createTask(options) {
   const delivery = validateDeliveryConfig(buildDeliveryConfig(options));
   const originalRequest = cleanText(options["original-request"]);
   const baseUrl = cleanText(options["base-url"]) || defaultBaseUrl;
+  const includeFrame = resolveIncludeFrame(options, null);
 
   const created = await requestJson(`${baseUrl}/api/tasks`, {
     method: "POST",
@@ -351,6 +374,7 @@ async function createTask(options) {
     delivery_sender_id: delivery.senderId,
     delivery_target: delivery.target,
     delivery_session_key: delivery.sessionKey,
+    include_note_frame: includeFrame,
     original_request: buildOriginalRequestContext(trigger, action, originalRequest),
     created_at: now,
     updated_at: now,
@@ -387,6 +411,7 @@ async function updateTask(options) {
 
   const now = new Date().toISOString();
   const delivery = validateDeliveryConfig(buildDeliveryConfig(options, previousEntry));
+  const includeFrame = resolveIncludeFrame(options, previousEntry);
   const entry = {
     task_id: taskId,
     io_id: cleanText(task?.io_id),
@@ -399,6 +424,7 @@ async function updateTask(options) {
     delivery_sender_id: delivery.senderId,
     delivery_target: delivery.target,
     delivery_session_key: delivery.sessionKey,
+    include_note_frame: includeFrame,
     original_request: buildOriginalRequestContext(trigger, action, originalRequest, previousEntry),
     created_at: cleanText(previousEntry?.created_at) || now,
     updated_at: now,

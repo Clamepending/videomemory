@@ -72,6 +72,14 @@ function wantsExternalDelivery(entry) {
   return normalizeDeliveryMode(entry) === "telegram";
 }
 
+function wantsFrameAttachment(entry) {
+  if (typeof entry?.include_note_frame === "boolean") {
+    return entry.include_note_frame;
+  }
+  const value = cleanText(String(entry?.include_note_frame || "")).toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
 function normalizeDeliveryMode(entry) {
   const value = cleanText(entry?.delivery_mode || "session").toLowerCase();
   if (value === "webchat") {
@@ -139,6 +147,46 @@ function shouldSuppressRegistryDrivenEvent(payload, entry) {
   return !actionWantsAbsence(entry);
 }
 
+function buildSavedFrameContext(payload, entry) {
+  const lines = [];
+  const taskApiUrl = cleanText(payload?.task_api_url);
+  const noteId =
+    payload?.note_id === 0 || payload?.note_id
+      ? cleanText(String(payload.note_id))
+      : "";
+  const noteHasFrame =
+    payload?.note_has_frame === true ||
+    Boolean(cleanText(payload?.note_frame_api_url || payload?.note_frame_api_path));
+  const noteFrameUrl = cleanText(payload?.note_frame_api_url);
+
+  if (taskApiUrl) {
+    lines.push(`Task API URL: ${taskApiUrl}`);
+  }
+  if (noteId) {
+    lines.push(`Triggering note ID: ${noteId}`);
+  }
+
+  if (!wantsFrameAttachment(entry)) {
+    return lines;
+  }
+
+  if (noteHasFrame && noteFrameUrl) {
+    lines.push(`Saved triggering frame URL: ${noteFrameUrl}`);
+    lines.push(
+      "This task explicitly requested the saved triggering frame. Fetch that exact saved frame and use it in the follow-up instead of taking a new live snapshot.",
+    );
+    lines.push(
+      "If your delivery path supports media, attach the saved frame. Otherwise mention that a saved frame is available at the URL.",
+    );
+    return lines;
+  }
+
+  lines.push(
+    "This task explicitly requested the saved triggering frame, but this webhook did not include a saved frame URL for the triggering note.",
+  );
+  return lines;
+}
+
 function buildRegistryDrivenMessage(payload, entry) {
   const originalRequest =
     cleanText(entry?.original_request) || cleanText(payload?.task_description) || "VideoMemory task";
@@ -152,6 +200,7 @@ function buildRegistryDrivenMessage(payload, entry) {
   const note = cleanText(payload?.note) || "VideoMemory reported an update.";
   const ioId = cleanText(payload?.io_id) || "unknown device";
   const taskId = cleanText(payload?.task_id) || "unknown";
+  const savedFrameContext = buildSavedFrameContext(payload, entry);
   const actionNeedsFreshLookup = /\b(search|web search|look up|lookup|find|fetch|check|inspect|get the latest|current|today|now|price|weather|news|headline|first result|top result)\b/i.test(
     actionInstruction,
   );
@@ -164,6 +213,7 @@ function buildRegistryDrivenMessage(payload, entry) {
     `Observation: ${note}`,
     `Device: ${ioId}`,
     `Task ID: ${taskId}`,
+    ...savedFrameContext,
     "If the authoritative requested action differs from the original request context, follow the authoritative requested action.",
     "You may use tools if needed to perform the requested action right now.",
     actionNeedsFreshLookup
@@ -180,12 +230,14 @@ function buildExplicitMessage(payload) {
   const note = cleanText(payload?.note) || "VideoMemory reported an update.";
   const ioId = cleanText(payload?.io_id) || "unknown device";
   const taskId = cleanText(payload?.task_id) || "unknown";
+  const savedFrameContext = buildSavedFrameContext(payload, null);
   return [
     "A VideoMemory detection requires a Telegram notification.",
     `Task: ${taskDescription}`,
     `Observation: ${note}`,
     `Device: ${ioId}`,
     `Task ID: ${taskId}`,
+    ...savedFrameContext,
     "Reply with exactly one short user-facing alert sentence.",
   ].join("\n");
 }

@@ -359,6 +359,10 @@ sync_openclaw_webhook_settings() {
   fi
 
   log "Copying OpenClaw webhook settings into VideoMemory"
+  "$CURL_BIN" -fsS -X PUT "$VIDEOMEMORY_BASE/api/settings/VIDEOMEMORY_SELF_BASE_URL" \
+    -H 'Content-Type: application/json' \
+    -d "{\"value\":\"$VIDEOMEMORY_BASE\"}" >/dev/null || log "Warning: failed to set VIDEOMEMORY_SELF_BASE_URL"
+
   "$CURL_BIN" -fsS -X PUT "$VIDEOMEMORY_BASE/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_URL" \
     -H 'Content-Type: application/json' \
     -d "{\"value\":\"$webhook_url\"}" >/dev/null || log "Warning: failed to set VIDEOMEMORY_OPENCLAW_WEBHOOK_URL"

@@ -209,6 +209,7 @@ node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs create \
   --io-id net0 \
   --trigger 'Watch for a backpack in the frame. Add a note only when a backpack appears, disappears, or the visible backpack count changes.' \
   --action 'Tell one short backpack joke when a backpack is newly visible.' \
+  --include-frame false \
   --delivery telegram \
   --original-request 'When you see a backpack in the frame, tell a backpack joke.' \
   --bot-id openclaw
@@ -221,6 +222,7 @@ node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs create \
   --io-id net0 \
   --trigger 'Watch for a card in the frame. Add a note only when a card appears, disappears, or the visible card count changes.' \
   --action 'Tell me one concise sentence when a card is visible.' \
+  --include-frame false \
   --delivery webchat \
   --session-key agent:main:main \
   --original-request 'Can you let me know here when you see a card?' \
@@ -252,6 +254,7 @@ node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs update \
   --task-id 0 \
   --trigger 'Watch for a backpack in the frame. Add a note only when a backpack appears, disappears, or the visible backpack count changes.' \
   --action 'Tell one short backpack joke when a backpack is newly visible.' \
+  --include-frame false \
   --delivery telegram \
   --original-request 'When you see a backpack in the frame, tell a backpack joke.'
 ```
@@ -333,4 +336,5 @@ curl -fsSL -X PUT http://videomemory:5050/api/settings/VIDEO_INGESTOR_MODEL \
 10. If the user wants "when X happens, do Y", use `videomemory-task-helper.mjs` so OpenClaw keeps `do Y` locally and VideoMemory only sees `watch for X`.
 11. Use `--delivery webchat` for "tell me here/in this chat" requests and point it at the originating OpenClaw session when available.
 12. Use `--delivery telegram` only when the user explicitly wants Telegram or the current interaction already came from Telegram.
-13. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.
+13. Use `--include-frame true` only when the user explicitly wants the saved triggering image or photo to be used later. Do not infer that from wording at alert time.
+14. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.

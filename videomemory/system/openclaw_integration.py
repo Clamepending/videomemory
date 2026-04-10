@@ -26,6 +26,7 @@ class OpenClawWebhookConfig:
     dedupe_ttl_s: float
     min_interval_s: float
     default_bot_id: str
+    videomemory_base_url: str = "http://127.0.0.1:5050"
 
 
 class OpenClawWebhookDispatcher:
@@ -64,6 +65,11 @@ class OpenClawWebhookDispatcher:
             dedupe_ttl_s=_float_env("VIDEOMEMORY_OPENCLAW_DEDUPE_TTL_S", 30.0, 0.0),
             min_interval_s=_float_env("VIDEOMEMORY_OPENCLAW_MIN_INTERVAL_S", 0.0, 0.0),
             default_bot_id=str(os.getenv("VIDEOMEMORY_OPENCLAW_BOT_ID", "")).strip(),
+            videomemory_base_url=(
+                str(os.getenv("VIDEOMEMORY_SELF_BASE_URL", "")).strip()
+                or str(os.getenv("VIDEOMEMORY_BASE_URL", "")).strip()
+                or "http://127.0.0.1:5050"
+            ),
         )
 
     @staticmethod
@@ -85,9 +91,24 @@ class OpenClawWebhookDispatcher:
                 )
         return None
 
+    @staticmethod
+    def _normalize_base_url(base_url: str) -> str:
+        normalized = str(base_url or "").strip().rstrip("/")
+        return normalized or "http://127.0.0.1:5050"
+
+    @classmethod
+    def _build_api_url(cls, base_url: str, path: str) -> str:
+        normalized_path = str(path or "").strip()
+        if not normalized_path:
+            return ""
+        if not normalized_path.startswith("/"):
+            normalized_path = f"/{normalized_path}"
+        return f"{cls._normalize_base_url(base_url)}{normalized_path}"
+
     def _build_payload(
         self,
         *,
+        config: OpenClawWebhookConfig,
         task: Task,
         note: Optional[NoteEntry],
         bot_id: str,
@@ -95,11 +116,18 @@ class OpenClawWebhookDispatcher:
     ) -> Dict[str, Any]:
         note_content = note.content if note is not None else ""
         note_ts = float(note.timestamp) if note is not None else now_ts
+        note_id = getattr(note, "note_id", None) if note is not None else None
+        note_frame_api_path = ""
+        note_has_frame = False
+        if note is not None:
+            note_frame_api_path = str(getattr(note, "frame_url", "") or "")
+            note_has_frame = bool(note_frame_api_path)
+        task_id = str(getattr(task, "task_id", "") or "")
         event_basis = "|".join(
             [
                 str(bot_id),
                 str(getattr(task, "io_id", "") or ""),
-                str(getattr(task, "task_id", "") or ""),
+                task_id,
                 str(getattr(task, "status", "") or ""),
                 str(int(bool(getattr(task, "done", False)))),
                 note_content,
@@ -109,21 +137,28 @@ class OpenClawWebhookDispatcher:
         event_hash = hashlib.sha256(event_basis.encode("utf-8")).hexdigest()
         event_id = f"vm-{event_hash[:20]}"
         note_entries = getattr(task, "task_note", []) or []
+        videomemory_base_url = self._normalize_base_url(config.videomemory_base_url)
         return {
             "service": "videomemory",
             "event_type": "task_update",
             "event_id": event_id,
             "idempotency_key": event_id,
             "bot_id": bot_id,
+            "videomemory_base_url": videomemory_base_url,
             "io_id": str(getattr(task, "io_id", "") or ""),
-            "task_id": str(getattr(task, "task_id", "") or ""),
+            "task_id": task_id,
             "task_number": getattr(task, "task_number", None),
             "task_description": str(getattr(task, "task_desc", "") or ""),
             "task_status": str(getattr(task, "status", "") or ""),
             "task_done": bool(getattr(task, "done", False)),
+            "task_api_url": self._build_api_url(videomemory_base_url, f"/api/task/{task_id}") if task_id else "",
             "note": note_content,
+            "note_id": note_id,
             "note_timestamp": note_ts,
             "note_timestamp_iso": self._isoformat(note_ts),
+            "note_has_frame": note_has_frame,
+            "note_frame_api_path": note_frame_api_path,
+            "note_frame_api_url": self._build_api_url(videomemory_base_url, note_frame_api_path),
             "notes_count": len(note_entries),
             "observed_at": self._isoformat(now_ts),
         }
@@ -160,7 +195,7 @@ class OpenClawWebhookDispatcher:
 
         now_ts = self._clock()
         note = self._latest_note(task, new_note)
-        payload = self._build_payload(task=task, note=note, bot_id=bot_id, now_ts=now_ts)
+        payload = self._build_payload(config=config, task=task, note=note, bot_id=bot_id, now_ts=now_ts)
         dedupe_key = self._dedupe_key(payload)
 
         with self._lock:
