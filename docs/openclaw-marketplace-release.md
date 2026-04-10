@@ -2,20 +2,20 @@
 
 This repo now contains the two pieces needed for the desired OpenClaw setup flow:
 
-- the installable OpenClaw package at `openclaw-plugin/`
+- the installable host CLI package at `openclaw-plugin/`
 - the ClawHub skill folder at `clawhub-skill/videomemory/`
 
 ## Why there are two artifacts
 
 The OpenClaw Skills UI installs skill dependencies through `metadata.openclaw.install`.
-That installer can install node packages, but it does not directly install OpenClaw plugins by itself.
+That installer can install node packages, which is enough for VideoMemory because the published npm package is now a plain host CLI instead of an in-process OpenClaw plugin.
 
-So the release flow is intentionally hybrid:
+So the release flow is intentionally:
 
 1. Publish the npm package `@clamepending/videomemory`
 2. Publish the ClawHub skill `clawhub-skill/videomemory`
 3. The ClawHub skill installs the npm package and exposes the `videomemory-openclaw` host CLI
-4. That CLI installs/enables the OpenClaw plugin and runs VideoMemory onboarding
+4. That CLI runs VideoMemory onboarding directly on the host
 
 ## Artifact 1: npm package
 
@@ -29,7 +29,8 @@ Validate locally:
 
 ```bash
 npm pack
-node cli.mjs ensure-plugin --json
+node cli.mjs onboard --help
+node cli.mjs status --videomemory-base http://127.0.0.1:5050 --json
 ```
 
 Publish to npm:
@@ -55,7 +56,14 @@ cd clawhub-skill/videomemory
 Publish to ClawHub:
 
 ```bash
-clawhub publish . --slug videomemory --name "VideoMemory" --version 0.1.0
+clawhub login
+clawhub publish . --slug videomemory --name "VideoMemory" --version 0.1.1
+```
+
+If browser login fails, use an API token instead:
+
+```bash
+clawhub login --token YOUR_TOKEN --no-browser
 ```
 
 The skill metadata already points at the npm package:
@@ -79,19 +87,16 @@ videomemory-openclaw onboard
 
 That command:
 
-- ensures the OpenClaw plugin is installed and enabled
 - bootstraps VideoMemory on the host
 - returns the user-facing UI link
 
 ## Local verification already completed in this repo
 
-- `node cli.mjs ensure-plugin --openclaw-home <tmp> --json`
-- `openclaw plugins install <packed-tgz>`
-- `openclaw plugins info videomemory --json`
-- `openclaw skills list` shows the bundled plugin skill
+- `npm pack`
+- `node cli.mjs onboard --help`
 - `node cli.mjs status --videomemory-base http://localhost:5051 --json`
 
-## Future cleanup
+## Why this avoids the security scanner block
 
-The plugin still reuses the existing GitHub-hosted bootstrap/relaunch scripts under `docs/`.
-That is enough for the marketplace flow, but a later cleanup can move more of that logic into the plugin runtime itself.
+The published npm package no longer ships an `openclaw.plugin.json` manifest, bundled hook assets, or plugin runtime code.
+That keeps the marketplace install path as a normal npm binary install instead of asking OpenClaw to trust the package as native plugin code.

@@ -1,9 +1,7 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const DEFAULTS = {
   repoUrl: "https://github.com/Clamepending/videomemory.git",
@@ -27,22 +25,6 @@ function cleanText(value) {
 
 function truthyFlag(value) {
   return value === true || value === "true" || value === "1" || value === 1;
-}
-
-function getPackageRoot() {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-}
-
-function buildOpenClawEnv(openclawHome) {
-  const home = cleanText(openclawHome);
-  if (!home) {
-    return {};
-  }
-  return {
-    OPENCLAW_HOME: home,
-    OPENCLAW_STATE_DIR: home,
-    OPENCLAW_CONFIG_PATH: path.join(home, "openclaw.json"),
-  };
 }
 
 function parseUiUrl(output) {
@@ -119,26 +101,6 @@ async function runRemoteScript(url, args = [], env = {}) {
   }
 }
 
-async function packagePluginArchive(packageRoot) {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "videomemory-openclaw-pack-"));
-  const packResult = await runProcess("npm", ["pack", packageRoot], { cwd: tempDir });
-  if (packResult.code !== 0) {
-    await rm(tempDir, { recursive: true, force: true });
-    throw new Error(summarizeFailure(packResult.stderr, packResult.stdout) || "npm pack failed");
-  }
-
-  const tarballName = cleanText(packResult.stdout).split("\n").filter(Boolean).at(-1);
-  if (!tarballName) {
-    await rm(tempDir, { recursive: true, force: true });
-    throw new Error("npm pack did not report a tarball name.");
-  }
-
-  return {
-    tempDir,
-    tarballPath: path.join(tempDir, tarballName),
-  };
-}
-
 function toArgList(entries) {
   const args = [];
   for (const [flag, value] of entries) {
@@ -176,6 +138,7 @@ function buildRelaunchArgs(options = {}) {
     ["--repo-url", cleanText(options.repoUrl) || DEFAULTS.repoUrl],
     ["--repo-ref", cleanText(options.repoRef) || DEFAULTS.repoRef],
     ["--repo-dir", cleanText(options.repoDir) || DEFAULTS.repoDir],
+    ["--openclaw-home", cleanText(options.openclawHome) || DEFAULTS.openclawHome],
     ["--videomemory-base", cleanText(options.videomemoryBase) || DEFAULTS.videomemoryBase],
     ["--skip-keys", truthyFlag(options.skipKeys)],
   ]);
@@ -271,113 +234,6 @@ export async function getVideomemoryStatus(options = {}) {
   };
 }
 
-function extractJsonObject(text) {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    return null;
-  }
-  try {
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
-  }
-}
-
-export async function listOpenClawPlugins(env = {}) {
-  const result = await runProcess("openclaw", ["plugins", "list", "--json"], { env });
-  if (result.code !== 0) {
-    throw new Error(summarizeFailure(result.stderr, result.stdout) || "openclaw plugins list failed");
-  }
-  const parsed = extractJsonObject(result.stdout);
-  if (!parsed || !Array.isArray(parsed.plugins)) {
-    throw new Error("Could not parse JSON from `openclaw plugins list --json`.");
-  }
-  return parsed.plugins;
-}
-
-export async function ensurePluginInstalled(options = {}) {
-  const env = buildOpenClawEnv(options.openclawHome);
-
-  const packageRoot = cleanText(options.packageRoot) || getPackageRoot();
-  const hasLocalNodeModules = existsSync(path.join(packageRoot, "node_modules"));
-  let installedPlugins = await listOpenClawPlugins(env);
-  let existing = installedPlugins.find(
-    (plugin) =>
-      cleanText(plugin?.id) === "videomemory" ||
-      cleanText(plugin?.source).includes(packageRoot),
-  );
-
-  if (!existing) {
-    let installResult;
-    let packTempDir = "";
-    try {
-      if (hasLocalNodeModules) {
-        installResult = await runProcess(
-          "openclaw",
-          ["plugins", "install", "--link", packageRoot],
-          { env },
-        );
-      } else {
-        const packed = await packagePluginArchive(packageRoot);
-        packTempDir = packed.tempDir;
-        installResult = await runProcess(
-          "openclaw",
-          ["plugins", "install", packed.tarballPath],
-          { env },
-        );
-      }
-    } finally {
-      if (packTempDir) {
-        await rm(packTempDir, { recursive: true, force: true });
-      }
-    }
-
-    if (installResult.code !== 0) {
-      throw new Error(
-        summarizeFailure(installResult.stderr, installResult.stdout) ||
-          "Failed to install the VideoMemory OpenClaw plugin.",
-      );
-    }
-
-    installedPlugins = await listOpenClawPlugins(env);
-    existing = installedPlugins.find(
-      (plugin) =>
-        cleanText(plugin?.id) === "videomemory" ||
-        cleanText(plugin?.source).includes(packageRoot),
-    );
-    if (!existing) {
-      throw new Error("OpenClaw installed the package, but the VideoMemory plugin was not discoverable afterward.");
-    }
-  }
-
-  const pluginId = cleanText(existing?.id) || "videomemory";
-  const enableResult = await runProcess("openclaw", ["plugins", "enable", pluginId], { env });
-  if (enableResult.code !== 0) {
-    const output = [enableResult.stdout, enableResult.stderr].join("\n");
-    if (!/already enabled/i.test(output)) {
-      throw new Error(
-        summarizeFailure(enableResult.stderr, enableResult.stdout) ||
-          "Failed to enable the VideoMemory OpenClaw plugin.",
-      );
-    }
-  }
-
-  const infoResult = await runProcess("openclaw", ["plugins", "info", pluginId, "--json"], {
-    env,
-  });
-  const parsed = extractJsonObject(infoResult.stdout);
-  return {
-    success: infoResult.code === 0,
-    packageRoot,
-    openclawHome: env.OPENCLAW_HOME || DEFAULTS.openclawHome,
-    pluginId,
-    plugin: parsed,
-    stdout: infoResult.stdout,
-    stderr: infoResult.stderr,
-  };
-}
-
 export function summarizeOnboardResult(result) {
   const parts = [];
   if (result.uiUrl) {
@@ -392,4 +248,4 @@ export function summarizeOnboardResult(result) {
   return parts.join(" | ");
 }
 
-export { DEFAULTS, getPackageRoot };
+export { DEFAULTS };

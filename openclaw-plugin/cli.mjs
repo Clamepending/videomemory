@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
 import {
-  ensurePluginInstalled,
-  getPackageRoot,
   getVideomemoryStatus,
   onboardVideomemory,
   relaunchVideomemory,
@@ -11,13 +9,12 @@ import {
 function usage() {
   return [
     "Usage:",
-    "  videomemory-openclaw ensure-plugin [--openclaw-home DIR]",
     "  videomemory-openclaw onboard [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--bot-id ID] [--tailscale-authkey KEY] [--skip-start] [--skip-keys] [--skip-tailscale]",
-    "  videomemory-openclaw relaunch [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--skip-keys]",
+    "  videomemory-openclaw relaunch [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--skip-keys]",
     "  videomemory-openclaw status [--videomemory-base URL]",
     "",
     "Notes:",
-    "  onboard automatically ensures the VideoMemory OpenClaw plugin is installed and enabled first.",
+    "  onboard runs the maintained VideoMemory bootstrap flow directly on the host.",
     "  --json prints the full result object.",
   ].join("\n");
 }
@@ -62,7 +59,6 @@ function normalizeOptions(options) {
     skipStart: Boolean(options["skip-start"]),
     skipKeys: Boolean(options["skip-keys"]),
     skipTailscale: Boolean(options["skip-tailscale"]),
-    packageRoot: getPackageRoot(),
   };
 }
 
@@ -76,10 +72,7 @@ async function main() {
   const normalized = normalizeOptions(options);
   let result;
 
-  if (command === "ensure-plugin") {
-    result = await ensurePluginInstalled(normalized);
-  } else if (command === "onboard") {
-    await ensurePluginInstalled(normalized);
+  if (command === "onboard") {
     result = await onboardVideomemory(normalized);
   } else if (command === "relaunch") {
     result = await relaunchVideomemory(normalized);

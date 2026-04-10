@@ -1,27 +1,24 @@
-# OpenClaw VideoMemory Plugin
+# OpenClaw VideoMemory Host CLI
 
-This directory is the phase 1 scaffold for publishing VideoMemory as a native OpenClaw plugin.
+This directory now contains the npm package published as `@clamepending/videomemory`.
 
-What exists here today:
-- a native `openclaw.plugin.json` manifest
-- package metadata for future ClawHub/npm publication
-- a native OpenClaw plugin that registers VideoMemory onboarding tools
-- a package CLI (`videomemory-openclaw`) that can install/enable the plugin and run onboarding outside the plugin runtime
-- a bundled VideoMemory skill
-- a bundled `openclaw-videomemory-task-helper.mjs`
-- a bundled `videomemory-alert.mjs` transform asset for the future plugin-managed webhook path
+What the package does:
+- exposes the `videomemory-openclaw` host CLI
+- downloads and runs the maintained VideoMemory onboarding and relaunch scripts from this repo
+- keeps the OpenClaw marketplace install path simple: the ClawHub skill installs this package, then runs the CLI
 
-What is intentionally not finished yet:
-- no plugin-managed webhook route registration yet
-- no automatic migration from the current bootstrap-installed OpenClaw home layout
+Why it is a plain CLI package instead of a native OpenClaw plugin:
+- OpenClaw's plugin security scanner correctly treats host-management code, shell execution, and hook assets as high trust
+- publishing the onboarding flow as a plugin caused installs to be blocked before onboarding could run
+- the safer path is a skill + host CLI split, where OpenClaw installs a normal npm binary and the binary manages VideoMemory on the host
 
 Current source-of-truth split:
-- VideoMemory host install/relaunch remains in `docs/openclaw-bootstrap.sh` and `docs/relaunch-videomemory.sh`
-- the legacy OpenClaw home wiring still lives under `deploy/openclaw-real-home/`
-- this plugin package is now the new home for the OpenClaw-side assets we want to publish and eventually manage directly
-- the plugin and CLI currently reuse the existing GitHub-hosted bootstrap/relaunch scripts instead of reimplementing host install logic
+- VideoMemory host install and relaunch remain in `docs/openclaw-bootstrap.sh` and `docs/relaunch-videomemory.sh`
+- the current OpenClaw bridge files still live in the repo under `docs/` and `deploy/openclaw-real-home/`
+- the ClawHub skill lives separately under `clawhub-skill/videomemory/`
 
-Planned phase 2:
-- replace shell-based OpenClaw config patching with plugin-owned setup/runtime wiring
-- add a real setup surface so users can select VideoMemory during OpenClaw setup
-- make this package the canonical source for the skill, helper, and webhook integration
+Typical flow:
+1. OpenClaw installs `@clamepending/videomemory`
+2. The `videomemory-openclaw` binary becomes available on the gateway host
+3. The skill tells OpenClaw to run `videomemory-openclaw onboard`
+4. The CLI bootstraps VideoMemory without Docker and returns the UI link
