@@ -343,6 +343,11 @@ def create_task():
             return jsonify({'status': 'error', 'error': 'io_id is required'}), 400
         if not task_description:
             return jsonify({'status': 'error', 'error': 'task_description is required'}), 400
+
+        provider_error = _build_task_creation_model_error()
+        if provider_error is not None:
+            body, status_code = provider_error
+            return jsonify(body), status_code
         
         result = videomemory.tools.tasks.add_task(io_id, task_description, bot_id=bot_id)
         
@@ -1721,6 +1726,45 @@ _MODEL_RUNTIME_KEYS = {
 def _current_ingestor_model_name() -> str:
     """Return the normalized effective ingestor model name."""
     return normalize_model_name(os.getenv('VIDEO_INGESTOR_MODEL')) or 'local-vllm'
+
+
+def _selected_ingestor_model_name_from_settings() -> str:
+    """Return the selected model using the same precedence as the Settings UI."""
+    selected_value, _ = _get_effective_setting_value_and_source('VIDEO_INGESTOR_MODEL')
+    return normalize_model_name(selected_value) or 'local-vllm'
+
+
+def _build_task_creation_model_error() -> Optional[tuple[dict, int]]:
+    """Return an actionable error when task creation would use an unconfigured model."""
+    model_name = _selected_ingestor_model_name_from_settings()
+    required_setting = get_required_api_key_env(model_name)
+    if not required_setting:
+        return None
+
+    required_value, _ = _get_effective_setting_value_and_source(required_setting)
+    if str(required_value or '').strip():
+        return None
+
+    body = {
+        'status': 'error',
+        'error': f"Model '{model_name}' requires {required_setting}, but it is not configured.",
+        'hint': (
+            f"Open the Settings tab and save a valid {required_setting}, or switch "
+            "VIDEO_INGESTOR_MODEL to another configured model before creating monitoring tasks."
+        ),
+        'current_model': model_name,
+        'required_setting': required_setting,
+        'settings_url': '/settings',
+    }
+
+    suggested_model = choose_default_model_for_available_keys()
+    if suggested_model and suggested_model != model_name:
+        suggested_key = get_required_api_key_env(suggested_model)
+        body['suggested_model'] = suggested_model
+        if suggested_key:
+            body['suggested_required_setting'] = suggested_key
+
+    return body, 503
 
 
 def _looks_like_invalid_api_key_error(message: str) -> bool:

@@ -63,6 +63,7 @@ What this bootstrap does:
 - merges the VideoMemory webhook mapping into `~/.openclaw/openclaw.json`
 - copies any model API keys present in the shell environment into VideoMemory settings
 - prints a user-facing VideoMemory UI link, and sends it over Telegram too when a bot token plus chat id are available
+- prints a setup warning when the selected model still needs a provider API key so the user can finish setup in the Settings tab
 
 If you already have a reusable Tailscale auth key, pass it in so onboarding can connect noninteractively:
 
@@ -115,9 +116,11 @@ Do not precompute those results during setup unless the user explicitly asked fo
 - During onboarding, if the user wants to use an Android phone camera from outside the same local network, tell them to install Tailscale on both the VideoMemory machine and the phone first.
 - If the user provides a `100.x.y.z` phone address, treat it as a Tailscale address and check that Tailscale is installed and connected on the VideoMemory host before trying to use that phone camera.
 - After successful onboarding, reply to the user with the user-facing VideoMemory UI link from bootstrap output. Prefer the Tailscale UI URL when one is available.
+- If bootstrap prints a configuration warning about a missing provider key, relay that warning to the user and tell them to open the Settings tab before creating tasks.
 - If the user asks for a relaunch or restart, use the current `relaunch-videomemory.sh` script from GitHub so the command upgrades before restarting.
 - If the user asks to rerun the bootstrap or install step, fetch and execute the current script instead of assuming an earlier failure still applies.
 - When a bootstrap or install command fails, report the actual failing command or stderr before proposing a fix.
+- If `POST /api/tasks` fails because the selected model is not configured, surface that error directly instead of pretending the task was created.
 - Include `Content-Type: application/json` on `POST`, `PUT`, and `DELETE` calls that send JSON.
 - When the user wants monitoring to stop but keep history, call `POST /api/task/{task_id}/stop`.
 - When the user explicitly wants a task erased, call `DELETE /api/task/{task_id}`.

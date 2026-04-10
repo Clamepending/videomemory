@@ -409,7 +409,12 @@
                 });
                 if (!resp.ok) {
                     const err = await resp.json();
-                    alert('Error: ' + (err.error || 'Failed to create task'));
+                    const details = [
+                        err.error || 'Failed to create task',
+                        err.hint || '',
+                        err.settings_url ? `Settings: ${err.settings_url}` : ''
+                    ].filter(Boolean).join('\n\n');
+                    alert('Error: ' + details);
                     return;
                 }
                 document.getElementById('taskDescription').value = '';

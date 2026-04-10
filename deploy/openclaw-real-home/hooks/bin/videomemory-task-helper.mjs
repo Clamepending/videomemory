@@ -284,7 +284,11 @@ async function requestJson(url, init = {}) {
     }
   }
   if (!response.ok) {
-    const detail = cleanText(payload?.error || payload?.message || payload?.text) || response.statusText;
+    const detailParts = [
+      cleanText(payload?.error || payload?.message || payload?.text),
+      cleanText(payload?.hint),
+    ].filter(Boolean);
+    const detail = detailParts.join(" ") || response.statusText;
     throw new Error(`HTTP ${response.status} from ${url}: ${detail}`);
   }
   return payload;

@@ -876,6 +876,67 @@ sync_model_keys() {
   fi
 }
 
+warn_if_model_provider_needs_setup() {
+  [ -n "$PYTHON_BIN" ] || return 0
+
+  settings_json="$("$CURL_BIN" -fsS "$VIDEOMEMORY_BASE/api/settings" 2>/dev/null || true)"
+  [ -n "$settings_json" ] || return 0
+
+  warning_message="$(printf '%s' "$settings_json" | "$PYTHON_BIN" - "$VIDEOMEMORY_BASE" <<'EOF'
+import json
+import sys
+
+base_url = sys.argv[1].rstrip("/")
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(0)
+
+settings = payload.get("settings") or {}
+
+def is_set(key: str) -> bool:
+    return bool((settings.get(key) or {}).get("is_set"))
+
+model_name = str((settings.get("VIDEO_INGESTOR_MODEL") or {}).get("value") or "local-vllm").strip() or "local-vllm"
+required_map = {
+    "gemini-2.5-flash": "GOOGLE_API_KEY",
+    "gemini-2.5-flash-lite": "GOOGLE_API_KEY",
+    "gpt-4.1-nano": "OPENAI_API_KEY",
+    "gpt-4o-mini": "OPENAI_API_KEY",
+    "claude-sonnet-4-6": "ANTHROPIC_API_KEY",
+    "claude-haiku-4-5": "ANTHROPIC_API_KEY",
+    "claude-opus-4-6": "ANTHROPIC_API_KEY",
+    "molmo-2-8b": "OPENROUTER_API_KEY",
+    "qwen-2-vl-7b": "OPENROUTER_API_KEY",
+    "phi-4-multimodal": "OPENROUTER_API_KEY",
+    "mistral-small-3.1": "OPENROUTER_API_KEY",
+    "qwen3-vl-8b": "OPENROUTER_API_KEY",
+}
+cloud_keys = [
+    key for key in ("GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY")
+    if is_set(key)
+]
+required_setting = required_map.get(model_name)
+
+if required_setting and not is_set(required_setting):
+    print(
+        f"Model '{model_name}' requires {required_setting}, but it is not configured yet. "
+        f"Tell the user to open {base_url}/settings and save that key before creating tasks."
+    )
+elif model_name == "local-vllm" and not cloud_keys:
+    print(
+        f"No cloud model provider key is configured yet. If the user is not intentionally using a local vLLM server, "
+        f"tell them to open {base_url}/settings and save a provider API key before creating tasks."
+    )
+EOF
+)"
+
+  if [ -n "$warning_message" ]; then
+    log "Configuration warning: $warning_message"
+    log "Reply to the user with this setup warning: $warning_message"
+  fi
+}
+
 pick_videomemory_base
 start_videomemory_if_needed
 setup_tailscale_if_needed
@@ -883,6 +944,7 @@ install_openclaw_files
 merge_openclaw_config
 sync_openclaw_webhook_settings
 sync_model_keys
+warn_if_model_provider_needs_setup
 
 USER_FACING_UI_URL="$VIDEOMEMORY_BASE/devices"
 if [ -n "$TAILSCALE_UI_URL" ]; then
