@@ -91,6 +91,8 @@ CURL_BIN="$(find_bin curl || true)"
 PYTHON_BIN="$(find_bin python3 || true)"
 UV_BIN="$(find_bin "$HOME/.local/bin/uv" /home/linuxbrew/.linuxbrew/bin/uv uv || true)"
 TAILSCALE_BIN="$(find_bin tailscale || true)"
+LSOF_BIN="$(find_bin lsof || true)"
+SS_BIN="$(find_bin ss || true)"
 
 [ -n "$CURL_BIN" ] || fail "curl is required"
 [ -n "$GIT_BIN" ] || fail "git is required"
@@ -163,40 +165,119 @@ pid_is_running() {
   [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1
 }
 
-healthcheck() {
-  "$CURL_BIN" -fsS "$VIDEOMEMORY_BASE/api/health" >/dev/null 2>&1
+port_from_base_url() {
+  hostport="${1#*://}"
+  hostport="${hostport%%/*}"
+  case "$hostport" in
+    *:*)
+      printf '%s\n' "${hostport##*:}"
+      ;;
+    *)
+      case "$1" in
+        https://*)
+          printf '443\n'
+          ;;
+        *)
+          printf '80\n'
+          ;;
+      esac
+      ;;
+  esac
 }
 
-stop_local_videomemory() {
-  if [ ! -f "$PID_FILE" ]; then
-    if healthcheck; then
-      fail "VideoMemory is running at $VIDEOMEMORY_BASE but is not managed by $PID_FILE. Stop that service manually or rerun the bootstrap path first."
-    fi
+listener_pid() {
+  port="$(port_from_base_url "$VIDEOMEMORY_BASE")"
+  if [ -n "$LSOF_BIN" ]; then
+    "$LSOF_BIN" -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed -n '1p'
+    return 0
+  fi
+  if [ -n "$SS_BIN" ]; then
+    "$SS_BIN" -ltnp 2>/dev/null | awk -v port=":$port" '
+      $4 ~ port"$" {
+        if (match($0, /pid=([0-9]+)/)) {
+          value = substr($0, RSTART, RLENGTH)
+          sub(/^pid=/, "", value)
+          print value
+          exit
+        }
+      }
+    '
+  fi
+}
+
+pid_looks_like_videomemory() {
+  pid="${1:-}"
+  [ -n "$pid" ] || return 1
+  args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+  case "$args" in
+    *"flask_app/app.py"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+stop_pid_gracefully() {
+  pid="${1:-}"
+  label="${2:-process}"
+  [ -n "$pid" ] || return 0
+  if ! pid_is_running "$pid"; then
     return 0
   fi
 
-  existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  if ! pid_is_running "$existing_pid"; then
-    rm -f "$PID_FILE"
-    return 0
-  fi
-
-  log "Stopping VideoMemory process $existing_pid"
-  kill "$existing_pid" >/dev/null 2>&1 || true
+  log "Stopping $label $pid"
+  kill "$pid" >/dev/null 2>&1 || true
 
   i=0
   while [ "$i" -lt 30 ]; do
-    if ! pid_is_running "$existing_pid"; then
-      rm -f "$PID_FILE"
+    if ! pid_is_running "$pid"; then
       return 0
     fi
     i=$((i + 1))
     sleep 1
   done
 
-  log "Process $existing_pid did not exit after SIGTERM; sending SIGKILL"
-  kill -9 "$existing_pid" >/dev/null 2>&1 || true
+  log "$label $pid did not exit after SIGTERM; sending SIGKILL"
+  kill -9 "$pid" >/dev/null 2>&1 || true
+}
+
+sync_pid_file_to_listener() {
+  pid="$(listener_pid || true)"
+  if [ -n "$pid" ] && pid_is_running "$pid" && pid_looks_like_videomemory "$pid"; then
+    printf '%s\n' "$pid" >"$PID_FILE"
+    return 0
+  fi
+  return 1
+}
+
+healthcheck() {
+  "$CURL_BIN" -fsS "$VIDEOMEMORY_BASE/api/health" >/dev/null 2>&1
+}
+
+stop_local_videomemory() {
+  existing_pid=""
+  if [ -f "$PID_FILE" ]; then
+    existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  fi
+
+  if [ -n "$existing_pid" ] && pid_is_running "$existing_pid"; then
+    stop_pid_gracefully "$existing_pid" "VideoMemory process"
+  else
+    rm -f "$PID_FILE"
+  fi
+
+  existing_listener_pid="$(listener_pid || true)"
+  if [ -n "$existing_listener_pid" ] && [ "$existing_listener_pid" != "$existing_pid" ] && pid_looks_like_videomemory "$existing_listener_pid"; then
+    stop_pid_gracefully "$existing_listener_pid" "stale VideoMemory listener"
+  fi
+
   rm -f "$PID_FILE"
+
+  if healthcheck; then
+    fail "VideoMemory is still reachable at $VIDEOMEMORY_BASE after stop; another process is holding the port."
+  fi
 }
 
 start_local_videomemory() {
@@ -223,6 +304,7 @@ wait_for_health() {
   i=0
   while [ "$i" -lt 60 ]; do
     if healthcheck; then
+      sync_pid_file_to_listener || true
       log "VideoMemory is healthy"
       return 0
     fi
