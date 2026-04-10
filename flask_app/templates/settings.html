@@ -487,9 +487,30 @@
                 <div class="setting-status" id="status-VIDEOMEMORY_SAVE_NOTE_FRAMES"></div>
             </div>
 
+            <div class="setting-row" data-key="VIDEOMEMORY_SAVE_NOTE_VIDEOS">
+                <div class="setting-label">
+                    <label>Save Evidence Videos With Task Notes</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_SAVE_NOTE_VIDEOS"></span>
+                </div>
+                <div class="setting-hint">Stores a short preroll evidence clip ending on the triggering frame for each task note. Turn this on when you want shareable motion clips, and off to keep CPU and disk usage lower.</div>
+                <div class="setting-toggle-row">
+                    <div class="setting-toggle-shell">
+                        <input
+                            type="checkbox"
+                            class="setting-toggle"
+                            id="input-VIDEOMEMORY_SAVE_NOTE_VIDEOS"
+                            onchange="updateToggleLabel('VIDEOMEMORY_SAVE_NOTE_VIDEOS')"
+                        >
+                        <span class="setting-toggle-copy" id="toggle-label-VIDEOMEMORY_SAVE_NOTE_VIDEOS">Off</span>
+                    </div>
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_SAVE_NOTE_VIDEOS')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_SAVE_NOTE_VIDEOS"></div>
+            </div>
+
             <div class="restart-notice">
                 <span class="icon">&#9888;</span>
-                Model and note-frame storage changes apply immediately to running and new tasks.
+                Model and note media storage changes apply immediately to running and new tasks.
             </div>
         </div>
 

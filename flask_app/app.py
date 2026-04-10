@@ -338,6 +338,8 @@ def create_task():
         io_id = data.get('io_id', '').strip()
         task_description = data.get('task_description', '').strip()
         bot_id = data.get('bot_id', '').strip() or None
+        save_note_frames = _coerce_optional_boolean_request_value(data.get('save_note_frames'))
+        save_note_videos = _coerce_optional_boolean_request_value(data.get('save_note_videos'))
         
         if not io_id:
             return jsonify({'status': 'error', 'error': 'io_id is required'}), 400
@@ -349,7 +351,13 @@ def create_task():
             body, status_code = provider_error
             return jsonify(body), status_code
         
-        result = videomemory.tools.tasks.add_task(io_id, task_description, bot_id=bot_id)
+        result = videomemory.tools.tasks.add_task(
+            io_id,
+            task_description,
+            bot_id=bot_id,
+            save_note_frames=save_note_frames,
+            save_note_videos=save_note_videos,
+        )
         
         if result.get('status') == 'error':
             return jsonify(result), 400
@@ -446,6 +454,25 @@ def get_task_note_frame(note_id):
         )
     except Exception as e:
         flask_logger.error(f"Failed to load task note frame {note_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/task-note/<int:note_id>/video', methods=['GET'])
+def get_task_note_video(note_id):
+    """Serve the stored evidence clip associated with a task note, if available."""
+    try:
+        video_path = db.get_note_video_path(note_id)
+        if video_path is None or not video_path.exists():
+            return Response(status=404)
+        mimetype = 'video/mp4' if video_path.suffix.lower() == '.mp4' else 'video/x-msvideo'
+        return send_file(
+            video_path,
+            mimetype=mimetype,
+            conditional=True,
+            max_age=0,
+        )
+    except Exception as e:
+        flask_logger.error(f"Failed to load task note video {note_id}: {e}", exc_info=True)
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 # ── Device API ────────────────────────────────────────────────
@@ -1549,6 +1576,8 @@ def openapi_spec():
                                 "io_id": {"type": "string", "description": "Device identifier from GET /api/devices"},
                                 "task_description": {"type": "string", "description": "What to monitor for, e.g. 'Count the number of people entering the room'"},
                                 "bot_id": {"type": "string", "description": "Optional identifier of the bot that created this task (multi-bot / debug)."},
+                                "save_note_frames": {"type": "boolean", "description": "Optional per-task override for saving a frame with each task note."},
+                                "save_note_videos": {"type": "boolean", "description": "Optional per-task override for saving an evidence clip with each task note."},
                             },
                         }}},
                     },
@@ -1688,6 +1717,7 @@ _BOOLEAN_TRUE_VALUES = {'1', 'true', 'yes', 'on'}
 _BOOLEAN_FALSE_VALUES = {'0', 'false', 'no', 'off'}
 _DEFAULT_SETTINGS = {
     'VIDEOMEMORY_SAVE_NOTE_FRAMES': '1',
+    'VIDEOMEMORY_SAVE_NOTE_VIDEOS': '0',
 }
 
 # All known setting keys (for the settings page)
@@ -1699,6 +1729,7 @@ _KNOWN_SETTINGS = [
     'VIDEO_INGESTOR_MODEL',
     'VIDEOMEMORY_SELF_BASE_URL',
     'VIDEOMEMORY_SAVE_NOTE_FRAMES',
+    'VIDEOMEMORY_SAVE_NOTE_VIDEOS',
     'LOCAL_MODEL_BASE_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
@@ -1864,6 +1895,20 @@ def _coerce_boolean_setting(value, *, default: bool) -> bool:
     return default
 
 
+def _coerce_optional_boolean_request_value(value) -> Optional[bool]:
+    """Parse an optional boolean field from JSON requests."""
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+    if normalized in _BOOLEAN_TRUE_VALUES:
+        return True
+    if normalized in _BOOLEAN_FALSE_VALUES:
+        return False
+    return None
+
+
 def _get_effective_setting_value_and_source(key: str) -> tuple[str, str]:
     """Resolve a setting from DB/env/default and report the source."""
     db_val = db.get_setting(key)
@@ -1958,7 +2003,7 @@ def update_setting(key):
     try:
         data = request.get_json(silent=True) or {}
         raw_value = data.get('value', '')
-        if key == 'VIDEOMEMORY_SAVE_NOTE_FRAMES':
+        if key in {'VIDEOMEMORY_SAVE_NOTE_FRAMES', 'VIDEOMEMORY_SAVE_NOTE_VIDEOS'}:
             value = '1' if _coerce_boolean_setting(raw_value, default=True) else '0'
         elif key == 'VIDEO_INGESTOR_MODEL':
             try:

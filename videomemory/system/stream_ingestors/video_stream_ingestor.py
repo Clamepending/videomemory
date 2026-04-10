@@ -187,6 +187,9 @@ class VideoStreamIngestor:
 
     DEFAULT_FRAME_DIFF_THRESHOLD = 5.0
     FRAME_DIFF_THRESHOLD_UNIT = "average_pixel_difference_0_to_255"
+    DEFAULT_EVIDENCE_CLIP_FPS = 6.0
+    DEFAULT_EVIDENCE_CLIP_PREROLL_SECONDS = 4.0
+    DEFAULT_EVIDENCE_CLIP_END_HOLD_SECONDS = 1.0
     
     def __init__(self, camera_source, model_provider: BaseModelProvider, target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None, on_detection_event=None):
         """Initialize the video stream ingestor.
@@ -220,6 +223,22 @@ class VideoStreamIngestor:
         self._total_output_count: int = 0  # Track total number of outputs processed (for debugging)
         self._process_loop_ticks: int = 0
         self._latest_inference_error: Optional[Dict[str, Any]] = None
+
+        evidence_clip_fps = float(os.getenv("VIDEOMEMORY_NOTE_VIDEO_FPS", self.DEFAULT_EVIDENCE_CLIP_FPS))
+        evidence_clip_preroll_seconds = float(
+            os.getenv("VIDEOMEMORY_NOTE_VIDEO_PREROLL_SECONDS", self.DEFAULT_EVIDENCE_CLIP_PREROLL_SECONDS)
+        )
+        evidence_clip_end_hold_seconds = float(
+            os.getenv("VIDEOMEMORY_NOTE_VIDEO_END_HOLD_SECONDS", self.DEFAULT_EVIDENCE_CLIP_END_HOLD_SECONDS)
+        )
+        self._evidence_clip_fps = max(1.0, evidence_clip_fps)
+        self._evidence_clip_preroll_seconds = max(1.0, evidence_clip_preroll_seconds)
+        self._evidence_clip_end_hold_seconds = max(0.0, evidence_clip_end_hold_seconds)
+        self._evidence_clip_sample_interval_s = 1.0 / self._evidence_clip_fps
+        self._evidence_frame_buffer: deque = deque(
+            maxlen=max(2, int(round(self._evidence_clip_fps * self._evidence_clip_preroll_seconds)))
+        )
+        self._last_evidence_buffer_sample_at: float = 0.0
         
         # Frame deduplication: skip VLM calls when the average pixel difference stays below threshold
         self._last_processed_frame: Optional[Any] = None  # Last frame sent to VLM
@@ -536,6 +555,7 @@ class VideoStreamIngestor:
         if current_frame.size > 0:
             self._latest_frame = current_frame.copy()
             self._latest_frame_timestamp = time.time()
+            self._record_evidence_frame(current_frame)
 
         return current_frame
 
@@ -730,6 +750,30 @@ class VideoStreamIngestor:
         if not success:
             return b""
         return buffer.tobytes()
+
+    def _record_evidence_frame(self, frame: Any) -> None:
+        """Sample frames into a small rolling buffer for note evidence clips."""
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return
+        now = time.time()
+        if self._evidence_frame_buffer and (now - self._last_evidence_buffer_sample_at) < self._evidence_clip_sample_interval_s:
+            return
+        self._evidence_frame_buffer.append((now, frame.copy()))
+        self._last_evidence_buffer_sample_at = now
+
+    def _build_evidence_clip_frames(self, trigger_frame: Any) -> List[Any]:
+        """Build a short preroll evidence clip ending on the trigger frame."""
+        if trigger_frame is None or getattr(trigger_frame, "size", 0) == 0:
+            return []
+
+        clip_frames = [frame.copy() for _, frame in self._evidence_frame_buffer if getattr(frame, "size", 0) > 0]
+        clip_frames.append(trigger_frame.copy())
+
+        hold_frames = int(round(self._evidence_clip_fps * self._evidence_clip_end_hold_seconds))
+        for _ in range(max(0, hold_frames)):
+            clip_frames.append(trigger_frame.copy())
+
+        return clip_frames
     
     def _build_prompt(self) -> str:
         """Build the prompt for the LLM based on tasks and history."""
@@ -836,6 +880,7 @@ class VideoStreamIngestor:
 
         task_updates = ml_results.get("task_updates", [])
         note_frame_bytes = self._frame_to_jpeg_bytes(ml_results.get("frame"))
+        note_video_frames = self._build_evidence_clip_frames(ml_results.get("frame"))
         available_task_numbers = [t.task_number for t in self._tasks_list]
         completed_task_seen = False
 
@@ -869,7 +914,12 @@ class VideoStreamIngestor:
 
             # Append new note entry with current timestamp
             if new_note_content:  # Only append if there's actual content
-                new_note = NoteEntry(content=new_note_content, frame_bytes=note_frame_bytes or None)
+                new_note = NoteEntry(
+                    content=new_note_content,
+                    frame_bytes=note_frame_bytes or None,
+                    video_frames=note_video_frames or None,
+                    video_fps=self._evidence_clip_fps if note_video_frames else None,
+                )
                 task.task_note.append(new_note)
 
             # Update done status

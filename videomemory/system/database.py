@@ -2,10 +2,14 @@
 
 import logging
 import os
+import shutil
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import cv2
 
 logger = logging.getLogger('Database')
 
@@ -41,6 +45,8 @@ class TaskDatabase:
         self._data_dir = Path(db_path).parent
         self._note_frames_dir = self._data_dir / 'task_note_frames'
         self._note_frames_dir.mkdir(parents=True, exist_ok=True)
+        self._note_videos_dir = self._data_dir / 'task_note_videos'
+        self._note_videos_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
         logger.info(f"Task database initialized at {db_path}")
     
@@ -62,6 +68,8 @@ class TaskDatabase:
                     task_desc TEXT NOT NULL,
                     done INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'active',
+                    save_note_frames INTEGER,
+                    save_note_videos INTEGER,
                     io_id TEXT,
                     created_at REAL
                 );
@@ -72,6 +80,7 @@ class TaskDatabase:
                     content TEXT NOT NULL,
                     timestamp REAL NOT NULL,
                     frame_path TEXT,
+                    video_path TEXT,
                     FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
                 );
 
@@ -135,11 +144,20 @@ class TaskDatabase:
             if 'bot_id' not in columns:
                 conn.execute("ALTER TABLE tasks ADD COLUMN bot_id TEXT")
                 logger.info("Migrated tasks table: added bot_id column")
+            if 'save_note_frames' not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN save_note_frames INTEGER")
+                logger.info("Migrated tasks table: added save_note_frames column")
+            if 'save_note_videos' not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN save_note_videos INTEGER")
+                logger.info("Migrated tasks table: added save_note_videos column")
 
             note_columns = [row[1] for row in conn.execute("PRAGMA table_info(task_notes)").fetchall()]
             if 'frame_path' not in note_columns:
                 conn.execute("ALTER TABLE task_notes ADD COLUMN frame_path TEXT")
                 logger.info("Migrated task_notes table: added frame_path column")
+            if 'video_path' not in note_columns:
+                conn.execute("ALTER TABLE task_notes ADD COLUMN video_path TEXT")
+                logger.info("Migrated task_notes table: added video_path column")
 
             usage_columns = [row[1] for row in conn.execute("PRAGMA table_info(model_usage_events)").fetchall()]
             if usage_columns and 'was_success' not in usage_columns:
@@ -150,6 +168,10 @@ class TaskDatabase:
         """Build a relative file path for a task note frame."""
         return Path('task_note_frames') / str(task_id) / f'note_{note_id}.jpg'
 
+    def _note_video_relpath(self, task_id: str, note_id: int, suffix: str) -> Path:
+        """Build a relative file path for a task note evidence clip."""
+        return Path('task_note_videos') / str(task_id) / f'note_{note_id}{suffix}'
+
     def _resolve_note_frame_path(self, frame_path: str) -> Optional[Path]:
         """Resolve a stored relative frame path to an absolute path inside the data dir."""
         if not frame_path:
@@ -159,6 +181,18 @@ class TaskDatabase:
             resolved.relative_to(self._data_dir.resolve())
         except ValueError:
             logger.warning("Ignoring note frame outside data dir: %s", frame_path)
+            return None
+        return resolved
+
+    def _resolve_note_video_path(self, video_path: str) -> Optional[Path]:
+        """Resolve a stored relative evidence-clip path to an absolute path inside the data dir."""
+        if not video_path:
+            return None
+        resolved = (self._data_dir / video_path).resolve()
+        try:
+            resolved.relative_to(self._data_dir.resolve())
+        except ValueError:
+            logger.warning("Ignoring note video outside data dir: %s", video_path)
             return None
         return resolved
 
@@ -188,19 +222,197 @@ class TaskDatabase:
                     pass
         except OSError as exc:
             logger.warning("Failed to delete task note frame %s: %s", absolute_path, exc)
+
+    def _write_note_video(
+        self,
+        task_id: str,
+        note_id: int,
+        video_frames: Optional[List[Any]],
+        video_fps: Optional[float],
+    ) -> Optional[str]:
+        """Persist an evidence clip for a note and return the stored relative path."""
+        if not video_frames:
+            return None
+
+        normalized_fps = float(video_fps or 0) if video_fps is not None else 0.0
+        if normalized_fps <= 0:
+            normalized_fps = 6.0
+
+        valid_frames = [frame for frame in video_frames if frame is not None]
+        if not valid_frames:
+            return None
+
+        first_frame = valid_frames[0]
+        if getattr(first_frame, "size", 0) == 0:
+            return None
+        height, width = first_frame.shape[:2]
+        if height <= 0 or width <= 0:
+            return None
+
+        normalized_frames: List[Any] = []
+        for frame in valid_frames:
+            if frame.shape[:2] != (height, width):
+                frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
+            normalized_frames.append(frame)
+
+        ffmpeg_relpath = self._note_video_relpath(task_id, note_id, ".mp4")
+        ffmpeg_absolute_path = self._data_dir / ffmpeg_relpath
+        ffmpeg_absolute_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._write_note_video_with_ffmpeg(
+            absolute_path=ffmpeg_absolute_path,
+            video_frames=normalized_frames,
+            video_fps=normalized_fps,
+            width=width,
+            height=height,
+        ):
+            return ffmpeg_relpath.as_posix()
+
+        candidate_formats = [
+            (".mp4", cv2.VideoWriter_fourcc(*"mp4v")),
+            (".avi", cv2.VideoWriter_fourcc(*"MJPG")),
+        ]
+
+        for suffix, fourcc in candidate_formats:
+            relpath = self._note_video_relpath(task_id, note_id, suffix)
+            absolute_path = self._data_dir / relpath
+            absolute_path.parent.mkdir(parents=True, exist_ok=True)
+
+            writer = cv2.VideoWriter(
+                str(absolute_path),
+                fourcc,
+                normalized_fps,
+                (width, height),
+            )
+            if not writer.isOpened():
+                writer.release()
+                absolute_path.unlink(missing_ok=True)
+                continue
+
+            try:
+                for frame in normalized_frames:
+                    writer.write(frame)
+            finally:
+                writer.release()
+
+            try:
+                if absolute_path.exists() and absolute_path.stat().st_size > 0:
+                    return relpath.as_posix()
+            except OSError:
+                pass
+            absolute_path.unlink(missing_ok=True)
+
+        logger.warning("Failed to persist note evidence clip for task=%s note=%s", task_id, note_id)
+        return None
+
+    def _write_note_video_with_ffmpeg(
+        self,
+        *,
+        absolute_path: Path,
+        video_frames: List[Any],
+        video_fps: float,
+        width: int,
+        height: int,
+    ) -> bool:
+        """Encode a browser-playable H.264 MP4 via ffmpeg when available."""
+        ffmpeg_path = shutil.which("ffmpeg")
+        if not ffmpeg_path:
+            return False
+
+        candidate_codecs = (
+            ("libx264", ["-preset", "veryfast", "-crf", "23"]),
+            ("h264_videotoolbox", ["-b:v", "2M"]),
+        )
+        payload = b"".join(frame.tobytes() for frame in video_frames)
+
+        for codec_name, codec_args in candidate_codecs:
+            cmd = [
+                ffmpeg_path,
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "bgr24",
+                "-s:v",
+                f"{width}x{height}",
+                "-r",
+                f"{video_fps:g}",
+                "-i",
+                "pipe:0",
+                "-an",
+                "-c:v",
+                codec_name,
+                *codec_args,
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(absolute_path),
+            ]
+            try:
+                result = subprocess.run(
+                    cmd,
+                    input=payload,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+            except OSError as exc:
+                logger.warning("Failed to launch ffmpeg for note video encoding: %s", exc)
+                return False
+
+            if result.returncode == 0:
+                try:
+                    if absolute_path.exists() and absolute_path.stat().st_size > 0:
+                        return True
+                except OSError:
+                    pass
+
+            absolute_path.unlink(missing_ok=True)
+            stderr_text = result.stderr.decode("utf-8", errors="ignore").strip()
+            logger.warning(
+                "ffmpeg note video encoding failed with codec=%s for %s: %s",
+                codec_name,
+                absolute_path,
+                stderr_text or f"exit {result.returncode}",
+            )
+
+        return False
+
+    def _delete_note_video(self, video_path: Optional[str]) -> None:
+        """Delete a stored note evidence clip if it exists."""
+        absolute_path = self._resolve_note_video_path(video_path or "")
+        if absolute_path is None:
+            return
+        try:
+            absolute_path.unlink(missing_ok=True)
+            parent = absolute_path.parent
+            if parent != self._note_videos_dir:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    pass
+        except OSError as exc:
+            logger.warning("Failed to delete task note video %s: %s", absolute_path, exc)
     
     # ── Task methods ─────────────────────────────────────────────
 
     def save_task(self, task) -> None:
         """Insert or update a task."""
         bot_id = getattr(task, 'bot_id', None)
+        save_note_frames = getattr(task, 'save_note_frames', None)
+        save_note_videos = getattr(task, 'save_note_videos', None)
         with self._get_conn() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO tasks
-                   (task_id, task_number, task_desc, done, status, io_id, created_at, bot_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (task_id, task_number, task_desc, done, status, save_note_frames, save_note_videos, io_id, created_at, bot_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (task.task_id, task.task_number, task.task_desc,
-                 int(task.done), task.status, task.io_id, time.time(), bot_id)
+                 int(task.done), task.status,
+                 None if save_note_frames is None else int(bool(save_note_frames)),
+                 None if save_note_videos is None else int(bool(save_note_videos)),
+                 task.io_id, time.time(), bot_id)
             )
     
     def update_task_done(self, task_id: str, done: bool, status: str = None) -> None:
@@ -243,33 +455,66 @@ class TaskDatabase:
                 "UPDATE tasks SET task_desc = ? WHERE task_id = ?",
                 (desc, task_id)
             )
+
+    def update_task_evidence_preferences(
+        self,
+        task_id: str,
+        *,
+        save_note_frames: Optional[bool],
+        save_note_videos: Optional[bool],
+    ) -> None:
+        """Update stored evidence preferences for a task."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE tasks SET save_note_frames = ?, save_note_videos = ? WHERE task_id = ?",
+                (
+                    None if save_note_frames is None else int(bool(save_note_frames)),
+                    None if save_note_videos is None else int(bool(save_note_videos)),
+                    task_id,
+                ),
+            )
     
     def delete_task(self, task_id: str) -> None:
         """Delete a task and its notes (CASCADE)."""
         with self._get_conn() as conn:
             note_rows = conn.execute(
-                "SELECT frame_path FROM task_notes WHERE task_id = ?",
+                "SELECT frame_path, video_path FROM task_notes WHERE task_id = ?",
                 (task_id,),
             ).fetchall()
             conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
         for row in note_rows:
             self._delete_note_frame(row['frame_path'])
+            self._delete_note_video(row['video_path'])
     
-    def save_note(self, task_id: str, content: str, timestamp: float, frame_bytes: Optional[bytes] = None) -> Dict[str, Optional[str]]:
-        """Append a single note entry for a task and optionally persist a frame."""
+    def save_note(
+        self,
+        task_id: str,
+        content: str,
+        timestamp: float,
+        frame_bytes: Optional[bytes] = None,
+        video_frames: Optional[List[Any]] = None,
+        video_fps: Optional[float] = None,
+    ) -> Dict[str, Optional[str]]:
+        """Append a single note entry for a task and optionally persist frame/video artifacts."""
         with self._get_conn() as conn:
             cursor = conn.execute(
-                "INSERT INTO task_notes (task_id, content, timestamp, frame_path) VALUES (?, ?, ?, NULL)",
+                "INSERT INTO task_notes (task_id, content, timestamp, frame_path, video_path) VALUES (?, ?, ?, NULL, NULL)",
                 (task_id, content, timestamp)
             )
             note_id = int(cursor.lastrowid)
             frame_path = self._write_note_frame(task_id, note_id, frame_bytes)
+            video_path = self._write_note_video(task_id, note_id, video_frames, video_fps)
             if frame_path:
                 conn.execute(
                     "UPDATE task_notes SET frame_path = ? WHERE id = ?",
                     (frame_path, note_id),
                 )
-            return {"note_id": note_id, "frame_path": frame_path}
+            if video_path:
+                conn.execute(
+                    "UPDATE task_notes SET video_path = ? WHERE id = ?",
+                    (video_path, note_id),
+                )
+            return {"note_id": note_id, "frame_path": frame_path, "video_path": video_path}
     
     def load_all_tasks(self) -> List[Dict]:
         """Load all tasks with their notes, ordered by task_id."""
@@ -280,7 +525,7 @@ class TaskDatabase:
             result = []
             for r in rows:
                 notes = conn.execute(
-                    "SELECT id, content, timestamp, frame_path FROM task_notes WHERE task_id = ? ORDER BY timestamp",
+                    "SELECT id, content, timestamp, frame_path, video_path FROM task_notes WHERE task_id = ? ORDER BY timestamp",
                     (r['task_id'],)
                 ).fetchall()
                 row_dict = {
@@ -289,6 +534,8 @@ class TaskDatabase:
                     'task_desc': r['task_desc'],
                     'done': bool(r['done']),
                     'status': r['status'] if 'status' in r.keys() else ('done' if r['done'] else 'active'),
+                    'save_note_frames': None if r['save_note_frames'] is None else bool(r['save_note_frames']),
+                    'save_note_videos': None if r['save_note_videos'] is None else bool(r['save_note_videos']),
                     'io_id': r['io_id'],
                     'notes': [
                         {
@@ -296,6 +543,7 @@ class TaskDatabase:
                             'content': n['content'],
                             'timestamp': n['timestamp'],
                             'frame_path': n['frame_path'],
+                            'video_path': n['video_path'],
                         }
                         for n in notes
                     ]
@@ -550,6 +798,17 @@ class TaskDatabase:
         if not row or not row['frame_path']:
             return None
         return self._resolve_note_frame_path(row['frame_path'])
+
+    def get_note_video_path(self, note_id: int) -> Optional[Path]:
+        """Get the absolute file path for a stored note evidence clip, if any."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT video_path FROM task_notes WHERE id = ?",
+                (note_id,),
+            ).fetchone()
+        if not row or not row['video_path']:
+            return None
+        return self._resolve_note_video_path(row['video_path'])
 
     def get_ingestor_frame_diff_threshold(self, io_id: str) -> Optional[float]:
         """Get a saved frame diff threshold for a specific device."""

@@ -2,6 +2,8 @@ import os
 from unittest.mock import AsyncMock, Mock, patch
 import unittest
 
+import numpy as np
+
 from videomemory.system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from videomemory.system.task_types import Task
 
@@ -74,6 +76,45 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
         self.assertEqual(len(detections), 1)
         self.assertEqual(detections[0][1].content, "Red marker detected in frame.")
         self.assertEqual(ingestor._tasks_list, [])
+
+    def test_process_ml_results_attaches_evidence_clip_payload_to_new_note(self):
+        updates = []
+        ingestor = VideoStreamIngestor(
+            "http://camera.example/snapshot.jpg",
+            model_provider=object(),
+            on_task_updated=lambda task, note: updates.append((task, note)),
+        )
+        task = self._task()
+        ingestor._tasks_list = [task]
+        ingestor._evidence_clip_fps = 4.0
+        prior_frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        prior_frame[:, :] = (0, 0, 255)
+        trigger_frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        trigger_frame[:, :] = (0, 255, 0)
+        ingestor._evidence_frame_buffer.append((1.0, prior_frame.copy()))
+
+        ingestor._process_ml_results(
+            {
+                "frame": trigger_frame,
+                "task_updates": [
+                    {
+                        "task_number": 0,
+                        "task_note": "Red marker detected in frame.",
+                        "task_done": False,
+                    }
+                ],
+            }
+        )
+
+        note = task.task_note[0]
+        video_frames, video_fps = note.consume_video_payload()
+        self.assertIsNotNone(video_frames)
+        self.assertGreaterEqual(len(video_frames), 2)
+        self.assertEqual(video_fps, 4.0)
+        self.assertTrue(np.array_equal(video_frames[0], prior_frame))
+        self.assertTrue(np.array_equal(video_frames[-1], trigger_frame))
+        self.assertEqual(len(updates), 1)
+        self.assertIs(updates[0][1], note)
 
     def test_process_ml_results_prunes_only_completed_tasks_and_renumbers_active_ones(self):
         updates = []

@@ -132,6 +132,24 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         mock_db.set_setting.assert_called_once_with("VIDEOMEMORY_SAVE_NOTE_FRAMES", "0")
         mock_task_manager.reload_model_provider.assert_not_called()
 
+    def test_note_video_toggle_save_does_not_trigger_model_reload(self):
+        mock_db = MagicMock()
+        mock_task_manager = MagicMock()
+
+        with (
+            patch.object(app_module, "db", mock_db),
+            patch.object(app_module, "task_manager", mock_task_manager),
+        ):
+            resp = self.client.put(
+                "/api/settings/VIDEOMEMORY_SAVE_NOTE_VIDEOS",
+                json={"value": "1"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json(), {"status": "saved", "key": "VIDEOMEMORY_SAVE_NOTE_VIDEOS"})
+        mock_db.set_setting.assert_called_once_with("VIDEOMEMORY_SAVE_NOTE_VIDEOS", "1")
+        mock_task_manager.reload_model_provider.assert_not_called()
+
     def test_get_settings_reports_note_frame_toggle_default(self):
         mock_db = MagicMock()
         mock_db.get_setting.return_value = None
@@ -145,6 +163,22 @@ class SettingsRuntimeReloadTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         setting = resp.get_json()["settings"]["VIDEOMEMORY_SAVE_NOTE_FRAMES"]
         self.assertEqual(setting["value"], "1")
+        self.assertTrue(setting["is_set"])
+        self.assertEqual(setting["source"], "default")
+
+    def test_get_settings_reports_note_video_toggle_default(self):
+        mock_db = MagicMock()
+        mock_db.get_setting.return_value = None
+
+        with (
+            patch.object(app_module, "db", mock_db),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            resp = self.client.get("/api/settings")
+
+        self.assertEqual(resp.status_code, 200)
+        setting = resp.get_json()["settings"]["VIDEOMEMORY_SAVE_NOTE_VIDEOS"]
+        self.assertEqual(setting["value"], "0")
         self.assertTrue(setting["is_set"])
         self.assertEqual(setting["source"], "default")
 

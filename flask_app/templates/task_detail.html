@@ -304,7 +304,17 @@
                         const isAction = note.content && note.content.startsWith('Action taken:');
                         const noteCardClasses = ['note-card'];
                         if (isAction) noteCardClasses.push('action-taken');
-                        if (!note.frame_url) noteCardClasses.push('no-frame');
+                        if (!note.frame_url && !note.video_url) noteCardClasses.push('no-frame');
+                        const noteVideoHtml = note.video_url
+                            ? `<div class="note-frame-wrap">
+                                   <video
+                                       class="note-frame"
+                                       controls
+                                       preload="metadata"
+                                       src="${encodeURI(note.video_url)}"
+                                   ></video>
+                               </div>`
+                            : '';
                         const noteFrameHtml = note.frame_url
                             ? `<div class="note-frame-wrap">
                                    <img
@@ -317,6 +327,7 @@
                             : '';
                         notesHtml += `
                             <div class="${noteCardClasses.join(' ')}">
+                                ${noteVideoHtml}
                                 ${noteFrameHtml}
                                 <div class="note-body">
                                     <div class="note-content">${escapeHtml(note.content || 'No content')}</div>

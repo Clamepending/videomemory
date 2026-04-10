@@ -137,13 +137,21 @@ def add_camera(camera_url: str, device_name: Optional[str] = None) -> dict:
         }
 
 
-def add_task(io_id: str, task_description: str, bot_id: Optional[str] = None) -> dict:
+def add_task(
+    io_id: str,
+    task_description: str,
+    bot_id: Optional[str] = None,
+    save_note_frames: Optional[bool] = None,
+    save_note_videos: Optional[bool] = None,
+) -> dict:
     """Adds a task for a specific input device using its io_id.
     
     Args:
         io_id: The unique identifier of the input device.
         task_description: A description of the task to be performed.
         bot_id: Optional identifier of the bot that created this task (for multi-bot / debug).
+        save_note_frames: Optional per-task override for saving note frames.
+        save_note_videos: Optional per-task override for saving note videos.
     
     Returns:
         dict: A dictionary containing the task information and status.
@@ -187,7 +195,13 @@ def add_task(io_id: str, task_description: str, bot_id: Optional[str] = None) ->
         logger = logging.getLogger('tasks')
         logger.debug(f"[DEBUG] add_task: About to call task_manager.add_task for io_id={io_id}, task={task_description}")
         try:
-            result = _context.task_manager.add_task(io_id, task_description, bot_id=bot_id)
+            result = _context.task_manager.add_task(
+                io_id,
+                task_description,
+                bot_id=bot_id,
+                save_note_frames=save_note_frames,
+                save_note_videos=save_note_videos,
+            )
             logger.debug(f"[DEBUG] add_task: task_manager.add_task returned: {result}")
             result["device_info"] = device_info
             logger.info(f"[INFO] add_task: Successfully added task, returning result")

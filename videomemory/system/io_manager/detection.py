@@ -60,11 +60,11 @@ class DeviceDetector:
                 logger.debug(f"Found {len(camera_infos)} cameras from enumeration")
                 
                 for camera_info in camera_infos:
-                    if self.is_linux:
-                        # On Linux, trust the enumeration -- don't try to open the
-                        # camera because the device may already be held by a running
-                        # video ingestor, which would cause the open to fail and the
-                        # camera to vanish from the list on refresh.
+                    if self.is_linux or self.is_mac:
+                        # On Linux and macOS, trust the enumeration -- don't try to
+                        # open the camera during device refresh. Re-opening a live
+                        # camera can make it disappear from the list on Linux and can
+                        # trigger native AVFoundation/OpenCV crashes on macOS.
                         cameras.append((camera_info.index, camera_info.name))
                         logger.debug(f"Added camera {camera_info.index}: {camera_info.name}")
                     else:
@@ -112,21 +112,7 @@ class DeviceDetector:
             for idx, device in enumerate(av_devices):
                 if device:
                     name = device.localizedName() or f"Camera {idx}"
-                    # Simple verification: just check if camera can be opened
-                    cap = None
-                    try:
-                        cap = cv2.VideoCapture(idx, cv2.CAP_AVFOUNDATION)
-                        if cap.isOpened():
-                            # Camera can be opened - include it
-                            cameras.append((idx, name))
-                    except Exception:
-                        pass  # Skip if can't open
-                    finally:
-                        if cap is not None:
-                            try:
-                                cap.release()
-                            except Exception:
-                                pass
+                    cameras.append((idx, name))
         except ImportError:
             logger.debug("AVFoundation Python bindings unavailable; using OpenCV index scan fallback")
         except Exception as e:

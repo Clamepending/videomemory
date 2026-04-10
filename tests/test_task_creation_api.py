@@ -66,6 +66,43 @@ class TaskCreationApiTests(unittest.TestCase):
             "net0",
             "Watch for a person entering the room",
             bot_id=None,
+            save_note_frames=None,
+            save_note_videos=None,
+        )
+
+    def test_create_task_passes_per_task_evidence_preferences(self):
+        mock_db = MagicMock()
+        add_result = {
+            "status": "success",
+            "task_id": "0",
+            "io_id": "net0",
+            "task_description": "Watch for a person entering the room",
+            "save_note_frames": False,
+            "save_note_videos": True,
+        }
+
+        with (
+            patch.object(app_module, "db", mock_db),
+            patch.object(app_module, "_build_task_creation_model_error", return_value=None),
+            patch.object(app_module.videomemory.tools.tasks, "add_task", return_value=add_result) as mock_add_task,
+        ):
+            resp = self.client.post(
+                "/api/tasks",
+                json={
+                    "io_id": "net0",
+                    "task_description": "Watch for a person entering the room",
+                    "save_note_frames": False,
+                    "save_note_videos": True,
+                },
+            )
+
+        self.assertEqual(resp.status_code, 201)
+        mock_add_task.assert_called_once_with(
+            "net0",
+            "Watch for a person entering the room",
+            bot_id=None,
+            save_note_frames=False,
+            save_note_videos=True,
         )
 
 

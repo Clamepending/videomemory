@@ -50,6 +50,17 @@ class TaskManagerNoteFrameSettingTests(unittest.TestCase):
         self.assertEqual(note.note_id, 7)
         self.assertEqual(note.frame_path, "task_note_frames/task-1/note_7.jpg")
 
+    def test_on_task_updated_respects_per_task_frame_override(self):
+        db = self._make_db("1", None)
+        manager = TaskManager(io_manager=None, model_provider=object(), db=db)
+        task = self._make_task()
+        task.save_note_frames = False
+        note = NoteEntry(content="Card detected", frame_bytes=b"jpeg-bytes")
+
+        manager._on_task_updated(task, note)
+
+        self.assertIsNone(db.save_note.call_args.kwargs["frame_bytes"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ from .model_providers import BaseModelProvider, get_VLM_provider
 logger = logging.getLogger('TaskManager')
 
 _NOTE_FRAME_SETTING_KEY = "VIDEOMEMORY_SAVE_NOTE_FRAMES"
+_NOTE_VIDEO_SETTING_KEY = "VIDEOMEMORY_SAVE_NOTE_VIDEOS"
 _TRUE_SETTING_VALUES = {"1", "true", "yes", "on"}
 _FALSE_SETTING_VALUES = {"0", "false", "no", "off"}
 _AVERAGE_PIXEL_DIFF_UNIT = "average_pixel_difference_0_to_255"
@@ -76,6 +77,7 @@ class TaskManager:
                         timestamp=n['timestamp'],
                         note_id=n.get('note_id'),
                         frame_path=n.get('frame_path'),
+                        video_path=n.get('video_path'),
                     )
                     for n in t['notes']
                 ]
@@ -88,6 +90,8 @@ class TaskManager:
                     io_id=t['io_id'],
                     status=t.get('status', STATUS_ACTIVE),
                     bot_id=t.get('bot_id'),
+                    save_note_frames=t.get('save_note_frames'),
+                    save_note_videos=t.get('save_note_videos'),
                 )
                 self._tasks[t['task_id']] = task
                 if self._io_manager is not None and task.status == STATUS_ACTIVE and not task.done:
@@ -214,21 +218,29 @@ class TaskManager:
         if self._db is None:
             if new_note is not None:
                 new_note.clear_frame_bytes()
+                new_note.clear_video_payload()
             return
         try:
             if new_note:
-                should_persist_note_frames = self._should_persist_note_frames()
+                should_persist_note_frames = self._should_persist_note_frames(task)
+                should_persist_note_videos = self._should_persist_note_videos(task)
                 frame_bytes = new_note.consume_frame_bytes() if should_persist_note_frames else None
+                video_frames, video_fps = new_note.consume_video_payload() if should_persist_note_videos else (None, None)
                 if not should_persist_note_frames:
                     new_note.clear_frame_bytes()
+                if not should_persist_note_videos:
+                    new_note.clear_video_payload()
                 save_result = self._db.save_note(
                     task.task_id,
                     new_note.content,
                     new_note.timestamp,
                     frame_bytes=frame_bytes,
+                    video_frames=video_frames,
+                    video_fps=video_fps,
                 )
                 new_note.note_id = save_result.get('note_id')
                 new_note.frame_path = save_result.get('frame_path')
+                new_note.video_path = save_result.get('video_path')
             # When done is set, also update status to 'done'
             if task.done:
                 task.status = STATUS_DONE
@@ -238,8 +250,10 @@ class TaskManager:
         except Exception as e:
             logger.error(f"Failed to persist task update for {task.task_id}: {e}")
 
-    def _should_persist_note_frames(self) -> bool:
+    def _should_persist_note_frames(self, task: Optional[Task] = None) -> bool:
         """Return whether task notes should persist their associated frames."""
+        if task is not None and task.save_note_frames is not None:
+            return bool(task.save_note_frames)
         raw_value = None
         if self._db is not None:
             try:
@@ -261,6 +275,32 @@ class TaskManager:
             return False
         logger.warning("Unrecognized %s value %r; defaulting to enabled", _NOTE_FRAME_SETTING_KEY, raw_value)
         return True
+
+    def _should_persist_note_videos(self, task: Optional[Task] = None) -> bool:
+        """Return whether task notes should persist evidence clips."""
+        if task is not None and task.save_note_videos is not None:
+            return bool(task.save_note_videos)
+        raw_value = None
+        if self._db is not None:
+            try:
+                raw_value = self._db.get_setting(_NOTE_VIDEO_SETTING_KEY)
+            except Exception as e:
+                logger.error("Failed to load note-video setting from database: %s", e, exc_info=True)
+        if raw_value is None:
+            raw_value = os.getenv(_NOTE_VIDEO_SETTING_KEY)
+
+        if raw_value is None:
+            return False
+
+        normalized = str(raw_value).strip().lower()
+        if not normalized:
+            return False
+        if normalized in _TRUE_SETTING_VALUES:
+            return True
+        if normalized in _FALSE_SETTING_VALUES:
+            return False
+        logger.warning("Unrecognized %s value %r; defaulting to disabled", _NOTE_VIDEO_SETTING_KEY, raw_value)
+        return False
 
     def _attach_usage_callback(self, provider: Optional[BaseModelProvider]) -> None:
         """Attach the configured usage callback to a provider when supported."""
@@ -403,13 +443,22 @@ class TaskManager:
 
         return True
     
-    def add_task(self, io_id: str, task_description: str, bot_id: Optional[str] = None) -> Dict:
+    def add_task(
+        self,
+        io_id: str,
+        task_description: str,
+        bot_id: Optional[str] = None,
+        save_note_frames: Optional[bool] = None,
+        save_note_videos: Optional[bool] = None,
+    ) -> Dict:
         """Add a new task for a specific IO stream.
         
         Args:
             io_id: The unique identifier of the IO stream
             task_description: Description of the task to be performed
             bot_id: Optional identifier of the bot that created this task (for multi-bot / debug)
+            save_note_frames: Optional per-task override for saving note frames
+            save_note_videos: Optional per-task override for saving note videos
         
         Returns:
             Dictionary containing the task information and status
@@ -460,6 +509,8 @@ class TaskManager:
             done=False,
             io_id=io_id,
             bot_id=bot_id,
+            save_note_frames=save_note_frames,
+            save_note_videos=save_note_videos,
         )
         
         
@@ -492,6 +543,8 @@ class TaskManager:
         }
         if bot_id is not None:
             result["bot_id"] = bot_id
+        result["save_note_frames"] = save_note_frames
+        result["save_note_videos"] = save_note_videos
         return result
 
     def _emit_detection_event(self, task: Task, new_note: Optional[NoteEntry] = None):
