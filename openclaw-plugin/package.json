@@ -1,0 +1,28 @@
+{
+  "name": "@clamepending/videomemory",
+  "version": "0.1.0",
+  "description": "VideoMemory onboarding and runtime integration for OpenClaw",
+  "type": "module",
+  "license": "UNLICENSED",
+  "bin": {
+    "videomemory-openclaw": "./cli.mjs"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.41"
+  },
+  "files": [
+    "README.md",
+    "openclaw.plugin.json",
+    "src",
+    "skills",
+    "bin",
+    "transforms",
+    "cli.mjs"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./src/index.mjs"
+    ],
+    "setupEntry": "./src/setup-entry.mjs"
+  }
+}

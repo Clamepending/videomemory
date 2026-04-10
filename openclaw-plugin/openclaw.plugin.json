@@ -1,0 +1,35 @@
+{
+  "id": "videomemory",
+  "name": "VideoMemory",
+  "description": "Adds VideoMemory skill packaging and future onboarding/runtime integration to OpenClaw.",
+  "version": "0.1.0",
+  "skills": [
+    "./skills"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "videomemoryBaseUrl": {
+        "type": "string",
+        "description": "Preferred VideoMemory base URL for skill prompts and future plugin-managed routing."
+      },
+      "repoDir": {
+        "type": "string",
+        "description": "Local VideoMemory checkout path used by bootstrap and relaunch flows."
+      },
+      "repoRef": {
+        "type": "string",
+        "description": "Preferred git ref when the plugin installs or relaunches VideoMemory."
+      },
+      "botId": {
+        "type": "string",
+        "description": "bot_id written into helper-managed VideoMemory tasks."
+      },
+      "tailscaleAuthKeyEnvVar": {
+        "type": "string",
+        "description": "Environment variable name that contains a reusable Tailscale auth key for onboarding."
+      }
+    }
+  }
+}
