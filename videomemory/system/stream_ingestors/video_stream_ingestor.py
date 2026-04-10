@@ -185,7 +185,7 @@ def build_video_ingestor_prompt(
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
 
-    DEFAULT_FRAME_DIFF_THRESHOLD = 3.0
+    DEFAULT_FRAME_DIFF_THRESHOLD = 5.0
     FRAME_DIFF_THRESHOLD_UNIT = "average_pixel_difference_0_to_255"
     
     def __init__(self, camera_source, model_provider: BaseModelProvider, target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None, on_detection_event=None):

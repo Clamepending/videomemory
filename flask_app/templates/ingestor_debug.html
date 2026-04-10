@@ -405,10 +405,10 @@
                                 min="0"
                                 max="255"
                                 step="0.5"
-                                value="3.0"
+                                value="5.0"
                             />
                             <div class="frame-skip-meta">
-                                <span class="frame-skip-value" id="frameSkipThresholdValue">3.0 avg pixel diff</span>
+                                <span class="frame-skip-value" id="frameSkipThresholdValue">5.0 avg pixel diff</span>
                                 <span class="frame-skip-status" id="frameSkipThresholdStatus">Loading threshold…</span>
                             </div>
                         </div>
@@ -497,7 +497,7 @@
                 const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/frame-skip-threshold`);
                 const data = await resp.json();
                 if (!resp.ok) {
-                    setFrameSkipThresholdUi(3.0, data.error || 'Failed to load threshold');
+                    setFrameSkipThresholdUi(5.0, data.error || 'Failed to load threshold');
                     return;
                 }
                 const sourceLabel = data.source === 'active_ingestor'
@@ -506,7 +506,7 @@
                 setFrameSkipThresholdUi(firstDefined(data.average_pixel_diff_threshold, data.frame_diff_threshold), sourceLabel);
             } catch (e) {
                 console.error('Error loading frame skip threshold:', e);
-                setFrameSkipThresholdUi(3.0, 'Failed to load threshold');
+                setFrameSkipThresholdUi(5.0, 'Failed to load threshold');
             }
         }
 

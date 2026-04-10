@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from videomemory.system.task_manager import TaskManager
 from videomemory.system.task_types import STATUS_ACTIVE, STATUS_DONE, STATUS_TERMINATED
+from videomemory.system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 
 
 class TaskManagerRuntimeReloadTests(unittest.TestCase):
@@ -142,6 +143,22 @@ class TaskManagerRuntimeReloadTests(unittest.TestCase):
         self.assertEqual(manager._tasks["1"].status, STATUS_ACTIVE)
         db.update_task_status.assert_any_call("1", STATUS_TERMINATED)
         db.update_task_status.assert_any_call("1", STATUS_ACTIVE)
+
+    def test_get_ingestor_frame_skip_threshold_uses_current_default_when_unsaved(self):
+        db = MagicMock()
+        db.load_all_tasks.return_value = []
+        db.get_max_task_id.return_value = -1
+        db.get_ingestor_frame_diff_threshold.return_value = None
+
+        manager = TaskManager(io_manager=None, model_provider=object(), db=db)
+
+        result = manager.get_ingestor_frame_skip_threshold("0")
+
+        self.assertEqual(result["source"], "default")
+        self.assertEqual(
+            result["average_pixel_diff_threshold"],
+            float(VideoStreamIngestor.DEFAULT_FRAME_DIFF_THRESHOLD),
+        )
 
 
 if __name__ == "__main__":
