@@ -253,7 +253,7 @@ In this repo, sessions matter in three distinct ways:
 The important session keys in this integration are:
 
 - `hook:videomemory:...` for webhook-originated work
-- `agent:main:main` for the main shared chat session
+- a concrete user-chat session key such as `agent:main:explicit:...` or another runtime-provided session key for the current chat
 
 That distinction is central to how alert routing works.
 
@@ -846,7 +846,7 @@ The session-target patch is the especially important part.
 Why it exists:
 
 - inbound webhook work naturally starts in an isolated hook session
-- but for "tell me here" behavior, the system needs to inject the resulting action into a shared user session such as `agent:main:main`
+- but for "tell me here" behavior, the system needs to inject the resulting action into the actual user chat session rather than a hook/heartbeat/internal session
 - this patch appears to make that rerouting behave the way the integration wants
 
 Inference:
@@ -926,10 +926,16 @@ For in-chat alerts, the helper stores something like:
 
 ```text
 delivery_mode = session
-delivery_session_key = agent:main:main
+delivery_session_key = <actual originating chat session key>
 ```
 
 Then the transform returns that session key.
+
+Important:
+
+- `agent:main:main` is not a safe generic fallback on all OpenClaw installs.
+- Some current builds reuse that key for heartbeat or other internal automation traffic.
+- The helper should store the real originating session key for the current chat, not a guessed alias.
 
 That is the mechanism by which:
 

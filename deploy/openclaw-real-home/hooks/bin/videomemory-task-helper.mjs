@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,12 +9,15 @@ const defaultBaseUrl = process.env.VIDEOMEMORY_BASE_URL || "http://videomemory:5
 const registryPath =
   process.env.OPENCLAW_VIDEOMEMORY_REGISTRY_PATH ||
   path.join(os.homedir(), ".openclaw", "hooks", "state", "videomemory-task-actions.json");
+const sessionStorePath =
+  process.env.OPENCLAW_SESSION_STORE_PATH ||
+  path.join(os.homedir(), ".openclaw", "agents", "main", "sessions", "sessions.json");
 
 function usage() {
   return [
     "Usage:",
-    "  node videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--session-key agent:main:main] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
-    "  node videomemory-task-helper.mjs update --task-id 0 --trigger 'Watch for backpacks...' [--action 'Tell one short backpack joke...'] [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--session-key agent:main:main] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request '...'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
+    "  node videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--include-video true|false] [--session-key <current-session-key>] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
+    "  node videomemory-task-helper.mjs update --task-id 0 --trigger 'Watch for backpacks...' [--action 'Tell one short backpack joke...'] [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--include-video true|false] [--session-key <current-session-key>] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request '...'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
     "  node videomemory-task-helper.mjs stop --task-id 0 [--base-url http://videomemory:5050]",
     "  node videomemory-task-helper.mjs delete --task-id 0 [--base-url http://videomemory:5050]",
     "",
@@ -21,8 +25,10 @@ function usage() {
     "  telegram sends an external user alert through Telegram.",
     "  session routes the follow-up action into a specific OpenClaw session without external channel delivery.",
     "  webchat is an alias for session delivery and should point at the originating OpenClaw session.",
+    "  Never use agent:main:main as a generic session-key fallback; pass the real current chat session key.",
     "  internal keeps the follow-up action inside the hook flow and does not reply in the current web chat.",
     "  --include-frame true explicitly tells OpenClaw to fetch and use the saved triggering note frame.",
+    "  --include-video true explicitly tells OpenClaw to fetch and use the saved triggering note evidence clip.",
   ].join("\n");
 }
 
@@ -127,17 +133,12 @@ function resolveSenderId(options, previousEntry) {
   return "";
 }
 
-function fallbackSessionKey() {
-  return cleanText(process.env.OPENCLAW_DEFAULT_SESSION_KEY) || "agent:main:main";
-}
-
 function resolveSessionKey(options, previousEntry) {
   const candidates = [
     options["session-key"],
     previousEntry?.delivery_session_key,
     process.env.OPENCLAW_SESSION_KEY,
     process.env.SESSION_KEY,
-    fallbackSessionKey(),
   ];
   for (const candidate of candidates) {
     const value = cleanText(candidate);
@@ -146,6 +147,27 @@ function resolveSessionKey(options, previousEntry) {
     }
   }
   return "";
+}
+
+function loadSessionStoreEntry(sessionKey) {
+  const normalizedKey = cleanText(sessionKey);
+  if (!normalizedKey) {
+    return null;
+  }
+
+  try {
+    const raw = fsSync.readFileSync(sessionStorePath, "utf8");
+    const parsed = JSON.parse(raw);
+    const entry = parsed?.[normalizedKey];
+    return typeof entry === "object" && entry ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+function isHeartbeatOwnedSessionKey(sessionKey) {
+  const entry = loadSessionStoreEntry(sessionKey);
+  return cleanText(entry?.origin?.provider).toLowerCase() === "heartbeat";
 }
 
 function resolveTelegramTarget(options, previousEntry, source, senderId) {
@@ -231,22 +253,29 @@ function buildDeliveryConfig(options, previousEntry) {
 function validateDeliveryConfig(delivery) {
   const deliveryMode = delivery.mode;
   if (deliveryMode !== "telegram") {
-    if (deliveryMode === "session" && !cleanText(delivery.sessionKey)) {
-      throw new Error(
-        "Session delivery requires a session key. Pass --session-key or set OPENCLAW_SESSION_KEY.",
-      );
+    if (deliveryMode === "session") {
+      const sessionKey = cleanText(delivery.sessionKey);
+      if (!sessionKey) {
+        throw new Error(
+          "Session delivery requires the actual originating chat session key. Pass --session-key or set OPENCLAW_SESSION_KEY.",
+        );
+      }
+      if (isHeartbeatOwnedSessionKey(sessionKey)) {
+        throw new Error(
+          `Session delivery key ${sessionKey} currently belongs to a heartbeat/internal session. Pass the real user chat session key instead of reusing a generic main-session alias.`,
+        );
+      }
     }
     return delivery;
   }
 
-  const botToken = cleanText(process.env.TELEGRAM_BOT_TOKEN);
   const target = cleanText(delivery.target);
-  if (botToken && target) {
+  if (target) {
     return delivery;
   }
 
   throw new Error(
-    "Telegram delivery requires TELEGRAM_BOT_TOKEN and a target chat id. Pass --to, set OPENCLAW_TELEGRAM_OWNER_ID, or provide the current Telegram sender id.",
+    "Telegram delivery requires a target chat id. Pass --to, set OPENCLAW_TELEGRAM_OWNER_ID, or provide the current Telegram sender id.",
   );
 }
 
@@ -337,11 +366,26 @@ function buildOriginalRequestContext(trigger, action, explicitOriginalRequest, p
   return cleanText(previousEntry?.original_request) || normalizedTrigger;
 }
 
-function resolveIncludeFrame(options, previousEntry) {
-  if (Object.prototype.hasOwnProperty.call(options, "include-frame")) {
-    return parseBooleanOption(options["include-frame"], false);
+function resolveIncludeFlag(options, previousEntry, optionKey, entryKey) {
+  if (Object.prototype.hasOwnProperty.call(options, optionKey)) {
+    return parseBooleanOption(options[optionKey], false);
   }
-  return Boolean(previousEntry?.include_note_frame);
+  return Boolean(previousEntry?.[entryKey]);
+}
+
+function getExplicitIncludeOverride(options, optionKey) {
+  if (!Object.prototype.hasOwnProperty.call(options, optionKey)) {
+    return undefined;
+  }
+  return parseBooleanOption(options[optionKey], false);
+}
+
+function resolveIncludeFrame(options, previousEntry) {
+  return resolveIncludeFlag(options, previousEntry, "include-frame", "include_note_frame");
+}
+
+function resolveIncludeVideo(options, previousEntry) {
+  return resolveIncludeFlag(options, previousEntry, "include-video", "include_note_video");
 }
 
 async function createTask(options) {
@@ -353,15 +397,26 @@ async function createTask(options) {
   const originalRequest = cleanText(options["original-request"]);
   const baseUrl = cleanText(options["base-url"]) || defaultBaseUrl;
   const includeFrame = resolveIncludeFrame(options, null);
+  const includeVideo = resolveIncludeVideo(options, null);
+  const saveNoteFramesOverride = getExplicitIncludeOverride(options, "include-frame");
+  const saveNoteVideosOverride = getExplicitIncludeOverride(options, "include-video");
+
+  const createPayload = {
+    io_id: ioId,
+    task_description: trigger,
+    bot_id: botId,
+  };
+  if (saveNoteFramesOverride !== undefined) {
+    createPayload.save_note_frames = saveNoteFramesOverride;
+  }
+  if (saveNoteVideosOverride !== undefined) {
+    createPayload.save_note_videos = saveNoteVideosOverride;
+  }
 
   const created = await requestJson(`${baseUrl}/api/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      io_id: ioId,
-      task_description: trigger,
-      bot_id: botId,
-    }),
+    body: JSON.stringify(createPayload),
   });
 
   const registry = await loadRegistry();
@@ -379,6 +434,7 @@ async function createTask(options) {
     delivery_target: delivery.target,
     delivery_session_key: delivery.sessionKey,
     include_note_frame: includeFrame,
+    include_note_video: includeVideo,
     original_request: buildOriginalRequestContext(trigger, action, originalRequest),
     created_at: now,
     updated_at: now,
@@ -401,11 +457,6 @@ async function updateTask(options) {
 
   const taskResponse = await getTask(baseUrl, taskId);
   const task = typeof taskResponse?.task === "object" && taskResponse.task ? taskResponse.task : taskResponse;
-  const updated = await requestJson(`${baseUrl}/api/task/${encodeURIComponent(taskId)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ new_description: trigger }),
-  });
 
   const registry = await loadRegistry();
   const previousEntry = Object.values(registry.tasks || {}).find(
@@ -416,6 +467,21 @@ async function updateTask(options) {
   const now = new Date().toISOString();
   const delivery = validateDeliveryConfig(buildDeliveryConfig(options, previousEntry));
   const includeFrame = resolveIncludeFrame(options, previousEntry);
+  const includeVideo = resolveIncludeVideo(options, previousEntry);
+  const saveNoteFramesOverride = getExplicitIncludeOverride(options, "include-frame");
+  const saveNoteVideosOverride = getExplicitIncludeOverride(options, "include-video");
+  const updatePayload = { new_description: trigger };
+  if (saveNoteFramesOverride !== undefined) {
+    updatePayload.save_note_frames = saveNoteFramesOverride;
+  }
+  if (saveNoteVideosOverride !== undefined) {
+    updatePayload.save_note_videos = saveNoteVideosOverride;
+  }
+  const updated = await requestJson(`${baseUrl}/api/task/${encodeURIComponent(taskId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updatePayload),
+  });
   const entry = {
     task_id: taskId,
     io_id: cleanText(task?.io_id),
@@ -429,6 +495,7 @@ async function updateTask(options) {
     delivery_target: delivery.target,
     delivery_session_key: delivery.sessionKey,
     include_note_frame: includeFrame,
+    include_note_video: includeVideo,
     original_request: buildOriginalRequestContext(trigger, action, originalRequest, previousEntry),
     created_at: cleanText(previousEntry?.created_at) || now,
     updated_at: now,

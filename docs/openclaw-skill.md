@@ -169,6 +169,40 @@ curl -fsSL -X POST http://videomemory:5050/api/caption_frame \
 
 Prefer `/api/caption_frame` for one-off camera descriptions. Only fall back to raw snapshot download plus another tool if `/api/caption_frame` is unavailable or returns an error.
 
+## Current image requests
+
+For prompts like `send me a picture of the camera`, `show me the current frame`, `attach the latest camera image`, `can you send a photo from the webcam`, `capture a photo from the USB camera`, or `send a snapshot right now`, use VideoMemory's fresh capture endpoint instead of asking VideoMemory to describe it in text.
+
+Treat these as image-delivery requests, not caption requests. If the user's primary ask is for the image itself, you must return or attach the image rather than substituting a textual description.
+
+The most reliable path for Telegram image replies is a direct helper command that captures and sends the JPEG. Prefer it over `read` when the user wants the image itself.
+
+First list devices and pick the camera `io_id`, then fetch:
+
+```bash
+~/.openclaw/workspace/bin/openclaw_send_current_camera_image.sh \
+  --target "<sender_id>" \
+  --reply-to "<message_id>" \
+  --io-id 0 \
+  --base-url http://127.0.0.1:5050
+```
+
+Important:
+- Use the current Telegram/direct-message metadata for `<sender_id>` and `<message_id>`.
+- Do not use `read` on the JPEG unless you need to analyze the image contents. For pure attachment requests, send the image directly.
+- Do not replace a direct image request with a textual description unless the user explicitly asked for description instead, or the preview endpoint fails and you need to explain the failure.
+- The helper tries VideoMemory fresh capture first, then falls back to VideoMemory preview, then direct `ffmpeg` capture if needed.
+- The helper tries a Telegram reply with `--reply-to` first and falls back to a plain media send if reply-mode stalls.
+
+If `POST /api/device/{io_id}/capture` fails, fall back to `GET /api/device/{io_id}/preview`. If both fail for a local USB camera, fall back to a direct capture and send that file instead:
+
+```bash
+mkdir -p ~/.openclaw/workspace
+ffmpeg -f v4l2 -i /dev/video0 -frames:v 1 -update 1 -y ~/.openclaw/workspace/videomemory-preview.jpg
+```
+
+Only use the final `MEDIA:` reply format when you are in a context where direct channel send is unavailable. If you do use it, do not `read` the JPEG first.
+
 ## Cameras
 
 Add a network camera:
@@ -227,10 +261,16 @@ node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs create \
   --action 'Tell me one concise sentence when a card is visible.' \
   --include-frame false \
   --delivery webchat \
-  --session-key agent:main:main \
+  --session-key '<current_session_key>' \
   --original-request 'Can you let me know here when you see a card?' \
   --bot-id openclaw
 ```
+
+Important:
+- Replace `<current_session_key>` with the actual originating OpenClaw chat session key from runtime metadata or `OPENCLAW_SESSION_KEY`.
+- Never hardcode `agent:main:main` as a generic fallback. On newer OpenClaw installs that key may belong to heartbeat or another internal automation session.
+- If you do not have the real current session key, do not silently switch to `webchat` just to make the helper succeed.
+- For Telegram-originated requests, prefer `--delivery telegram --to <sender_id>` instead of `webchat`.
 
 List all tasks:
 
@@ -250,6 +290,23 @@ Get one task:
 curl -fsSL http://videomemory:5050/api/task/0
 ```
 
+Saved note media:
+
+- `GET /api/task/{task_id}` returns note entries that can include `frame_url` and `video_url`.
+- Fetch the exact saved frame for one note:
+
+```bash
+curl -fsSL -o trigger-frame.jpg http://videomemory:5050/api/task-note/42/frame
+```
+
+- Fetch the exact saved evidence clip for one note:
+
+```bash
+curl -fsSL -o trigger-clip.mp4 http://videomemory:5050/api/task-note/42/video
+```
+
+- When the user explicitly wants the exact triggering media later, create or update the task through the helper with `--include-frame true` and/or `--include-video true`. The helper will request that VideoMemory save that evidence on the task and the later webhook will point at the exact triggering note media URLs when they exist.
+
 Edit a task:
 
 ```bash
@@ -258,8 +315,10 @@ node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs update \
   --trigger 'Watch for a backpack in the frame. Add a note only when a backpack appears, disappears, or the visible backpack count changes.' \
   --action 'Tell one short backpack joke when a backpack is newly visible.' \
   --include-frame false \
+  --include-video false \
   --delivery telegram \
-  --original-request 'When you see a backpack in the frame, tell a backpack joke.'
+  --original-request 'When you see a backpack in the frame, tell a backpack joke.' \
+  --bot-id openclaw
 ```
 
 Stop a task but keep history:
@@ -323,6 +382,12 @@ curl -fsSL -X PUT http://videomemory:5050/api/settings/VIDEO_INGESTOR_MODEL \
   - `task_status`
   - `task_done`
   - `note`
+  - `note_id`
+  - `task_api_url`
+  - `note_has_frame`
+  - `note_frame_api_url`
+  - `note_has_video`
+  - `note_video_api_url`
   - `event_id`
 
 ## Suggested OpenClaw workflow
@@ -337,7 +402,11 @@ curl -fsSL -X PUT http://videomemory:5050/api/settings/VIDEO_INGESTOR_MODEL \
 8. If the user asks a one-off camera question, call `/api/caption_frame`.
 9. If the user wants record-only monitoring, use `/api/tasks` directly with a neutral condition-only description.
 10. If the user wants "when X happens, do Y", use `videomemory-task-helper.mjs` so OpenClaw keeps `do Y` locally and VideoMemory only sees `watch for X`.
-11. Use `--delivery webchat` for "tell me here/in this chat" requests and point it at the originating OpenClaw session when available.
-12. Use `--delivery telegram` only when the user explicitly wants Telegram or the current interaction already came from Telegram.
-13. Use `--include-frame true` only when the user explicitly wants the saved triggering image or photo to be used later. Do not infer that from wording at alert time.
-14. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.
+11. Use `--delivery webchat` for "tell me here/in this chat" requests only when you know the actual originating OpenClaw session key.
+12. Never hardcode `agent:main:main` as a generic "main chat" fallback for `--session-key`; it may point at heartbeat/internal traffic on current OpenClaw builds.
+13. Use `--delivery telegram` when the user explicitly wants Telegram or the current interaction already came from Telegram. Pass `--to <sender_id>` from the current Telegram metadata.
+14. If Telegram delivery setup fails, do not silently downgrade to `webchat` unless you also have the real current chat session key.
+15. Use `--include-frame true` only when the user explicitly wants the saved triggering image or photo to be used later. Do not infer that from wording at alert time.
+16. Use `--include-video true` only when the user explicitly wants the saved triggering clip to be used later.
+17. When a VideoMemory alert webhook arrives, prefer `note_frame_api_url` or `note_video_api_url` from that webhook over taking a new snapshot.
+18. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.
