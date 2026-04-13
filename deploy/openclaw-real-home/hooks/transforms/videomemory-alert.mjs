@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +16,9 @@ const legacyRegistryPath = path.join(
   "state",
   "videomemory-task-actions.json",
 );
+const sessionStorePath =
+  process.env.OPENCLAW_SESSION_STORE_PATH ||
+  path.join(os.homedir(), ".openclaw", "agents", "main", "sessions", "sessions.json");
 const ttlSeconds = Number.parseFloat(
   process.env.OPENCLAW_VIDEOMEMORY_HOOK_DEDUPE_TTL_S || "300",
 );
@@ -80,6 +84,14 @@ function wantsFrameAttachment(entry) {
   return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
+function wantsVideoAttachment(entry) {
+  if (typeof entry?.include_note_video === "boolean") {
+    return entry.include_note_video;
+  }
+  const value = cleanText(String(entry?.include_note_video || "")).toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
 function normalizeDeliveryMode(entry) {
   const value = cleanText(entry?.delivery_mode || "session").toLowerCase();
   if (value === "webchat") {
@@ -92,11 +104,39 @@ function normalizeDeliveryMode(entry) {
 }
 
 function fallbackSessionKey() {
-  return cleanText(process.env.OPENCLAW_DEFAULT_SESSION_KEY) || "agent:main:main";
+  return "";
+}
+
+function loadSessionStoreEntry(sessionKey) {
+  const normalizedKey = cleanText(sessionKey);
+  if (!normalizedKey) {
+    return null;
+  }
+
+  try {
+    const raw = fsSync.readFileSync(sessionStorePath, "utf8");
+    const parsed = JSON.parse(raw);
+    const entry = parsed?.[normalizedKey];
+    return typeof entry === "object" && entry ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+function isHeartbeatOwnedSessionKey(sessionKey) {
+  const entry = loadSessionStoreEntry(sessionKey);
+  return cleanText(entry?.origin?.provider).toLowerCase() === "heartbeat";
 }
 
 function resolveSessionDelivery(entry) {
-  return cleanText(entry?.delivery_session_key) || fallbackSessionKey();
+  const sessionKey = cleanText(entry?.delivery_session_key) || fallbackSessionKey();
+  if (!sessionKey) {
+    return "";
+  }
+  if (isHeartbeatOwnedSessionKey(sessionKey)) {
+    return "";
+  }
+  return sessionKey;
 }
 
 function resolveTelegramTarget(entry) {
@@ -147,7 +187,7 @@ function shouldSuppressRegistryDrivenEvent(payload, entry) {
   return !actionWantsAbsence(entry);
 }
 
-function buildSavedFrameContext(payload, entry) {
+function buildSavedMediaContext(payload, entry) {
   const lines = [];
   const taskApiUrl = cleanText(payload?.task_api_url);
   const noteId =
@@ -158,6 +198,10 @@ function buildSavedFrameContext(payload, entry) {
     payload?.note_has_frame === true ||
     Boolean(cleanText(payload?.note_frame_api_url || payload?.note_frame_api_path));
   const noteFrameUrl = cleanText(payload?.note_frame_api_url);
+  const noteHasVideo =
+    payload?.note_has_video === true ||
+    Boolean(cleanText(payload?.note_video_api_url || payload?.note_video_api_path));
+  const noteVideoUrl = cleanText(payload?.note_video_api_url);
 
   if (taskApiUrl) {
     lines.push(`Task API URL: ${taskApiUrl}`);
@@ -166,11 +210,27 @@ function buildSavedFrameContext(payload, entry) {
     lines.push(`Triggering note ID: ${noteId}`);
   }
 
-  if (!wantsFrameAttachment(entry)) {
+  const wantsFrame = wantsFrameAttachment(entry);
+  const wantsVideo = wantsVideoAttachment(entry);
+  if (!wantsFrame && !wantsVideo) {
     return lines;
   }
 
-  if (noteHasFrame && noteFrameUrl) {
+  if (wantsVideo && noteHasVideo && noteVideoUrl) {
+    lines.push(`Saved triggering video URL: ${noteVideoUrl}`);
+    lines.push(
+      "This task explicitly requested the saved triggering evidence clip. Fetch that exact saved clip and use it in the follow-up instead of taking a new live snapshot.",
+    );
+    lines.push(
+      "If your delivery path supports media, attach the saved clip. Otherwise mention that a saved clip is available at the URL.",
+    );
+  } else if (wantsVideo) {
+    lines.push(
+      "This task explicitly requested the saved triggering evidence clip, but this webhook did not include a saved video URL for the triggering note.",
+    );
+  }
+
+  if (wantsFrame && noteHasFrame && noteFrameUrl) {
     lines.push(`Saved triggering frame URL: ${noteFrameUrl}`);
     lines.push(
       "This task explicitly requested the saved triggering frame. Fetch that exact saved frame and use it in the follow-up instead of taking a new live snapshot.",
@@ -178,16 +238,15 @@ function buildSavedFrameContext(payload, entry) {
     lines.push(
       "If your delivery path supports media, attach the saved frame. Otherwise mention that a saved frame is available at the URL.",
     );
-    return lines;
+  } else if (wantsFrame) {
+    lines.push(
+      "This task explicitly requested the saved triggering frame, but this webhook did not include a saved frame URL for the triggering note.",
+    );
   }
-
-  lines.push(
-    "This task explicitly requested the saved triggering frame, but this webhook did not include a saved frame URL for the triggering note.",
-  );
   return lines;
 }
 
-function buildRegistryDrivenMessage(payload, entry) {
+function buildRegistryDrivenMessage(payload, entry, options = {}) {
   const originalRequest =
     cleanText(entry?.original_request) || cleanText(payload?.task_description) || "VideoMemory task";
   const triggerCondition =
@@ -200,10 +259,11 @@ function buildRegistryDrivenMessage(payload, entry) {
   const note = cleanText(payload?.note) || "VideoMemory reported an update.";
   const ioId = cleanText(payload?.io_id) || "unknown device";
   const taskId = cleanText(payload?.task_id) || "unknown";
-  const savedFrameContext = buildSavedFrameContext(payload, entry);
+  const savedFrameContext = buildSavedMediaContext(payload, entry);
   const actionNeedsFreshLookup = /\b(search|web search|look up|lookup|find|fetch|check|inspect|get the latest|current|today|now|price|weather|news|headline|first result|top result)\b/i.test(
     actionInstruction,
   );
+  const externalDelivery = options.externalDelivery === true;
 
   return [
     "A VideoMemory trigger evaluation is requested.",
@@ -221,7 +281,15 @@ function buildRegistryDrivenMessage(payload, entry) {
       : "If the requested action already contains specific facts or wording to relay, include those details instead of replacing them with a generic alert.",
     "Reply with exactly NO_REPLY if the observation does not show the trigger condition happening now.",
     "Ignore unrelated scene details or correction-only notes that do not affect the trigger condition.",
-    "If the trigger condition is satisfied now, complete the requested action for the user. Keep it brief, but do not omit required details. One or two sentences is fine if needed.",
+    externalDelivery
+      ? "Your reply will be delivered to the end user automatically."
+      : "Your reply will stay inside OpenClaw unless the routing layer says otherwise.",
+    externalDelivery
+      ? "If the trigger condition is satisfied now, reply with exactly one short user-facing alert sentence and nothing else."
+      : "If the trigger condition is satisfied now, complete the requested action for the user. Keep it brief, but do not omit required details. One or two sentences is fine if needed.",
+    externalDelivery
+      ? "Do not mention Telegram, chat routing, tools, internal context, or that delivery is automatic."
+      : "Do not add internal workflow commentary.",
   ].join("\n");
 }
 
@@ -230,7 +298,7 @@ function buildExplicitMessage(payload) {
   const note = cleanText(payload?.note) || "VideoMemory reported an update.";
   const ioId = cleanText(payload?.io_id) || "unknown device";
   const taskId = cleanText(payload?.task_id) || "unknown";
-  const savedFrameContext = buildSavedFrameContext(payload, null);
+  const savedFrameContext = buildSavedMediaContext(payload, null);
   return [
     "A VideoMemory detection requires a Telegram notification.",
     `Task: ${taskDescription}`,
@@ -321,7 +389,9 @@ export default async function videomemoryAlertTransform(ctx) {
             to: telegramTarget,
           }
         : {}),
-      message: buildRegistryDrivenMessage(payload, taskAction),
+      message: buildRegistryDrivenMessage(payload, taskAction, {
+        externalDelivery: deliverExternally,
+      }),
     };
   }
 
