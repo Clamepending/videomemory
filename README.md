@@ -6,7 +6,7 @@ You or your agent creates a **tasks** describing what to watch for, and the syst
 
 ## Quick Start
 
-### I want OpenClaw + VIdeomemory on a VM, raspberry pi, or computer
+### I already installed OpenClaw and want VideoMemory
 
 1. [Install OpenClaw](https://docs.openclaw.ai/install)
 
@@ -15,7 +15,7 @@ This path now starts VideoMemory directly on that machine with `uv` or `python3`
 Send this message to OpenClaw:
 
 ```text
-Please run this to install and onboard VideoMemory locally: bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
+Please run `npx -y @clamepending/videomemory onboard` and send me the VideoMemory UI link.
 ```
 After that, your OpenClaw should be able to:
 - create/list/edit/stop/delete VideoMemory tasks
