@@ -85,10 +85,6 @@
     "enabled": true,
     "token": "${OPENCLAW_HOOKS_TOKEN}",
     "path": "/hooks",
-    "defaultSessionKey": "hook:videomemory",
-    "allowRequestSessionKey": false,
-    "allowedSessionKeyPrefixes": ["hook:", "agent:"],
-    "allowedAgentIds": ["main"],
     "transformsDir": "~/.openclaw/hooks/transforms",
     "mappings": [
       {
@@ -97,7 +93,6 @@
           "path": "videomemory-alert"
         },
         "action": "agent",
-        "agentId": "main",
         "wakeMode": "now",
         "name": "VideoMemory",
         "sessionKey": "hook:videomemory:{{io_id}}:{{task_id}}:{{event_id}}",

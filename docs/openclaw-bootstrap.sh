@@ -147,15 +147,28 @@ SS_BIN="$(find_bin ss || true)"
 ensure_repo() {
   if [ -d "$REPO_DIR/.git" ]; then
     log "Using existing repo at $REPO_DIR"
-    if ! "$GIT_BIN" -C "$REPO_DIR" pull --ff-only origin "$REPO_REF" >/dev/null 2>&1; then
-      log "Repo update skipped (non-fast-forward or local changes). Continuing with existing checkout."
+    if ! "$GIT_BIN" -C "$REPO_DIR" diff --quiet --ignore-submodules HEAD -- >/dev/null 2>&1; then
+      log "Repo has local changes; keeping current checkout."
+      return 0
     fi
-    return 0
+  else
+    log "Cloning VideoMemory source into $REPO_DIR"
+    mkdir -p "$(dirname "$REPO_DIR")"
+    "$GIT_BIN" clone --filter=blob:none --no-checkout "$REPO_URL" "$REPO_DIR" >/dev/null
   fi
 
-  log "Cloning VideoMemory from $REPO_URL into $REPO_DIR"
-  mkdir -p "$(dirname "$REPO_DIR")"
-  "$GIT_BIN" clone --branch "$REPO_REF" "$REPO_URL" "$REPO_DIR" >/dev/null
+  "$GIT_BIN" -C "$REPO_DIR" fetch --depth 1 origin "$REPO_REF" >/dev/null
+  "$GIT_BIN" -C "$REPO_DIR" sparse-checkout init --no-cone >/dev/null
+  "$GIT_BIN" -C "$REPO_DIR" sparse-checkout set \
+    /pyproject.toml \
+    /uv.lock \
+    /flask_app/ \
+    /videomemory/ \
+    /docs/update-manifest.json \
+    /docs/openclaw-skill.md \
+    /docs/openclaw-videomemory-task-helper.mjs \
+    /deploy/openclaw-real-home/hooks/transforms/videomemory-alert.mjs >/dev/null
+  "$GIT_BIN" -C "$REPO_DIR" checkout --detach FETCH_HEAD >/dev/null
 }
 
 healthcheck() {
@@ -773,27 +786,15 @@ config.hooks = typeof config.hooks === "object" && config.hooks ? config.hooks :
 config.hooks.enabled = true;
 config.hooks.path = config.hooks.path || "/hooks";
 config.hooks.transformsDir = transformsDir;
-config.hooks.defaultSessionKey = config.hooks.defaultSessionKey || "hook:videomemory";
-config.hooks.allowRequestSessionKey = false;
 config.hooks.token =
   process.env.OPENCLAW_HOOKS_TOKEN ||
   config.hooks.token ||
   crypto.randomBytes(18).toString("hex");
 
-const prefixes = new Set(Array.isArray(config.hooks.allowedSessionKeyPrefixes) ? config.hooks.allowedSessionKeyPrefixes : []);
-prefixes.add("hook:");
-prefixes.add("agent:");
-config.hooks.allowedSessionKeyPrefixes = Array.from(prefixes);
-
-const allowedAgentIds = new Set(Array.isArray(config.hooks.allowedAgentIds) ? config.hooks.allowedAgentIds : []);
-allowedAgentIds.add(defaultAgentId);
-config.hooks.allowedAgentIds = Array.from(allowedAgentIds);
-
 const mapping = {
   id: "videomemory-alert",
   match: { path: "videomemory-alert" },
   action: "agent",
-  agentId: defaultAgentId,
   wakeMode: "now",
   name: "VideoMemory",
   sessionKey: "hook:videomemory:{{io_id}}:{{task_id}}:{{event_id}}",
@@ -807,7 +808,7 @@ config.hooks.mappings = [...withoutOld, mapping];
 
 fs.mkdirSync(path.dirname(configPath), { recursive: true });
 fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-console.log(JSON.stringify({ status: "ok", configPath, hookToken: config.hooks.token, agentId: defaultAgentId }));
+console.log(JSON.stringify({ status: "ok", configPath, agentId: defaultAgentId }));
 EOF
     return 0
   fi
@@ -854,31 +855,12 @@ config["hooks"] = hooks
 hooks["enabled"] = True
 hooks["path"] = hooks.get("path") or "/hooks"
 hooks["transformsDir"] = transforms_dir
-hooks["defaultSessionKey"] = hooks.get("defaultSessionKey") or "hook:videomemory"
-hooks["allowRequestSessionKey"] = False
 hooks["token"] = os.environ.get("OPENCLAW_HOOKS_TOKEN") or hooks.get("token") or secrets.token_hex(18)
-
-prefixes = hooks.get("allowedSessionKeyPrefixes")
-if not isinstance(prefixes, list):
-    prefixes = []
-if "hook:" not in prefixes:
-    prefixes.append("hook:")
-if "agent:" not in prefixes:
-    prefixes.append("agent:")
-hooks["allowedSessionKeyPrefixes"] = prefixes
-
-allowed_agents = hooks.get("allowedAgentIds")
-if not isinstance(allowed_agents, list):
-    allowed_agents = []
-if default_agent_id not in allowed_agents:
-    allowed_agents.append(default_agent_id)
-hooks["allowedAgentIds"] = allowed_agents
 
 mapping = {
     "id": "videomemory-alert",
     "match": {"path": "videomemory-alert"},
     "action": "agent",
-    "agentId": default_agent_id,
     "wakeMode": "now",
     "name": "VideoMemory",
     "sessionKey": "hook:videomemory:{{io_id}}:{{task_id}}:{{event_id}}",
@@ -895,7 +877,7 @@ hooks["mappings"] = mappings
 
 config_path.parent.mkdir(parents=True, exist_ok=True)
 config_path.write_text(json.dumps(config, indent=2) + "\n")
-print(json.dumps({"status": "ok", "configPath": str(config_path), "hookToken": hooks["token"], "agentId": default_agent_id}))
+print(json.dumps({"status": "ok", "configPath": str(config_path), "agentId": default_agent_id}))
 EOF
 }
 

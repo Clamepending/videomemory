@@ -105,30 +105,34 @@ SS_BIN="$(find_bin ss || true)"
 [ -n "$UV_BIN" ] || [ -n "$PYTHON_BIN" ] || fail "uv or python3 is required to launch VideoMemory without Docker"
 
 ensure_repo() {
-  if [ ! -d "$REPO_DIR/.git" ]; then
-    log "Cloning VideoMemory from $REPO_URL into $REPO_DIR"
-    mkdir -p "$(dirname "$REPO_DIR")"
-    "$GIT_BIN" clone --branch "$REPO_REF" "$REPO_URL" "$REPO_DIR" >/dev/null
-    REPO_UPDATED=1
-    REPO_COMMIT="$("$GIT_BIN" -C "$REPO_DIR" rev-parse --short=12 HEAD 2>/dev/null || true)"
-    return 0
-  fi
-
-  log "Using existing repo at $REPO_DIR"
-  before_commit="$("$GIT_BIN" -C "$REPO_DIR" rev-parse --short=12 HEAD 2>/dev/null || true)"
-
-  if ! "$GIT_BIN" -C "$REPO_DIR" diff --quiet --ignore-submodules HEAD -- >/dev/null 2>&1; then
-    log "Repo has local changes; skipping automatic upgrade and keeping current checkout."
-    REPO_COMMIT="$before_commit"
-    return 0
-  fi
-
-  if "$GIT_BIN" -C "$REPO_DIR" fetch origin "$REPO_REF" >/dev/null 2>&1 \
-    && "$GIT_BIN" -C "$REPO_DIR" merge --ff-only FETCH_HEAD >/dev/null 2>&1; then
-    :
+  before_commit=""
+  if [ -d "$REPO_DIR/.git" ]; then
+    log "Using existing repo at $REPO_DIR"
+    before_commit="$("$GIT_BIN" -C "$REPO_DIR" rev-parse --short=12 HEAD 2>/dev/null || true)"
+    if ! "$GIT_BIN" -C "$REPO_DIR" diff --quiet --ignore-submodules HEAD -- >/dev/null 2>&1; then
+      log "Repo has local changes; skipping automatic upgrade and keeping current checkout."
+      REPO_COMMIT="$before_commit"
+      return 0
+    fi
   else
-    log "Repo update skipped (non-fast-forward or fetch failure). Continuing with existing checkout."
+    log "Cloning VideoMemory source into $REPO_DIR"
+    mkdir -p "$(dirname "$REPO_DIR")"
+    "$GIT_BIN" clone --filter=blob:none --no-checkout "$REPO_URL" "$REPO_DIR" >/dev/null
+    REPO_UPDATED=1
   fi
+
+  "$GIT_BIN" -C "$REPO_DIR" fetch --depth 1 origin "$REPO_REF" >/dev/null
+  "$GIT_BIN" -C "$REPO_DIR" sparse-checkout init --no-cone >/dev/null
+  "$GIT_BIN" -C "$REPO_DIR" sparse-checkout set \
+    /pyproject.toml \
+    /uv.lock \
+    /flask_app/ \
+    /videomemory/ \
+    /docs/update-manifest.json \
+    /docs/openclaw-skill.md \
+    /docs/openclaw-videomemory-task-helper.mjs \
+    /deploy/openclaw-real-home/hooks/transforms/videomemory-alert.mjs >/dev/null
+  "$GIT_BIN" -C "$REPO_DIR" checkout --detach FETCH_HEAD >/dev/null
 
   after_commit="$("$GIT_BIN" -C "$REPO_DIR" rev-parse --short=12 HEAD 2>/dev/null || true)"
   REPO_COMMIT="$after_commit"

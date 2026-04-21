@@ -8,15 +8,15 @@ This repo now contains the two pieces needed for the desired OpenClaw setup flow
 ## Why there are two artifacts
 
 The npm package is still useful as an explicit host-CLI fallback and for update commands.
-The ClawHub skill is the smoother chat-first path: it bundles local launcher scripts so OpenClaw can start VideoMemory without first installing a global package.
+The ClawHub skill is the smoother chat-first path: it is instruction-only so it installs cleanly, then points OpenClaw at the published host CLI.
 
 So the release flow is intentionally:
 
 1. Publish the npm package `@clamepending/videomemory`
 2. Publish the ClawHub skill `clawhub-skill/videomemory`
-3. The ClawHub skill is immediately eligible after install because it does not gate itself on a helper binary
-4. The bundled launcher clones the pinned VideoMemory repo and verifies the expected commit
-5. The repo onboarding script starts VideoMemory directly on the host
+3. The ClawHub skill is immediately eligible after install because it does not bundle host-mutating launcher scripts
+4. The skill tells OpenClaw to inspect the safe onboarding plan from the published host CLI
+5. The host CLI starts VideoMemory directly on the host and installs the OpenClaw bridge files
 
 ## Artifact 1: npm package
 
@@ -58,7 +58,7 @@ Publish to ClawHub:
 
 ```bash
 clawhub login
-clawhub publish . --slug videomemory --name "VideoMemory" --version 0.1.2
+clawhub publish . --slug videomemory --name "VideoMemory" --version 0.1.12
 ```
 
 If browser login fails, use an API token instead:
@@ -67,7 +67,7 @@ If browser login fails, use an API token instead:
 clawhub login --token YOUR_TOKEN --no-browser
 ```
 
-The skill metadata already points at the npm package:
+The skill instructions point at the pinned npm package:
 
 ```text
 @clamepending/videomemory
@@ -78,18 +78,18 @@ The skill metadata already points at the npm package:
 From OpenClaw setup / Skills UI:
 
 1. Select `VideoMemory`
-2. OpenClaw installs the ClawHub skill folder, including the bundled launcher scripts under `skills/videomemory/scripts`
-3. When the user says `Install the VideoMemory skill from ClawHub and send me the UI`, the skill tells OpenClaw to run:
+2. OpenClaw installs the instruction-only ClawHub skill folder
+3. When the user says `install videomemory please` or `Install the VideoMemory skill from ClawHub and send me the UI`, the skill tells OpenClaw to run:
 
 ```bash
-bash skills/videomemory/scripts/onboard.sh --safe --repo-ref v0.1.2 --explain
-bash skills/videomemory/scripts/onboard.sh --safe --repo-ref v0.1.2
+npx -y @clamepending/videomemory@0.1.3 onboard --safe --repo-ref v0.1.2 --explain
+npx -y @clamepending/videomemory@0.1.3 onboard --safe --repo-ref v0.1.2
 ```
 
 That command:
 
 - bootstraps VideoMemory on the host
-- uses the launcher scripts bundled inside the installed ClawHub skill
+- uses the published VideoMemory host CLI
 - avoids Tailscale setup, model API-key copying, Telegram notifications, and sudo-requiring setup paths in safe mode
 - returns the user-facing UI link
 
@@ -101,5 +101,5 @@ That command:
 
 ## Why this avoids the security scanner block
 
-The ClawHub skill no longer asks the agent to install a third-party global npm binary during the first chat turn.
-Instead, `clawhub install videomemory` gives OpenClaw a local, inspectable launcher that clones the pinned VideoMemory repo, verifies the expected commit, and then runs the repo's reviewed onboarding script.
+The ClawHub skill no longer bundles scripts that clone, install, run services, or modify OpenClaw config during skill installation.
+Instead, `clawhub install videomemory` installs a small instruction-only skill; the host-side work happens only when the user asks OpenClaw to run the published CLI, with `--safe --explain` shown first.
