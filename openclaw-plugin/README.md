@@ -1,16 +1,36 @@
-# OpenClaw VideoMemory Host CLI
+# OpenClaw VideoMemory Package
 
 This directory now contains the npm package published as `@clamepending/videomemory`.
 
 What the package does:
+- declares a first-class OpenClaw plugin via `openclaw.plugin.json`
+- exposes OpenClaw tools: `videomemory_onboard`, `videomemory_relaunch`, and `videomemory_status`
+- exposes OpenClaw commands: `/videomemory-onboard`, `/videomemory-relaunch`, and `/videomemory-status`
+- ships a hook pack entry for `openclaw hooks install @clamepending/videomemory`
 - exposes the `videomemory-openclaw` host CLI
 - runs the maintained VideoMemory onboarding and relaunch scripts bundled inside this npm package version
-- keeps the OpenClaw marketplace install path simple: the ClawHub skill installs this package, then runs the CLI
 
-Why it is a plain CLI package instead of a native OpenClaw plugin:
-- OpenClaw's plugin security scanner correctly treats host-management code, shell execution, and hook assets as high trust
-- publishing the onboarding flow as a plugin caused installs to be blocked before onboarding could run
-- the safer path is a skill + host CLI split, where OpenClaw installs a normal npm binary and the binary manages VideoMemory on the host
+Preferred install:
+
+```bash
+openclaw plugins install @clamepending/videomemory
+```
+
+After restarting the gateway, OpenClaw can call the plugin tools directly. A user can also run:
+
+```text
+/videomemory-onboard --explain
+/videomemory-onboard
+```
+
+Hook-pack install, for setups that want only gateway-startup checks:
+
+```bash
+openclaw hooks install @clamepending/videomemory
+```
+
+The startup hook does not auto-start VideoMemory unless `VIDEOMEMORY_OPENCLAW_AUTOSTART=1`
+or hook config `autoStart: true` is set.
 
 Current source-of-truth split:
 - VideoMemory host install and relaunch remain in `docs/openclaw-bootstrap.sh` and `docs/relaunch-videomemory.sh`
@@ -18,12 +38,10 @@ Current source-of-truth split:
 - the current OpenClaw bridge files still live in the repo under `docs/` and `deploy/openclaw-real-home/`
 - the ClawHub skill lives separately under `clawhub-skill/videomemory/`
 
-Typical flow:
-1. OpenClaw installs `@clamepending/videomemory`
-2. The `videomemory-openclaw` binary becomes available on the gateway host
-3. The skill tells OpenClaw to inspect `videomemory-openclaw onboard --safe --explain`
-4. After inspection, OpenClaw runs `videomemory-openclaw onboard --safe`
-5. The CLI bootstraps VideoMemory without Docker and returns the UI link
+Fallback CLI flow:
+1. `videomemory-openclaw onboard --safe --explain`
+2. `videomemory-openclaw onboard --safe`
+3. The CLI bootstraps VideoMemory without Docker and returns the UI link
 
 Safe mode:
 - disables automatic Tailscale setup

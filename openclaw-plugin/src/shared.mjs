@@ -238,7 +238,13 @@ export async function relaunchVideomemory(options = {}) {
 
 export async function getVideomemoryStatus(options = {}) {
   const baseUrl = cleanText(options.videomemoryBase) || DEFAULTS.videomemoryBase;
-  const response = await fetch(`${baseUrl}/api/health`);
+  let response;
+  try {
+    response = await fetch(`${baseUrl}/api/health`);
+  } catch (error) {
+    const message = cleanText(error?.message) || String(error);
+    throw new Error(`VideoMemory health check failed at ${baseUrl}/api/health: ${message}`);
+  }
   const text = await response.text();
   let payload = {};
   if (text) {

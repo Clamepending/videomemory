@@ -1,0 +1,92 @@
+{
+  "id": "videomemory",
+  "name": "VideoMemory",
+  "description": "Camera monitoring, one-off frame questions, and VideoMemory host onboarding for OpenClaw.",
+  "version": "0.1.4",
+  "skills": ["./skills/videomemory"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:5050",
+        "description": "VideoMemory base URL reachable from the OpenClaw host."
+      },
+      "repoRef": {
+        "type": "string",
+        "default": "v0.1.2",
+        "description": "VideoMemory git branch or tag used for host onboarding and relaunch."
+      },
+      "repoDir": {
+        "type": "string",
+        "description": "Optional host checkout directory for VideoMemory."
+      },
+      "openclawHome": {
+        "type": "string",
+        "description": "Optional OpenClaw home directory. Defaults to ~/.openclaw."
+      },
+      "autoStart": {
+        "type": "boolean",
+        "default": false,
+        "description": "If true, the plugin starts/onboards VideoMemory when the gateway starts."
+      },
+      "safeMode": {
+        "type": "boolean",
+        "default": true,
+        "description": "Run onboarding without sudo/Tailscale setup, model-key copying, or Telegram side effects."
+      },
+      "syncModelKeys": {
+        "type": "boolean",
+        "default": false,
+        "description": "Allow onboarding to copy model provider API keys from the OpenClaw host environment into VideoMemory."
+      },
+      "allowTailscaleSetup": {
+        "type": "boolean",
+        "default": false,
+        "description": "Allow onboarding to attempt Tailscale setup when safeMode is false."
+      },
+      "notifyTelegram": {
+        "type": "boolean",
+        "default": false,
+        "description": "Allow onboarding to send the UI link through Telegram when credentials are already configured."
+      }
+    }
+  },
+  "uiHints": {
+    "baseUrl": {
+      "label": "VideoMemory Base URL",
+      "placeholder": "http://127.0.0.1:5050"
+    },
+    "repoRef": {
+      "label": "VideoMemory Release",
+      "placeholder": "v0.1.2"
+    },
+    "repoDir": {
+      "label": "Checkout Directory",
+      "advanced": true
+    },
+    "openclawHome": {
+      "label": "OpenClaw Home",
+      "advanced": true
+    },
+    "autoStart": {
+      "label": "Auto-start VideoMemory"
+    },
+    "safeMode": {
+      "label": "Safe Onboarding Mode"
+    },
+    "syncModelKeys": {
+      "label": "Sync Model API Keys",
+      "advanced": true
+    },
+    "allowTailscaleSetup": {
+      "label": "Allow Tailscale Setup",
+      "advanced": true
+    },
+    "notifyTelegram": {
+      "label": "Notify Telegram",
+      "advanced": true
+    }
+  }
+}

@@ -9,26 +9,37 @@ metadata: {"openclaw":{"emoji":"camera"}}
 
 Use this skill when the user wants OpenClaw to install, start, relaunch, or check VideoMemory.
 
-For requests like "install videomemory please", "set up videomemory", or "Install the VideoMemory skill from ClawHub and send me the UI", run the safe onboarding command and reply with the returned UI link.
+For requests like "install videomemory please", "set up videomemory", or "Install the VideoMemory skill from ClawHub and send me the UI", prefer installing the OpenClaw plugin package. If the plugin install path is unavailable, run the safe onboarding command and reply with the returned UI link.
 
 ## Preferred Commands
 
-From the OpenClaw workspace root after `clawhub install videomemory`, inspect the onboarding plan:
+First-class plugin install:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.3 onboard --safe --repo-ref v0.1.2 --explain
+openclaw plugins install @clamepending/videomemory@0.1.4
+```
+
+After the plugin is installed and the gateway has restarted, prefer the plugin tools:
+- `videomemory_onboard`
+- `videomemory_relaunch`
+- `videomemory_status`
+
+CLI fallback from the OpenClaw workspace root after `clawhub install videomemory`, inspect the onboarding plan:
+
+```bash
+npx -y @clamepending/videomemory@0.1.4 onboard --safe --repo-ref v0.1.2 --explain
 ```
 
 If the plan matches the user's request, run onboarding:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.3 onboard --safe --repo-ref v0.1.2
+npx -y @clamepending/videomemory@0.1.4 onboard --safe --repo-ref v0.1.2
 ```
 
 Relaunch:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.3 relaunch --repo-ref v0.1.2
+npx -y @clamepending/videomemory@0.1.4 relaunch --repo-ref v0.1.2
 ```
 
 Check status:
@@ -47,6 +58,7 @@ curl -fsS http://127.0.0.1:5050/api/health
 ## Ground Rules
 
 - Prefer the published VideoMemory CLI command above over hand-written setup commands.
+- Prefer `openclaw plugins install @clamepending/videomemory@0.1.4` when OpenClaw plugin installation is allowed.
 - Run `--safe --explain` before onboarding when acting from chat.
 - If onboarding or relaunch fails, report the actual stderr instead of guessing.
 - After a successful onboarding or relaunch, reply with the returned UI link.

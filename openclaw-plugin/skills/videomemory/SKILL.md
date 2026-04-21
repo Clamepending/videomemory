@@ -15,6 +15,11 @@ When this plugin is enabled, prefer the built-in tools:
 - `videomemory_relaunch`
 - `videomemory_status`
 
+The plugin also provides user-facing slash commands:
+- `/videomemory-onboard`
+- `/videomemory-relaunch`
+- `/videomemory-status`
+
 ## Base URL rules
 
 - Inside the bundled Docker stack, prefer `http://videomemory:5050`.
@@ -33,13 +38,13 @@ What it does:
 - installs the OpenClaw helper and hook assets used by the current integration path
 - in safe mode, avoids Tailscale setup, model API-key copying, Telegram notifications, and sudo-requiring setup paths
 
-Before host onboarding from chat, inspect the safe plan first when possible:
+Before host onboarding from chat, inspect the safe plan first when possible. Prefer the tool with `explain: true`; if tools are unavailable, use:
 
 ```bash
 videomemory-openclaw onboard --safe --repo-ref v0.1.2 --explain
 ```
 
-If the plan matches the user's request, run:
+If the plan matches the user's request, call `videomemory_onboard`; if tools are unavailable, run:
 
 ```bash
 videomemory-openclaw onboard --safe --repo-ref v0.1.2
