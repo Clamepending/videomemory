@@ -18,6 +18,8 @@ If your OpenClaw has ClawHub enabled, send this message:
 Install the VideoMemory skill from ClawHub and send me the VideoMemory UI link.
 ```
 
+The ClawHub skill bundles the small launcher scripts OpenClaw needs, so this path does not require the agent to install a global npm package first.
+
 If you want the explicit fallback command, send this instead:
 
 ```text

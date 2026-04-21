@@ -44,17 +44,35 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
                 bundled,
             )
 
-    def test_marketplace_skill_installs_the_package_cli(self):
+    def test_marketplace_skill_uses_bundled_launchers(self):
         skill_text = MARKETPLACE_SKILL.read_text()
-        self.assertIn('"package":"@clamepending/videomemory@0.1.2"', skill_text)
-        self.assertIn('"bins":["videomemory-openclaw"]', skill_text)
+        self.assertIn('"emoji":"camera"', skill_text)
+        self.assertNotIn('"package"', skill_text)
+        self.assertNotIn('"bins"', skill_text)
         self.assertNotIn('"requires"', skill_text)
-        self.assertIn("npm install -g @clamepending/videomemory@0.1.2", skill_text)
-        self.assertIn("videomemory-openclaw onboard --safe", skill_text)
+        self.assertIn("bash skills/videomemory/scripts/onboard.sh --safe", skill_text)
+        self.assertIn("bash skills/videomemory/scripts/relaunch.sh", skill_text)
+        self.assertNotIn("npm install", skill_text)
         self.assertNotIn("npx -y", skill_text)
         self.assertIn("--explain", skill_text)
-        self.assertIn("host CLI", skill_text)
         self.assertIn("send me the UI", skill_text)
+
+    def test_marketplace_skill_bundles_safe_launchers(self):
+        scripts_dir = MARKETPLACE_SKILL.parent / "scripts"
+        onboard = scripts_dir / "onboard.sh"
+        relaunch = scripts_dir / "relaunch.sh"
+
+        self.assertTrue(onboard.exists())
+        self.assertTrue(relaunch.exists())
+
+        onboard_text = onboard.read_text()
+        relaunch_text = relaunch.read_text()
+        self.assertIn("docs/openclaw-bootstrap.sh", onboard_text)
+        self.assertIn("docs/relaunch-videomemory.sh", relaunch_text)
+        self.assertIn("EXPECTED_COMMIT", onboard_text)
+        self.assertIn("EXPECTED_COMMIT", relaunch_text)
+        self.assertNotIn("npm install", onboard_text)
+        self.assertNotIn("npx -y", onboard_text)
 
     def test_cli_can_explain_safe_onboarding_without_changes(self):
         result = subprocess.run(
