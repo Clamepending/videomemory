@@ -46,7 +46,7 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
 
     def test_marketplace_skill_installs_the_package_cli(self):
         skill_text = MARKETPLACE_SKILL.read_text()
-        self.assertIn('"package":"@clamepending/videomemory"', skill_text)
+        self.assertIn('"package":"@clamepending/videomemory@0.1.2"', skill_text)
         self.assertIn('"bins":["videomemory-openclaw"]', skill_text)
         self.assertIn("videomemory-openclaw onboard --safe", skill_text)
         self.assertIn("--explain", skill_text)

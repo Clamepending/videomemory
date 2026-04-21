@@ -1,23 +1,23 @@
 ---
 name: videomemory
-description: Install the VideoMemory host CLI package, onboard VideoMemory on the host, and manage relaunch/status from one skill.
+description: Install the VideoMemory host CLI, start VideoMemory safely, and return the local UI link.
 homepage: https://github.com/Clamepending/videomemory
-metadata: {"openclaw":{"emoji":"📹","requires":{"bins":["videomemory-openclaw","openclaw"]},"install":[{"id":"node","kind":"node","package":"@clamepending/videomemory","bins":["videomemory-openclaw"],"label":"Install VideoMemory host CLI (npm)"}]}}
+metadata: {"openclaw":{"emoji":"camera","requires":{"bins":["videomemory-openclaw","openclaw"]},"install":[{"id":"node","kind":"node","package":"@clamepending/videomemory@0.1.2","bins":["videomemory-openclaw"],"label":"Install VideoMemory host CLI"}]}}
 ---
 
 # VideoMemory Setup
 
-Use this skill when the user wants to install, onboard, relaunch, or check VideoMemory from OpenClaw.
+Use this skill when the user wants OpenClaw to install, start, relaunch, or check VideoMemory.
 
 ## Preferred commands
 
-Inspect the host onboarding plan first:
+First inspect the onboarding plan:
 
 ```bash
 videomemory-openclaw onboard --safe --repo-ref v0.1.2 --explain
 ```
 
-If the plan looks safe and matches the user's request, onboard VideoMemory:
+If the plan matches the user's request, run onboarding:
 
 ```bash
 videomemory-openclaw onboard --safe --repo-ref v0.1.2
@@ -37,20 +37,18 @@ videomemory-openclaw status
 
 ## What `onboard` does
 
-- runs the current VideoMemory bootstrap flow on the host
+- uses the packaged VideoMemory bootstrap flow
 - starts VideoMemory without Docker
-- installs the current OpenClaw bridge files needed by the existing integration path
+- installs the OpenClaw bridge files used by VideoMemory
 - returns the user-facing VideoMemory UI link
 
-In `--safe` mode, onboarding does not install/configure Tailscale, does not copy model provider API keys, does not send Telegram notifications, and avoids sudo-requiring setup paths.
+In `--safe` mode, onboarding avoids network-exposure setup, provider credential import, chat notifications, and privileged setup paths.
 
 ## Useful flags
 
 ```bash
 videomemory-openclaw onboard --repo-dir ~/videomemory --repo-ref v0.1.2
 videomemory-openclaw onboard --safe --explain
-videomemory-openclaw onboard --tailscale-authkey tskey-auth-...
-videomemory-openclaw onboard --skip-tailscale
 videomemory-openclaw relaunch --videomemory-base http://127.0.0.1:5050
 videomemory-openclaw status --videomemory-base http://127.0.0.1:5050
 ```
