@@ -13,28 +13,34 @@ For requests like "Install the VideoMemory skill from ClawHub and send me the UI
 
 ## Preferred commands
 
-First inspect the onboarding plan:
+If the helper command is missing, install the host CLI dependency declared in this skill's metadata. If you are acting from a shell and the user explicitly asked you to install VideoMemory, this command installs the same pinned helper:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --explain
+npm install -g @clamepending/videomemory@0.1.2
+```
+
+Then inspect the onboarding plan:
+
+```bash
+videomemory-openclaw onboard --safe --repo-ref v0.1.2 --explain
 ```
 
 If the plan matches the user's request, run onboarding:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2
+videomemory-openclaw onboard --safe --repo-ref v0.1.2
 ```
 
 Relaunch / upgrade:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.2 relaunch --repo-ref v0.1.2
+videomemory-openclaw relaunch --repo-ref v0.1.2
 ```
 
 Check status:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.2 status
+videomemory-openclaw status
 ```
 
 ## What `onboard` does
@@ -49,16 +55,15 @@ In `--safe` mode, onboarding avoids network-exposure setup, provider credential 
 ## Useful flags
 
 ```bash
-npx -y @clamepending/videomemory@0.1.2 onboard --repo-dir ~/videomemory --repo-ref v0.1.2
-npx -y @clamepending/videomemory@0.1.2 onboard --safe --explain
-npx -y @clamepending/videomemory@0.1.2 relaunch --repo-ref v0.1.2 --videomemory-base http://127.0.0.1:5050
-npx -y @clamepending/videomemory@0.1.2 status --videomemory-base http://127.0.0.1:5050
+videomemory-openclaw onboard --repo-dir ~/videomemory --repo-ref v0.1.2
+videomemory-openclaw onboard --safe --explain
+videomemory-openclaw relaunch --repo-ref v0.1.2 --videomemory-base http://127.0.0.1:5050
+videomemory-openclaw status --videomemory-base http://127.0.0.1:5050
 ```
 
 ## Ground rules
 
-- Prefer the packaged `npx -y @clamepending/videomemory@0.1.2 ...` command over hand-written bootstrap commands.
-- If `videomemory-openclaw` is already installed and on PATH, it is also safe to use the equivalent `videomemory-openclaw ...` command.
+- Prefer the packaged `videomemory-openclaw` command over hand-written bootstrap commands.
 - Prefer `--safe --explain` before running host onboarding, especially when acting from chat.
 - This npm package is a host CLI, not an in-process OpenClaw plugin.
 - If onboarding or relaunch fails, report the actual stderr instead of guessing.

@@ -21,7 +21,7 @@ Install the VideoMemory skill from ClawHub and send me the VideoMemory UI link.
 If you want the explicit fallback command, send this instead:
 
 ```text
-Please inspect `npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --explain`. If it looks safe, run `npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2` and send me the VideoMemory UI link. If you are not comfortable running it, show me the exact command so I can run it manually.
+Please install the VideoMemory host CLI with `npm install -g @clamepending/videomemory@0.1.2`, inspect `videomemory-openclaw onboard --safe --repo-ref v0.1.2 --explain`, then if it looks safe run `videomemory-openclaw onboard --safe --repo-ref v0.1.2` and send me the VideoMemory UI link. If you are not comfortable running it, show me the exact command so I can run it manually.
 ```
 After that, your OpenClaw should be able to:
 - create/list/edit/stop/delete VideoMemory tasks

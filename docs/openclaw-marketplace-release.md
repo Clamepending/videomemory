@@ -14,8 +14,8 @@ So the release flow is intentionally:
 
 1. Publish the npm package `@clamepending/videomemory`
 2. Publish the ClawHub skill `clawhub-skill/videomemory`
-3. The ClawHub skill is immediately eligible after install because first-run commands use `npx`
-4. The optional npm helper install exposes `videomemory-openclaw` for faster repeat use
+3. The ClawHub skill is immediately eligible after install because it does not gate itself on the helper binary
+4. The npm helper install exposes `videomemory-openclaw`
 5. The CLI runs VideoMemory onboarding directly on the host
 
 ## Artifact 1: npm package
@@ -78,12 +78,13 @@ The skill metadata already points at the npm package:
 From OpenClaw setup / Skills UI:
 
 1. Select `VideoMemory`
-2. OpenClaw can install the npm package because of the skill's `metadata.openclaw.install`, but the skill does not require that binary to be preinstalled
+2. OpenClaw can install the npm package because of the skill's `metadata.openclaw.install`, but the skill does not hide itself when that binary is not preinstalled
 3. When the user says `Install the VideoMemory skill from ClawHub and send me the UI`, the skill tells OpenClaw to run:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --explain
-npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2
+npm install -g @clamepending/videomemory@0.1.2
+videomemory-openclaw onboard --safe --repo-ref v0.1.2 --explain
+videomemory-openclaw onboard --safe --repo-ref v0.1.2
 ```
 
 That command:
@@ -105,4 +106,4 @@ The published npm package no longer ships an `openclaw.plugin.json` manifest, bu
 That keeps the marketplace install path as a normal npm binary install instead of asking OpenClaw to trust the package as native plugin code.
 
 The ClawHub skill also avoids gating eligibility on the `videomemory-openclaw` binary.
-That means `clawhub install videomemory` is enough for OpenClaw to read the skill, inspect the safe `npx` onboarding command, and then run the same packaged CLI without a separate manual dependency-install step.
+That means `clawhub install videomemory` is enough for OpenClaw to read the skill, install the declared npm helper if needed, inspect the safe onboarding command, and then run the packaged CLI.
