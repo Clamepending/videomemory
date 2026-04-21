@@ -2,7 +2,7 @@
   "id": "videomemory",
   "name": "VideoMemory",
   "description": "Camera monitoring, one-off frame questions, and VideoMemory host onboarding for OpenClaw.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "skills": ["./skills/videomemory"],
   "configSchema": {
     "type": "object",

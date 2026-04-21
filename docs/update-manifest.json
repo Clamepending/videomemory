@@ -7,6 +7,6 @@
   "latest_commit": "",
   "published_at": "",
   "release_notes_url": "https://github.com/Clamepending/videomemory/releases/tag/v0.1.2",
-  "update_command": "npx -y @clamepending/videomemory@0.1.5 relaunch --repo-ref v0.1.2",
+  "update_command": "npx -y @clamepending/videomemory@0.1.6 relaunch --repo-ref v0.1.2",
   "message": "VideoMemory update checks are now available in the web UI."
 }

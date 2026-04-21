@@ -20,6 +20,7 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
         self.assertIn("./index.mjs", package["openclaw"]["extensions"])
         self.assertIn("./hooks/videomemory-startup", package["openclaw"]["hooks"])
         self.assertEqual(package["openclaw"]["compat"]["pluginApi"], ">=2026.2.2-0 <2027.0.0")
+        self.assertEqual(package["openclaw"]["build"]["openclawVersion"], "2026.2.2-3")
         self.assertEqual(package["name"], "@clamepending/videomemory")
 
     def test_package_files_include_plugin_runtime_assets(self):
@@ -53,9 +54,9 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
         self.assertNotIn('"package"', skill_text)
         self.assertNotIn('"bins"', skill_text)
         self.assertNotIn('"requires"', skill_text)
-        self.assertIn("openclaw plugins install @clamepending/videomemory@0.1.5", skill_text)
-        self.assertIn("npx -y @clamepending/videomemory@0.1.5 onboard --safe", skill_text)
-        self.assertIn("npx -y @clamepending/videomemory@0.1.5 relaunch", skill_text)
+        self.assertIn("openclaw plugins install @clamepending/videomemory@0.1.6", skill_text)
+        self.assertIn("npx -y @clamepending/videomemory@0.1.6 onboard --safe", skill_text)
+        self.assertIn("npx -y @clamepending/videomemory@0.1.6 relaunch", skill_text)
         self.assertNotIn("npm install", skill_text)
         self.assertIn("--explain", skill_text)
         self.assertIn("send me the UI", skill_text)

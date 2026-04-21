@@ -16,7 +16,7 @@ For requests like "install videomemory please", "set up videomemory", or "Instal
 First-class plugin install:
 
 ```bash
-openclaw plugins install @clamepending/videomemory@0.1.5
+openclaw plugins install @clamepending/videomemory@0.1.6
 ```
 
 After the plugin is installed and the gateway has restarted, prefer the plugin tools:
@@ -27,19 +27,19 @@ After the plugin is installed and the gateway has restarted, prefer the plugin t
 CLI fallback from the OpenClaw workspace root after `clawhub install videomemory`, inspect the onboarding plan:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.5 onboard --safe --repo-ref v0.1.2 --explain
+npx -y @clamepending/videomemory@0.1.6 onboard --safe --repo-ref v0.1.2 --explain
 ```
 
 If the plan matches the user's request, run onboarding:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.5 onboard --safe --repo-ref v0.1.2
+npx -y @clamepending/videomemory@0.1.6 onboard --safe --repo-ref v0.1.2
 ```
 
 Relaunch:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.5 relaunch --repo-ref v0.1.2
+npx -y @clamepending/videomemory@0.1.6 relaunch --repo-ref v0.1.2
 ```
 
 Check status:
@@ -58,7 +58,7 @@ curl -fsS http://127.0.0.1:5050/api/health
 ## Ground Rules
 
 - Prefer the published VideoMemory CLI command above over hand-written setup commands.
-- Prefer `openclaw plugins install @clamepending/videomemory@0.1.5` when OpenClaw plugin installation is allowed.
+- Prefer `openclaw plugins install @clamepending/videomemory@0.1.6` when OpenClaw plugin installation is allowed.
 - Run `--safe --explain` before onboarding when acting from chat.
 - If onboarding or relaunch fails, report the actual stderr instead of guessing.
 - After a successful onboarding or relaunch, reply with the returned UI link.
