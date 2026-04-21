@@ -14,8 +14,9 @@ So the release flow is intentionally:
 
 1. Publish the npm package `@clamepending/videomemory`
 2. Publish the ClawHub skill `clawhub-skill/videomemory`
-3. The ClawHub skill installs the npm package and exposes the `videomemory-openclaw` host CLI
-4. That CLI runs VideoMemory onboarding directly on the host
+3. The ClawHub skill is immediately eligible after install because first-run commands use `npx`
+4. The optional npm helper install exposes `videomemory-openclaw` for faster repeat use
+5. The CLI runs VideoMemory onboarding directly on the host
 
 ## Artifact 1: npm package
 
@@ -77,13 +78,12 @@ The skill metadata already points at the npm package:
 From OpenClaw setup / Skills UI:
 
 1. Select `VideoMemory`
-2. OpenClaw installs the npm package because of the skill's `metadata.openclaw.install`
-3. The `videomemory-openclaw` command becomes available on the gateway host
-4. When the user says `onboard to videomemory`, the skill tells OpenClaw to run:
+2. OpenClaw can install the npm package because of the skill's `metadata.openclaw.install`, but the skill does not require that binary to be preinstalled
+3. When the user says `Install the VideoMemory skill from ClawHub and send me the UI`, the skill tells OpenClaw to run:
 
 ```bash
-videomemory-openclaw onboard --safe --repo-ref v0.1.2 --explain
-videomemory-openclaw onboard --safe --repo-ref v0.1.2
+npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --explain
+npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2
 ```
 
 That command:
@@ -103,3 +103,6 @@ That command:
 
 The published npm package no longer ships an `openclaw.plugin.json` manifest, bundled hook assets, or plugin runtime code.
 That keeps the marketplace install path as a normal npm binary install instead of asking OpenClaw to trust the package as native plugin code.
+
+The ClawHub skill also avoids gating eligibility on the `videomemory-openclaw` binary.
+That means `clawhub install videomemory` is enough for OpenClaw to read the skill, inspect the safe `npx` onboarding command, and then run the same packaged CLI without a separate manual dependency-install step.

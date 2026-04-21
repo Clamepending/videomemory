@@ -12,7 +12,13 @@ You or your agent creates a **tasks** describing what to watch for, and the syst
 
 This path now starts VideoMemory directly on that machine with `uv` or `python3`. It does not use Docker.
 
-Send this message to OpenClaw:
+If your OpenClaw has ClawHub enabled, send this message:
+
+```text
+Install the VideoMemory skill from ClawHub and send me the VideoMemory UI link.
+```
+
+If you want the explicit fallback command, send this instead:
 
 ```text
 Please inspect `npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --explain`. If it looks safe, run `npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2` and send me the VideoMemory UI link. If you are not comfortable running it, show me the exact command so I can run it manually.

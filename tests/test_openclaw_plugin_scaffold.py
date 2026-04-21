@@ -48,9 +48,11 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
         skill_text = MARKETPLACE_SKILL.read_text()
         self.assertIn('"package":"@clamepending/videomemory@0.1.2"', skill_text)
         self.assertIn('"bins":["videomemory-openclaw"]', skill_text)
-        self.assertIn("videomemory-openclaw onboard --safe", skill_text)
+        self.assertNotIn('"requires"', skill_text)
+        self.assertIn("npx -y @clamepending/videomemory@0.1.2 onboard --safe", skill_text)
         self.assertIn("--explain", skill_text)
         self.assertIn("host CLI", skill_text)
+        self.assertIn("send me the UI", skill_text)
 
     def test_cli_can_explain_safe_onboarding_without_changes(self):
         result = subprocess.run(
