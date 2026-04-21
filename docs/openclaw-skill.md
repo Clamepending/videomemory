@@ -35,50 +35,42 @@ curl -fsSL http://host.docker.internal:5050/openclaw/skill.md
 
 ## One-shot bootstrap
 
-If OpenClaw's `exec` environment has `git` plus either `uv` or `python3`, it can bootstrap VideoMemory and the integration in one shell step:
+Prefer the packaged host CLI over network-downloaded shell snippets. Inspect the safe onboarding plan first:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
+npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --explain
+```
+
+If the plan matches the user's request, run the safe onboarding path:
+
+```bash
+npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2
 ```
 
 If OpenClaw is in Docker and the human already started VideoMemory on the host, bootstrap against the host alias:
 
 ```bash
-VIDEOMEMORY_BASE=http://host.docker.internal:5050 bash <(curl -fsSL http://host.docker.internal:5050/openclaw/bootstrap.sh)
-```
-
-If VideoMemory is not running yet and you already cloned the repo, use the repo copy of the script:
-
-```bash
-git clone https://github.com/Clamepending/videomemory.git
-cd videomemory
-bash docs/openclaw-bootstrap.sh
+npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --videomemory-base http://host.docker.internal:5050
 ```
 
 What this bootstrap does:
 - clones or reuses the VideoMemory repo
 - launches VideoMemory locally with `uv` or a Python virtualenv if it is not already reachable
-- installs Tailscale on Linux when possible, and prefers a Tailscale UI link for the user
 - installs the OpenClaw helper, hook transform, and local skill
 - merges the VideoMemory webhook mapping into `~/.openclaw/openclaw.json`
-- copies any model API keys present in the shell environment into VideoMemory settings
-- prints a user-facing VideoMemory UI link, and sends it over Telegram too when a bot token plus chat id are available
+- in safe mode, avoids Tailscale setup, model API-key copying, Telegram notifications, and sudo-requiring setup paths
+- prints a user-facing VideoMemory UI link
 - prints a setup warning when the selected model still needs a provider API key so the user can finish setup in the Settings tab
 
-If you already have a reusable Tailscale auth key, pass it in so onboarding can connect noninteractively:
-
-```bash
-VIDEOMEMORY_TAILSCALE_AUTHKEY=tskey-auth-... \
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh)
-```
+If you already have a reusable Tailscale auth key and the user explicitly wants Tailscale configured during onboarding, ask for confirmation before running non-safe onboarding with `--tailscale-authkey`.
 
 ## Relaunch / upgrade
 
 If the user asks to relaunch, restart, or update VideoMemory, do not improvise with ad hoc `git pull` plus process commands.
-Run the current relaunch script from GitHub so the repo is upgraded first, the local host-managed process is restarted, and the user gets the current UI link plus commit:
+Run the packaged relaunch command so the repo is upgraded first, the local host-managed process is restarted, and the user gets the current UI link plus commit:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/relaunch-videomemory.sh)
+npx -y @clamepending/videomemory@0.1.2 relaunch --repo-ref v0.1.2
 ```
 
 What this relaunch does:
@@ -117,8 +109,8 @@ Do not precompute those results during setup unless the user explicitly asked fo
 - If the user provides a `100.x.y.z` phone address, treat it as a Tailscale address and check that Tailscale is installed and connected on the VideoMemory host before trying to use that phone camera.
 - After successful onboarding, reply to the user with the user-facing VideoMemory UI link from bootstrap output. Prefer the Tailscale UI URL when one is available.
 - If bootstrap prints a configuration warning about a missing provider key, relay that warning to the user and tell them to open the Settings tab before creating tasks.
-- If the user asks for a relaunch or restart, use the current `relaunch-videomemory.sh` script from GitHub so the command upgrades before restarting.
-- If the user asks to rerun the bootstrap or install step, fetch and execute the current script instead of assuming an earlier failure still applies.
+- If the user asks for a relaunch or restart, use the packaged `videomemory-openclaw relaunch` / `npx @clamepending/videomemory` command so the command upgrades before restarting.
+- If the user asks to rerun the bootstrap or install step, rerun the packaged command instead of assuming an earlier failure still applies.
 - When a bootstrap or install command fails, report the actual failing command or stderr before proposing a fix.
 - If `POST /api/tasks` fails because the selected model is not configured, surface that error directly instead of pretending the task was created.
 - Include `Content-Type: application/json` on `POST`, `PUT`, and `DELETE` calls that send JSON.

@@ -15,7 +15,7 @@ This path now starts VideoMemory directly on that machine with `uv` or `python3`
 Send this message to OpenClaw:
 
 ```text
-Please run `npx -y @clamepending/videomemory onboard` and send me the VideoMemory UI link.
+Please inspect `npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --explain`. If it looks safe, run `npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2` and send me the VideoMemory UI link. If you are not comfortable running it, show me the exact command so I can run it manually.
 ```
 After that, your OpenClaw should be able to:
 - create/list/edit/stop/delete VideoMemory tasks
@@ -51,6 +51,23 @@ To launch just Videomemory (no openclaw)
 ```
 This starts VideoMemory for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
 
+### Updates
+
+VideoMemory checks `docs/update-manifest.json` for the latest stable app release. If the running app version is older than the manifest, the web UI shows an **Update** badge in the top bar with the relaunch command.
+
+For host/OpenClaw installs, the update command is:
+
+```bash
+npx -y @clamepending/videomemory@0.1.2 relaunch --repo-ref v0.1.2
+```
+
+Release checklist:
+
+1. Bump `pyproject.toml`.
+2. Update `docs/update-manifest.json`.
+3. Tag the release, for example `git tag v0.1.2`.
+4. Push the branch and tag, then publish GitHub release notes.
+
 ### I already have OpenClaw in a container
 
 1. Start VideoMemory on the host:
@@ -64,7 +81,7 @@ That script launches VideoMemory directly on the host machine and leaves Docker 
 2. Send this message to OpenClaw:
 
 ```text
-Please install and onboard VideoMemory by running VIDEOMEMORY_BASE=http://host.docker.internal:5050 bash <(curl -fsSL http://host.docker.internal:5050/openclaw/bootstrap.sh). Then use VideoMemory from http://host.docker.internal:5050/openclaw/skill.md and use the videomemory task helper for any "when X happens, do Y" request.
+Please inspect `npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --videomemory-base http://host.docker.internal:5050 --explain`. If it looks safe, run `npx -y @clamepending/videomemory@0.1.2 onboard --safe --repo-ref v0.1.2 --videomemory-base http://host.docker.internal:5050`. Then use VideoMemory from http://host.docker.internal:5050/openclaw/skill.md and use the videomemory task helper for any "when X happens, do Y" request.
 ```
 
 If `host.docker.internal` does not resolve on Linux, relaunch the OpenClaw container with:

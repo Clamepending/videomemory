@@ -1,6 +1,6 @@
 [project]
 name = "videomemory"
-version = "0.1.0"
+version = "0.1.2"
 description = "Video memory ingestion and monitoring core"
 requires-python = ">=3.9"
 dependencies = [

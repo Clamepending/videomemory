@@ -57,7 +57,7 @@ Publish to ClawHub:
 
 ```bash
 clawhub login
-clawhub publish . --slug videomemory --name "VideoMemory" --version 0.1.1
+clawhub publish . --slug videomemory --name "VideoMemory" --version 0.1.2
 ```
 
 If browser login fails, use an API token instead:
@@ -82,12 +82,15 @@ From OpenClaw setup / Skills UI:
 4. When the user says `onboard to videomemory`, the skill tells OpenClaw to run:
 
 ```bash
-videomemory-openclaw onboard
+videomemory-openclaw onboard --safe --repo-ref v0.1.2 --explain
+videomemory-openclaw onboard --safe --repo-ref v0.1.2
 ```
 
 That command:
 
 - bootstraps VideoMemory on the host
+- uses the scripts bundled inside the installed npm package
+- avoids Tailscale setup, model API-key copying, Telegram notifications, and sudo-requiring setup paths in safe mode
 - returns the user-facing UI link
 
 ## Local verification already completed in this repo

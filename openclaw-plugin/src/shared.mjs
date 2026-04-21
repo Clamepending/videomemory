@@ -1,22 +1,23 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const DEFAULTS = {
   repoUrl: "https://github.com/Clamepending/videomemory.git",
-  repoRef: "main",
+  repoRef: "v0.1.2",
   repoDir: path.join(os.homedir(), "videomemory"),
   openclawHome: path.join(os.homedir(), ".openclaw"),
   videomemoryBase: "http://127.0.0.1:5050",
   botId: "openclaw",
 };
 
-const SCRIPT_URLS = {
-  bootstrap:
-    "https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/openclaw-bootstrap.sh",
-  relaunch:
-    "https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/relaunch-videomemory.sh",
+const SCRIPT_PATHS = {
+  bootstrap: path.join(PACKAGE_ROOT, "bundled", "openclaw-bootstrap.sh"),
+  relaunch: path.join(PACKAGE_ROOT, "bundled", "relaunch-videomemory.sh"),
 };
 
 function cleanText(value) {
@@ -53,19 +54,6 @@ function summarizeFailure(stderr, stdout) {
   return lines.slice(-6).join("\n");
 }
 
-async function downloadScript(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to download ${url}: HTTP ${response.status}`);
-  }
-  const script = await response.text();
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "videomemory-openclaw-"));
-  const scriptPath = path.join(tempDir, path.basename(new URL(url).pathname) || "script.sh");
-  await writeFile(scriptPath, script, "utf8");
-  await chmod(scriptPath, 0o755);
-  return { tempDir, scriptPath };
-}
-
 function runProcess(command, args, options = {}) {
   const { env, cwd } = options;
   return new Promise((resolve, reject) => {
@@ -92,12 +80,32 @@ function runProcess(command, args, options = {}) {
   });
 }
 
-async function runRemoteScript(url, args = [], env = {}) {
-  const { tempDir, scriptPath } = await downloadScript(url);
+async function runBundledScript(scriptPath, args = [], env = {}) {
   try {
-    return await runProcess("bash", [scriptPath, ...args], { env });
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
+    await access(scriptPath);
+  } catch {
+    throw new Error(
+      `Bundled VideoMemory script is missing: ${scriptPath}. Reinstall @clamepending/videomemory.`,
+    );
+  }
+  return await runProcess("bash", [scriptPath, ...args], { env, cwd: PACKAGE_ROOT });
+}
+
+function scriptCommand(scriptPath, args = []) {
+  const relativeScriptPath = path.relative(PACKAGE_ROOT, scriptPath) || scriptPath;
+  return ["bash", relativeScriptPath, ...args].join(" ");
+}
+
+async function runPackagedScript(scriptPath, args = [], env = {}) {
+  try {
+    return await runBundledScript(scriptPath, args, env);
+  } catch (error) {
+    const message = cleanText(error?.message) || String(error);
+    return {
+      code: 1,
+      stdout: "",
+      stderr: message,
+    };
   }
 }
 
@@ -119,6 +127,7 @@ function toArgList(entries) {
 }
 
 function buildBootstrapArgs(options = {}) {
+  const explainOnly = truthyFlag(options.dryRun) || truthyFlag(options.explain);
   return toArgList([
     ["--repo-url", cleanText(options.repoUrl) || DEFAULTS.repoUrl],
     ["--repo-ref", cleanText(options.repoRef) || DEFAULTS.repoRef],
@@ -129,11 +138,15 @@ function buildBootstrapArgs(options = {}) {
     ["--skip-start", truthyFlag(options.skipStart)],
     ["--skip-keys", truthyFlag(options.skipKeys)],
     ["--skip-tailscale", truthyFlag(options.skipTailscale)],
+    ["--skip-notify", truthyFlag(options.skipNotify)],
+    ["--safe", truthyFlag(options.safe)],
+    ["--dry-run", explainOnly],
     ["--tailscale-authkey", cleanText(options.tailscaleAuthKey)],
   ]);
 }
 
 function buildRelaunchArgs(options = {}) {
+  const explainOnly = truthyFlag(options.dryRun) || truthyFlag(options.explain);
   return toArgList([
     ["--repo-url", cleanText(options.repoUrl) || DEFAULTS.repoUrl],
     ["--repo-ref", cleanText(options.repoRef) || DEFAULTS.repoRef],
@@ -141,6 +154,7 @@ function buildRelaunchArgs(options = {}) {
     ["--openclaw-home", cleanText(options.openclawHome) || DEFAULTS.openclawHome],
     ["--videomemory-base", cleanText(options.videomemoryBase) || DEFAULTS.videomemoryBase],
     ["--skip-keys", truthyFlag(options.skipKeys)],
+    ["--dry-run", explainOnly],
   ]);
 }
 
@@ -166,16 +180,18 @@ function buildScriptEnv(options = {}) {
   return env;
 }
 
-function buildResult(command, runResult) {
+function buildResult(command, runResult, metadata = {}) {
   const mergedOutput = [runResult.stdout, runResult.stderr].filter(Boolean).join("\n");
-  const uiUrl = parseReplyUrl(mergedOutput) || parseUiUrl(mergedOutput);
+  const dryRun = Boolean(metadata.dryRun);
+  const uiUrl = dryRun ? "" : parseReplyUrl(mergedOutput) || parseUiUrl(mergedOutput);
   return {
     command,
     exitCode: runResult.code,
     success: runResult.code === 0,
+    ...metadata,
     uiUrl,
-    videomemoryBase: parseVideomemoryBase(mergedOutput),
-    repoCommit: parseRepoCommit(mergedOutput),
+    videomemoryBase: dryRun ? "" : parseVideomemoryBase(mergedOutput),
+    repoCommit: dryRun ? "" : parseRepoCommit(mergedOutput),
     stdout: runResult.stdout,
     stderr: runResult.stderr,
   };
@@ -192,9 +208,15 @@ function ensureSuccess(result, label) {
 export async function onboardVideomemory(options = {}) {
   const args = buildBootstrapArgs(options);
   const env = buildScriptEnv(options);
+  const explainOnly = truthyFlag(options.dryRun) || truthyFlag(options.explain);
   const result = buildResult(
-    ["bash", path.basename(new URL(SCRIPT_URLS.bootstrap).pathname), ...args].join(" "),
-    await runRemoteScript(SCRIPT_URLS.bootstrap, args, env),
+    scriptCommand(SCRIPT_PATHS.bootstrap, args),
+    await runPackagedScript(SCRIPT_PATHS.bootstrap, args, env),
+    {
+      bundledScript: path.relative(PACKAGE_ROOT, SCRIPT_PATHS.bootstrap),
+      dryRun: explainOnly,
+      safe: truthyFlag(options.safe),
+    },
   );
   return ensureSuccess(result, "VideoMemory onboarding");
 }
@@ -202,9 +224,14 @@ export async function onboardVideomemory(options = {}) {
 export async function relaunchVideomemory(options = {}) {
   const args = buildRelaunchArgs(options);
   const env = buildScriptEnv(options);
+  const explainOnly = truthyFlag(options.dryRun) || truthyFlag(options.explain);
   const result = buildResult(
-    ["bash", path.basename(new URL(SCRIPT_URLS.relaunch).pathname), ...args].join(" "),
-    await runRemoteScript(SCRIPT_URLS.relaunch, args, env),
+    scriptCommand(SCRIPT_PATHS.relaunch, args),
+    await runPackagedScript(SCRIPT_PATHS.relaunch, args, env),
+    {
+      bundledScript: path.relative(PACKAGE_ROOT, SCRIPT_PATHS.relaunch),
+      dryRun: explainOnly,
+    },
   );
   return ensureSuccess(result, "VideoMemory relaunch");
 }

@@ -33,6 +33,7 @@ from videomemory.system.model_providers.factory import (
 from videomemory.system.database import TaskDatabase, get_default_data_dir
 from videomemory.system.openclaw_integration import OpenClawWebhookDispatcher
 from videomemory.system.usage import build_usage_dashboard_payload
+from videomemory.system.update_check import DEFAULT_UPDATE_MANIFEST_URL, build_update_payload
 import cv2
 import platform
 from typing import Any, Dict, List, Optional
@@ -51,7 +52,13 @@ load_dotenv()
 # Initialize logging
 setup_logging()
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
 app = Flask(__name__)
+_version_cache_lock = threading.Lock()
+_version_cache: Dict[str, Any] = {
+    "expires_at": 0.0,
+    "payload": None,
+}
 
 
 def _apply_no_store_headers(response: Response) -> Response:
@@ -60,6 +67,50 @@ def _apply_no_store_headers(response: Response) -> Response:
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
+
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_version_payload(force_refresh: bool = False) -> Dict[str, Any]:
+    """Return a cached, offline-safe update-check payload for the header UI."""
+    if _env_truthy("VIDEOMEMORY_UPDATE_CHECK_DISABLED"):
+        payload = build_update_payload(REPO_ROOT, manifest_url="")
+        payload["update_check_disabled"] = True
+        return payload
+
+    now = time.time()
+    cache_ttl_s = max(0.0, _float_env("VIDEOMEMORY_UPDATE_CACHE_TTL_S", 600.0))
+    with _version_cache_lock:
+        cached_payload = _version_cache.get("payload")
+        if (
+            not force_refresh
+            and cached_payload is not None
+            and now < float(_version_cache.get("expires_at") or 0.0)
+        ):
+            return dict(cached_payload)
+
+    manifest_url = os.environ.get("VIDEOMEMORY_UPDATE_MANIFEST_URL", DEFAULT_UPDATE_MANIFEST_URL)
+    fetch_timeout_s = max(0.1, _float_env("VIDEOMEMORY_UPDATE_TIMEOUT_S", 2.0))
+    payload = build_update_payload(
+        REPO_ROOT,
+        manifest_url=manifest_url,
+        fetch_timeout_s=fetch_timeout_s,
+    )
+
+    with _version_cache_lock:
+        _version_cache["payload"] = dict(payload)
+        _version_cache["expires_at"] = time.time() + cache_ttl_s
+
+    return payload
 
 
 @app.after_request
@@ -1433,6 +1484,14 @@ def health_check():
     })
 
 
+@app.route('/api/version', methods=['GET'])
+def version_check():
+    """Return current app version plus best-effort latest release info."""
+    force_refresh = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
+    response = jsonify(_get_version_payload(force_refresh=force_refresh))
+    return _apply_no_store_headers(response)
+
+
 @app.route('/healthz', methods=['GET'])
 def healthz():
     """Shallow health endpoint for HTTP clients that probe /healthz."""
@@ -1470,6 +1529,38 @@ def openapi_spec():
                                     "service": {"type": "string", "example": "videomemory"},
                                     "devices_detected": {"type": "integer"},
                                     "active_tasks": {"type": "integer"},
+                                },
+                            }}},
+                        }
+                    },
+                }
+            },
+            "/api/version": {
+                "get": {
+                    "operationId": "version_check",
+                    "summary": "Check VideoMemory app version",
+                    "description": "Returns the running app version and best-effort latest release metadata.",
+                    "parameters": [
+                        {
+                            "name": "refresh",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "boolean"},
+                            "description": "Bypass the cached update-check result.",
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Version and update-check status",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {
+                                    "current_version": {"type": "string", "example": "0.1.1"},
+                                    "latest_version": {"type": "string", "example": "0.1.2"},
+                                    "update_available": {"type": ["boolean", "null"]},
+                                    "release_notes_url": {"type": "string"},
+                                    "update_command": {"type": "string"},
+                                    "check_error": {"type": "string"},
                                 },
                             }}},
                         }

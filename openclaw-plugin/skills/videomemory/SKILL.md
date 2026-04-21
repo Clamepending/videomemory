@@ -31,10 +31,21 @@ What it does:
 - clones or reuses the VideoMemory repo
 - launches VideoMemory locally without Docker
 - installs the OpenClaw helper and hook assets used by the current integration path
-- copies model API keys when present
-- prefers a Tailscale UI link when available
+- in safe mode, avoids Tailscale setup, model API-key copying, Telegram notifications, and sudo-requiring setup paths
 
-If the tool is unavailable, fall back to the GitHub-hosted bootstrap script.
+Before host onboarding from chat, inspect the safe plan first when possible:
+
+```bash
+videomemory-openclaw onboard --safe --repo-ref v0.1.2 --explain
+```
+
+If the plan matches the user's request, run:
+
+```bash
+videomemory-openclaw onboard --safe --repo-ref v0.1.2
+```
+
+If the packaged tool is unavailable, ask the user before falling back to any network-downloaded bootstrap script.
 
 ## Relaunch / upgrade
 
@@ -165,5 +176,5 @@ curl -fsSL -X DELETE http://videomemory:5050/api/task/0
 - Treat VideoMemory as the source of truth for device discovery and task state.
 - If there is exactly one camera and the user did not specify otherwise, use it.
 - Report the actual failing command or stderr when bootstrap/relaunch fails.
-- Prefer the current GitHub-hosted scripts over stale local assumptions.
+- Prefer the packaged `videomemory-openclaw` command over network-downloaded scripts.
 - Do not put the user-facing follow-up action directly into `task_description` when OpenClaw should perform it later.

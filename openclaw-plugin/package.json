@@ -1,14 +1,18 @@
 {
   "name": "@clamepending/videomemory",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "VideoMemory host onboarding CLI for OpenClaw skills and agents",
   "type": "module",
   "license": "UNLICENSED",
   "bin": {
     "videomemory-openclaw": "./cli.mjs"
   },
+  "scripts": {
+    "prepack": "node scripts/sync-bundled-scripts.mjs"
+  },
   "files": [
     "README.md",
+    "bundled",
     "cli.mjs",
     "src"
   ]

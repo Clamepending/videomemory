@@ -9,12 +9,14 @@ import {
 function usage() {
   return [
     "Usage:",
-    "  videomemory-openclaw onboard [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--bot-id ID] [--tailscale-authkey KEY] [--skip-start] [--skip-keys] [--skip-tailscale]",
-    "  videomemory-openclaw relaunch [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--skip-keys]",
+    "  videomemory-openclaw onboard [--safe] [--dry-run|--explain] [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--bot-id ID] [--tailscale-authkey KEY] [--skip-start] [--skip-keys] [--skip-tailscale] [--skip-notify]",
+    "  videomemory-openclaw relaunch [--dry-run|--explain] [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--skip-keys]",
     "  videomemory-openclaw status [--videomemory-base URL]",
     "",
     "Notes:",
-    "  onboard runs the maintained VideoMemory bootstrap flow directly on the host.",
+    "  onboard runs the packaged VideoMemory bootstrap script directly on the host.",
+    "  --safe disables Tailscale setup, model API-key sync, Telegram notify, and sudo-requiring setup.",
+    "  --dry-run and --explain print the exact plan without making changes.",
     "  --json prints the full result object.",
   ].join("\n");
 }
@@ -56,9 +58,13 @@ function normalizeOptions(options) {
     videomemoryBase: cleanText(options["videomemory-base"]),
     botId: cleanText(options["bot-id"]),
     tailscaleAuthKey: cleanText(options["tailscale-authkey"]),
+    safe: Boolean(options.safe),
+    dryRun: Boolean(options["dry-run"]),
+    explain: Boolean(options.explain),
     skipStart: Boolean(options["skip-start"]),
     skipKeys: Boolean(options["skip-keys"]),
     skipTailscale: Boolean(options["skip-tailscale"]),
+    skipNotify: Boolean(options["skip-notify"]),
   };
 }
 
@@ -84,6 +90,11 @@ async function main() {
 
   if (options.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (result?.dryRun && result?.stdout) {
+    process.stdout.write(result.stdout.endsWith("\n") ? result.stdout : `${result.stdout}\n`);
     return;
   }
 
