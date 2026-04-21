@@ -10,20 +10,23 @@ MARKETPLACE_SKILL = REPO_ROOT / "clawhub-skill" / "videomemory" / "SKILL.md"
 
 
 class OpenClawPackageScaffoldTests(unittest.TestCase):
-    def test_package_json_exposes_only_the_cli_artifact(self):
+    def test_package_json_exposes_openclaw_artifacts(self):
         package = json.loads((PLUGIN_ROOT / "package.json").read_text())
 
         self.assertIn("bin", package)
         for relative_path in package["bin"].values():
             self.assertTrue((PLUGIN_ROOT / relative_path).exists(), relative_path)
-        self.assertNotIn("openclaw", package)
+        self.assertIn("openclaw", package)
+        self.assertIn("./index.mjs", package["openclaw"]["extensions"])
+        self.assertIn("./hooks/videomemory-startup", package["openclaw"]["hooks"])
+        self.assertEqual(package["openclaw"]["compat"]["pluginApi"], ">=2026.2.2-0 <2027.0.0")
         self.assertEqual(package["name"], "@clamepending/videomemory")
 
-    def test_package_files_exclude_plugin_runtime_assets(self):
+    def test_package_files_include_plugin_runtime_assets(self):
         package = json.loads((PLUGIN_ROOT / "package.json").read_text())
         packaged = set(package["files"])
-        self.assertEqual(packaged, {"README.md", "bundled", "cli.mjs", "src"})
-        self.assertFalse((PLUGIN_ROOT / "openclaw.plugin.json").exists())
+        self.assertEqual(packaged, {"README.md", "bundled", "cli.mjs", "hooks", "index.mjs", "openclaw.plugin.json", "skills", "src"})
+        self.assertTrue((PLUGIN_ROOT / "openclaw.plugin.json").exists())
         self.assertTrue(MARKETPLACE_SKILL.exists())
 
     def test_package_runs_bundled_scripts_instead_of_remote_main(self):
@@ -50,8 +53,9 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
         self.assertNotIn('"package"', skill_text)
         self.assertNotIn('"bins"', skill_text)
         self.assertNotIn('"requires"', skill_text)
-        self.assertIn("npx -y @clamepending/videomemory@0.1.3 onboard --safe", skill_text)
-        self.assertIn("npx -y @clamepending/videomemory@0.1.3 relaunch", skill_text)
+        self.assertIn("openclaw plugins install @clamepending/videomemory@0.1.5", skill_text)
+        self.assertIn("npx -y @clamepending/videomemory@0.1.5 onboard --safe", skill_text)
+        self.assertIn("npx -y @clamepending/videomemory@0.1.5 relaunch", skill_text)
         self.assertNotIn("npm install", skill_text)
         self.assertIn("--explain", skill_text)
         self.assertIn("send me the UI", skill_text)

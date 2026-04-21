@@ -55,8 +55,8 @@ Expected package name:
 Validate the published package through OpenClaw:
 
 ```bash
-openclaw plugins install @clamepending/videomemory@0.1.4
-openclaw hooks install @clamepending/videomemory@0.1.4
+openclaw plugins install @clamepending/videomemory@0.1.5
+openclaw hooks install @clamepending/videomemory@0.1.5
 openclaw plugins doctor
 openclaw hooks check
 openclaw videomemory onboard --explain
@@ -77,7 +77,7 @@ clawhub package publish . \
   --family code-plugin \
   --name @clamepending/videomemory \
   --display-name "VideoMemory" \
-  --version 0.1.4 \
+  --version 0.1.5 \
   --source-repo Clamepending/videomemory \
   --source-ref main \
   --source-path openclaw-plugin
@@ -95,7 +95,7 @@ Publish to ClawHub:
 
 ```bash
 clawhub login
-clawhub publish . --slug videomemory --name "VideoMemory" --version 0.1.13
+clawhub publish . --slug videomemory --name "VideoMemory" --version 0.1.14
 ```
 
 If browser login fails, use an API token instead:
@@ -119,7 +119,7 @@ From OpenClaw setup / Skills UI:
 3. When the user says `install videomemory please` or `Install the VideoMemory skill from ClawHub and send me the UI`, the skill first tries:
 
 ```bash
-openclaw plugins install @clamepending/videomemory@0.1.4
+openclaw plugins install @clamepending/videomemory@0.1.5
 ```
 
 After a gateway restart, the plugin exposes:
@@ -136,8 +136,8 @@ videomemory_status
 If plugin installation is unavailable, the skill falls back to:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.4 onboard --safe --repo-ref v0.1.2 --explain
-npx -y @clamepending/videomemory@0.1.4 onboard --safe --repo-ref v0.1.2
+npx -y @clamepending/videomemory@0.1.5 onboard --safe --repo-ref v0.1.2 --explain
+npx -y @clamepending/videomemory@0.1.5 onboard --safe --repo-ref v0.1.2
 ```
 
 That command:
@@ -154,10 +154,10 @@ That command:
 - `node cli.mjs status --videomemory-base http://localhost:5051 --json`
 - `openclaw plugins install /path/to/openclaw-plugin`
 - `openclaw hooks install /path/to/openclaw-plugin`
-- `openclaw plugins install clamepending-videomemory-0.1.4.tgz`
-- `openclaw hooks install clamepending-videomemory-0.1.4.tgz`
-- `openclaw plugins install @clamepending/videomemory@0.1.4`
-- `openclaw hooks install @clamepending/videomemory@0.1.4`
+- `openclaw plugins install clamepending-videomemory-0.1.5.tgz`
+- `openclaw hooks install clamepending-videomemory-0.1.5.tgz`
+- `openclaw plugins install @clamepending/videomemory@0.1.5`
+- `openclaw hooks install @clamepending/videomemory@0.1.5`
 - `openclaw plugins doctor`
 - `openclaw hooks check`
 - `openclaw videomemory onboard --explain`
