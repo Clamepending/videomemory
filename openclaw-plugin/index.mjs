@@ -29,7 +29,7 @@ const lifecycleToolSchema = {
     },
     repoRef: {
       type: "string",
-      description: "Optional VideoMemory git ref. Defaults to plugin config or v0.1.2.",
+      description: "Optional VideoMemory git ref. Defaults to plugin config or v0.1.3.",
     },
     repoDir: {
       type: "string",

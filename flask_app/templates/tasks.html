@@ -316,16 +316,47 @@
             background: #555;
         }
 
-        .delete-task-btn {
+        .task-action-buttons {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: 8px;
+        }
+
+        .task-control-btn {
             background: none;
             border: none;
+            cursor: pointer;
+            border-radius: 6px;
+            line-height: 1.1;
+            transition: color 0.2s, background 0.2s, border-color 0.2s, opacity 0.2s;
+        }
+
+        .task-control-btn:disabled {
+            cursor: wait;
+            opacity: 0.65;
+        }
+
+        .pause-task-btn {
+            color: #f6d365;
+            border: 1px solid rgba(246, 211, 101, 0.25);
+            font-size: 12px;
+            font-weight: 600;
+            padding: 5px 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .pause-task-btn:hover {
+            color: #ffe8a3;
+            background: rgba(246, 211, 101, 0.12);
+            border-color: rgba(246, 211, 101, 0.45);
+        }
+
+        .delete-task-btn {
             color: #666;
             font-size: 18px;
-            cursor: pointer;
             padding: 4px 8px;
-            border-radius: 6px;
-            line-height: 1;
-            transition: color 0.2s, background 0.2s;
         }
 
         .delete-task-btn:hover {
@@ -531,16 +562,49 @@
             }
         }
 
+        function taskApiPath(taskId, suffix = '') {
+            return '/api/task/' + encodeURIComponent(taskId) + suffix;
+        }
+
+        async function stopTask(taskId, event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!taskId) return;
+            if (!confirm('Pause task #' + taskId + '? This stops monitoring but keeps the task and all notes.')) return;
+
+            const btn = event.currentTarget;
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Pausing...';
+
+            try {
+                const resp = await fetch(taskApiPath(taskId, '/stop'), { method: 'POST' });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    alert('Error: ' + (err.error || err.message || 'Failed to pause task'));
+                    loadTasks();
+                    return;
+                }
+                loadTasks();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
         async function deleteTask(taskId, event) {
             event.preventDefault();
             event.stopPropagation();
+            if (!taskId) return;
             if (!confirm('Delete task #' + taskId + '? This will permanently remove it and all its notes.')) return;
 
             try {
-                const resp = await fetch('/api/task/' + taskId, { method: 'DELETE' });
+                const resp = await fetch(taskApiPath(taskId), { method: 'DELETE' });
                 if (!resp.ok) {
                     const err = await resp.json();
-                    alert('Error: ' + (err.error || 'Failed to delete task'));
+                    alert('Error: ' + (err.error || err.message || 'Failed to delete task'));
                     return;
                 }
                 loadTasks();
@@ -586,8 +650,9 @@
                 tasksGrid.className = 'tasks-grid';
 
                 tasks.forEach(task => {
+                    const taskId = task.task_id || '';
                     const taskCard = document.createElement('a');
-                    taskCard.href = `/task/${task.task_id || ''}`;
+                    taskCard.href = `/task/${encodeURIComponent(taskId)}`;
                     const status = task.status || (task.done ? 'done' : 'active');
                     taskCard.className = `task-card ${status !== 'active' ? status : ''}`;
 
@@ -599,6 +664,10 @@
 
                     const deviceName = deviceNames[task.io_id] || `Device ${task.io_id}`;
                     const botLabel = task.bot_id ? `Bot: ${escapeHtml(task.bot_id)}` : '';
+                    const safeTaskIdArg = JSON.stringify(String(taskId));
+                    const pauseButton = status === 'active'
+                        ? `<button class="task-control-btn pause-task-btn" onclick='stopTask(${safeTaskIdArg}, event)' title="Pause task: stop monitoring and keep history">Pause</button>`
+                        : '';
 
                     const latestNote = task.task_note && task.task_note.length > 0
                         ? task.task_note[task.task_note.length - 1]
@@ -606,12 +675,15 @@
 
                     taskCard.innerHTML = `
                         <div class="task-header">
-                            <span class="task-id">Task #${task.task_id || 'N/A'}</span>
+                            <span class="task-id">Task #${escapeHtml(taskId || 'N/A')}</span>
                             <div>
                                 <span class="task-status ${status}">
                                     ${statusLabels[status] || status}
                                 </span>
-                                <button class="delete-task-btn" onclick="deleteTask('${task.task_id}', event)" title="Delete task">&#x2715;</button>
+                                <span class="task-action-buttons">
+                                    ${pauseButton}
+                                    <button class="task-control-btn delete-task-btn" onclick='deleteTask(${safeTaskIdArg}, event)' title="Delete task permanently">&#x2715;</button>
+                                </span>
                             </div>
                         </div>
                         <div class="task-device">

@@ -8,7 +8,7 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 
 const DEFAULTS = {
   repoUrl: "https://github.com/Clamepending/videomemory.git",
-  repoRef: "v0.1.2",
+  repoRef: "v0.1.3",
   repoDir: path.join(os.homedir(), "videomemory"),
   openclawHome: path.join(os.homedir(), ".openclaw"),
   videomemoryBase: "http://127.0.0.1:5050",

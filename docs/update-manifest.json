@@ -2,11 +2,11 @@
   "schema_version": 1,
   "app": "videomemory",
   "channel": "stable",
-  "latest_version": "0.1.2",
-  "latest_git_ref": "v0.1.2",
+  "latest_version": "0.1.3",
+  "latest_git_ref": "v0.1.3",
   "latest_commit": "",
   "published_at": "",
-  "release_notes_url": "https://github.com/Clamepending/videomemory/releases/tag/v0.1.2",
-  "update_command": "npx -y @clamepending/videomemory@0.1.6 relaunch --repo-ref v0.1.2",
-  "message": "VideoMemory update checks are now available in the web UI."
+  "release_notes_url": "https://github.com/Clamepending/videomemory/releases/tag/v0.1.3",
+  "update_command": "npx -y @clamepending/videomemory@0.1.7 relaunch --repo-ref v0.1.3",
+  "message": "VideoMemory task cards now include a Pause button that stops monitoring while keeping task history."
 }

@@ -50,13 +50,14 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
 
     def test_marketplace_skill_uses_published_cli(self):
         skill_text = MARKETPLACE_SKILL.read_text()
+        package_version = json.loads((PLUGIN_ROOT / "package.json").read_text())["version"]
         self.assertIn('"emoji":"camera"', skill_text)
         self.assertNotIn('"package"', skill_text)
         self.assertNotIn('"bins"', skill_text)
         self.assertNotIn('"requires"', skill_text)
-        self.assertIn("openclaw plugins install @clamepending/videomemory@0.1.6", skill_text)
-        self.assertIn("npx -y @clamepending/videomemory@0.1.6 onboard --safe", skill_text)
-        self.assertIn("npx -y @clamepending/videomemory@0.1.6 relaunch", skill_text)
+        self.assertIn(f"openclaw plugins install @clamepending/videomemory@{package_version}", skill_text)
+        self.assertIn(f"npx -y @clamepending/videomemory@{package_version} onboard --safe", skill_text)
+        self.assertIn(f"npx -y @clamepending/videomemory@{package_version} relaunch", skill_text)
         self.assertNotIn("npm install", skill_text)
         self.assertIn("--explain", skill_text)
         self.assertIn("send me the UI", skill_text)

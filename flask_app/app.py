@@ -1382,6 +1382,7 @@ def _normalize_usage_range(range_key: Optional[str]) -> str:
 
 def _build_usage_payload(range_key: Optional[str]) -> dict[str, Any]:
     """Build the usage dashboard payload for the requested range."""
+    from datetime import datetime
     import time
 
     normalized_range = _normalize_usage_range(range_key)
@@ -1393,6 +1394,7 @@ def _build_usage_payload(range_key: Optional[str]) -> dict[str, Any]:
         events,
         range_key=normalized_range,
         recent_events=recent_events,
+        now=datetime.fromtimestamp(now_ts).astimezone(),
     )
 
 

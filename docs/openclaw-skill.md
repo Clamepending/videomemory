@@ -38,19 +38,19 @@ curl -fsSL http://host.docker.internal:5050/openclaw/skill.md
 Prefer the packaged host CLI over network-downloaded shell snippets. Inspect the safe onboarding plan first:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.6 onboard --safe --repo-ref v0.1.2 --explain
+npx -y @clamepending/videomemory@0.1.7 onboard --safe --repo-ref v0.1.3 --explain
 ```
 
 If the plan matches the user's request, run the safe onboarding path:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.6 onboard --safe --repo-ref v0.1.2
+npx -y @clamepending/videomemory@0.1.7 onboard --safe --repo-ref v0.1.3
 ```
 
 If OpenClaw is in Docker and the human already started VideoMemory on the host, bootstrap against the host alias:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.6 onboard --safe --repo-ref v0.1.2 --videomemory-base http://host.docker.internal:5050
+npx -y @clamepending/videomemory@0.1.7 onboard --safe --repo-ref v0.1.3 --videomemory-base http://host.docker.internal:5050
 ```
 
 What this bootstrap does:
@@ -70,7 +70,7 @@ If the user asks to relaunch, restart, or update VideoMemory, do not improvise w
 Run the packaged relaunch command so the repo is upgraded first, the local host-managed process is restarted, and the user gets the current UI link plus commit:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.6 relaunch --repo-ref v0.1.2
+npx -y @clamepending/videomemory@0.1.7 relaunch --repo-ref v0.1.3
 ```
 
 What this relaunch does:

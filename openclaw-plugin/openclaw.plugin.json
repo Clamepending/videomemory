@@ -2,7 +2,7 @@
   "id": "videomemory",
   "name": "VideoMemory",
   "description": "Camera monitoring, one-off frame questions, and VideoMemory host onboarding for OpenClaw.",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "skills": ["./skills/videomemory"],
   "configSchema": {
     "type": "object",
@@ -15,7 +15,7 @@
       },
       "repoRef": {
         "type": "string",
-        "default": "v0.1.2",
+        "default": "v0.1.3",
         "description": "VideoMemory git branch or tag used for host onboarding and relaunch."
       },
       "repoDir": {
@@ -60,7 +60,7 @@
     },
     "repoRef": {
       "label": "VideoMemory Release",
-      "placeholder": "v0.1.2"
+      "placeholder": "v0.1.3"
     },
     "repoDir": {
       "label": "Checkout Directory",

@@ -41,13 +41,13 @@ What it does:
 Before host onboarding from chat, inspect the safe plan first when possible. Prefer the tool with `explain: true`; if tools are unavailable, use:
 
 ```bash
-videomemory-openclaw onboard --safe --repo-ref v0.1.2 --explain
+videomemory-openclaw onboard --safe --repo-ref v0.1.3 --explain
 ```
 
 If the plan matches the user's request, call `videomemory_onboard`; if tools are unavailable, run:
 
 ```bash
-videomemory-openclaw onboard --safe --repo-ref v0.1.2
+videomemory-openclaw onboard --safe --repo-ref v0.1.3
 ```
 
 If the packaged tool is unavailable, ask the user before falling back to any network-downloaded bootstrap script.
