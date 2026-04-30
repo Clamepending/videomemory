@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -187,6 +188,8 @@ videomemory.tools.tasks.set_managers(io_manager, task_manager)
 # Per-device preview stream FPS state (used by Devices page UI).
 _preview_fps_lock = threading.Lock()
 _preview_fps_state = {}
+_local_preview_ingestor_lock = threading.Lock()
+_local_preview_ingestor_leases: Dict[str, int] = {}
 
 
 def _record_preview_frame(io_id: str) -> None:
@@ -224,6 +227,93 @@ def _get_preview_fps(io_id: str) -> float:
         if last_age > 3.0:
             return 0.0
         return float(state.get("fps", 0.0))
+
+
+def _device_has_active_tasks(io_id: str) -> bool:
+    """Return whether a device currently has any active tasks."""
+    try:
+        return any(task.get("status") == "active" for task in task_manager.list_tasks(io_id))
+    except Exception as e:
+        flask_logger.debug("Failed to inspect active tasks for %s: %s", io_id, e, exc_info=True)
+        return False
+
+
+def _is_local_camera_device(device_info: Optional[Dict[str, Any]]) -> bool:
+    """Return whether a device entry represents a directly-opened local camera."""
+    if not device_info:
+        return False
+    if device_info.get("source") == "network":
+        return False
+    return not bool(device_info.get("pull_url") or device_info.get("url"))
+
+
+def _wait_for_ingestor_frame(
+    io_id: str,
+    wait_timeout_s: float,
+    *,
+    minimum_mean: Optional[float] = 1.0,
+) -> Optional[np.ndarray]:
+    """Poll a shared ingestor briefly for its latest frame."""
+    deadline = time.monotonic() + max(0.0, wait_timeout_s)
+    while True:
+        latest_frame = task_manager.get_latest_frame_for_device(io_id)
+        if latest_frame is not None and latest_frame.size > 0:
+            if minimum_mean is None or latest_frame.mean() >= minimum_mean:
+                return latest_frame
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
+
+
+def _acquire_local_preview_ingestor(
+    io_id: str,
+    device_info: Optional[Dict[str, Any]],
+) -> Optional[Any]:
+    """Acquire a shared ingestor lease for a local camera preview."""
+    if not _is_local_camera_device(device_info):
+        return None
+
+    with _local_preview_ingestor_lock:
+        _local_preview_ingestor_leases[io_id] = _local_preview_ingestor_leases.get(io_id, 0) + 1
+        ingestor = task_manager.ensure_device_ingestor(io_id, keep_alive_without_tasks=True)
+        if ingestor is not None:
+            return ingestor
+
+        remaining_leases = _local_preview_ingestor_leases.get(io_id, 0) - 1
+        if remaining_leases > 0:
+            _local_preview_ingestor_leases[io_id] = remaining_leases
+        else:
+            _local_preview_ingestor_leases.pop(io_id, None)
+        return None
+
+
+def _release_local_preview_ingestor(io_id: str) -> None:
+    """Release a shared ingestor lease held by a local camera preview."""
+    with _local_preview_ingestor_lock:
+        lease_count = _local_preview_ingestor_leases.get(io_id, 0)
+        if lease_count <= 0:
+            return
+        if lease_count > 1:
+            _local_preview_ingestor_leases[io_id] = lease_count - 1
+            return
+
+        _local_preview_ingestor_leases.pop(io_id, None)
+        ingestor = task_manager.get_ingestor(io_id)
+        if ingestor is None:
+            return
+
+        try:
+            ingestor.set_keep_alive_without_tasks(False)
+        except Exception as e:
+            flask_logger.debug(
+                "Failed to reset keep_alive_without_tasks for local preview %s: %s",
+                io_id,
+                e,
+                exc_info=True,
+            )
+
+        if not _device_has_active_tasks(io_id):
+            task_manager.release_device_ingestor(io_id)
 
 
 def _get_latest_persisted_debug_snapshot(io_id: str) -> Optional[Dict[str, Any]]:
@@ -797,7 +887,7 @@ def _ensure_network_camera_ingestor(
     wait_timeout_s: float = 0.0,
 ) -> Optional[np.ndarray]:
     """Warm a background ingestor for a network camera and optionally wait for a frame."""
-    if device_info is None or device_info.get("source") != "network":
+    if device_info is None or _is_local_camera_device(device_info):
         return None
 
     try:
@@ -809,15 +899,7 @@ def _ensure_network_camera_ingestor(
     if wait_timeout_s <= 0:
         return None
 
-    import time
-    deadline = time.monotonic() + wait_timeout_s
-    while time.monotonic() < deadline:
-        latest_frame = task_manager.get_latest_frame_for_device(io_id)
-        if latest_frame is not None and latest_frame.size > 0 and latest_frame.mean() >= 1:
-            return latest_frame
-        time.sleep(0.05)
-
-    return None
+    return _wait_for_ingestor_frame(io_id, wait_timeout_s, minimum_mean=1.0)
 
 
 @app.route('/api/device/<io_id>/preview', methods=['GET'])
@@ -825,8 +907,8 @@ def get_device_preview(io_id):
     """Get a preview image from a camera device.
     
     Only works for camera devices. Returns a placeholder or error for other devices.
-    Tries to use frames from active video ingestors first (faster), falls back to
-    opening camera directly if no ingestor is active.
+    Tries to use frames from active video ingestors first and, for local cameras,
+    briefly warms a shared ingestor instead of opening the device independently.
     """
     frame_data = _get_device_preview_frame_bytes(io_id)
     if frame_data is None:
@@ -849,12 +931,19 @@ def _get_device_preview_frame_bytes(io_id: str) -> Optional[bytes]:
         if 'camera' not in category:
             return None
 
+        is_local_camera = _is_local_camera_device(device_info)
+        local_preview_warmup_s = max(
+            0.0,
+            float(os.getenv("VIDEOMEMORY_LOCAL_PREVIEW_WARMUP_S", "1.0")),
+        )
+
         # Try active ingestor frame first for lower latency and less camera churn.
         latest_frame = task_manager.get_latest_frame_for_device(io_id)
         if (
-            (latest_frame is None or latest_frame.size == 0 or latest_frame.mean() < 1)
-            and device_info.get("source") == "network"
-        ):
+            latest_frame is None or latest_frame.size == 0 or (
+                not is_local_camera and latest_frame.mean() < 1
+            )
+        ) and not is_local_camera:
             latest_frame = _ensure_network_camera_ingestor(
                 io_id,
                 device_info,
@@ -863,9 +952,21 @@ def _get_device_preview_frame_bytes(io_id: str) -> Optional[bytes]:
                     float(os.getenv("VIDEOMEMORY_NETWORK_PREVIEW_WARMUP_S", "0.75")),
                 ),
             )
+        elif latest_frame is None or latest_frame.size == 0:
+            preview_ingestor = _acquire_local_preview_ingestor(io_id, device_info) if is_local_camera else None
+            try:
+                if preview_ingestor is not None:
+                    latest_frame = _wait_for_ingestor_frame(
+                        io_id,
+                        local_preview_warmup_s,
+                        minimum_mean=None,
+                    )
+            finally:
+                if preview_ingestor is not None:
+                    _release_local_preview_ingestor(io_id)
+
         if latest_frame is not None and latest_frame.size > 0:
-            frame_mean = latest_frame.mean()
-            if frame_mean >= 1:
+            if is_local_camera or latest_frame.mean() >= 1:
                 _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 return buffer.tobytes()
 
@@ -873,11 +974,7 @@ def _get_device_preview_frame_bytes(io_id: str) -> Optional[bytes]:
         if pull_url:
             return _get_network_preview_frame(pull_url)
 
-        try:
-            camera_index = int(io_id)
-        except (ValueError, TypeError):
-            return None
-        return _get_camera_preview_frame(camera_index)
+        return None
     except Exception as e:
         flask_logger.debug(f"Error building preview for {io_id}: {e}")
         return None
@@ -894,6 +991,7 @@ def get_device_preview_stream(io_id):
     max_grabs = max(1, int(os.getenv("VIDEOMEMORY_PREVIEW_MAX_GRABS", "8")))
     drain_ms = max(0.0, float(os.getenv("VIDEOMEMORY_PREVIEW_DRAIN_MS", "80")))
     warmup_seconds = max(0.0, float(os.getenv("VIDEOMEMORY_NETWORK_PREVIEW_WARMUP_S", "0.75")))
+    local_warmup_seconds = max(0.0, float(os.getenv("VIDEOMEMORY_LOCAL_PREVIEW_WARMUP_S", "1.0")))
 
     def _open_preview_capture(source):
         cap = cv2.VideoCapture()
@@ -965,19 +1063,28 @@ def get_device_preview_stream(io_id):
         cap = None
         cap_source = None
         warmup_deadline = None
+        local_preview_acquired = False
+        local_camera = False
         try:
             initial_device_info = io_manager.get_stream_info(io_id)
-            if initial_device_info is not None and initial_device_info.get("source") == "network":
+            if initial_device_info is not None and not _is_local_camera_device(initial_device_info):
                 _ensure_network_camera_ingestor(io_id, initial_device_info, wait_timeout_s=0.0)
                 if warmup_seconds > 0:
                     warmup_deadline = time.monotonic() + warmup_seconds
+            elif initial_device_info is not None and 'camera' in (initial_device_info.get('category', '').lower()):
+                local_camera = True
+                local_preview_acquired = _acquire_local_preview_ingestor(io_id, initial_device_info) is not None
+                if local_preview_acquired and local_warmup_seconds > 0:
+                    warmup_deadline = time.monotonic() + local_warmup_seconds
 
             while True:
                 loop_started = time.monotonic()
                 frame_data = None
 
                 latest_frame = task_manager.get_latest_frame_for_device(io_id)
-                if latest_frame is not None and latest_frame.size > 0 and latest_frame.mean() >= 1:
+                if latest_frame is not None and latest_frame.size > 0 and (
+                    local_camera or latest_frame.mean() >= 1
+                ):
                     if cap is not None:
                         cap.release()
                         cap = None
@@ -987,12 +1094,16 @@ def get_device_preview_stream(io_id):
                 else:
                     device_info = io_manager.get_stream_info(io_id)
                     if device_info is not None and 'camera' in (device_info.get('category', '').lower()):
-                        if (
-                            device_info.get("source") == "network"
-                            and warmup_deadline is not None
-                            and time.monotonic() < warmup_deadline
-                        ):
+                        local_camera = _is_local_camera_device(device_info)
+                        if warmup_deadline is not None and time.monotonic() < warmup_deadline:
                             time.sleep(min(0.05, frame_delay_s))
+                            continue
+                        if local_camera:
+                            if not local_preview_acquired:
+                                local_preview_acquired = _acquire_local_preview_ingestor(io_id, device_info) is not None
+                                if local_preview_acquired and local_warmup_seconds > 0:
+                                    warmup_deadline = time.monotonic() + local_warmup_seconds
+                            time.sleep(frame_delay_s)
                             continue
                         pull_url = device_info.get('pull_url') or device_info.get('url')
                         if pull_url:
@@ -1044,6 +1155,8 @@ def get_device_preview_stream(io_id):
         finally:
             if cap is not None:
                 cap.release()
+            if local_preview_acquired:
+                _release_local_preview_ingestor(io_id)
 
     return Response(
         generate(),
@@ -1389,10 +1502,12 @@ def _build_usage_payload(range_key: Optional[str]) -> dict[str, Any]:
     start_ts = now_ts - _USAGE_RANGE_SECONDS[normalized_range]
     events = db.list_model_usage_events(start_at=start_ts, end_at=now_ts, newest_first=False)
     recent_events = db.list_model_usage_events(start_at=start_ts, end_at=now_ts, newest_first=True, limit=200)
+    now_dt = datetime.fromtimestamp(now_ts).astimezone()
     return build_usage_dashboard_payload(
         events,
         range_key=normalized_range,
         recent_events=recent_events,
+        now=now_dt,
     )
 
 
