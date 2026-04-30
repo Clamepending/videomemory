@@ -2,13 +2,10 @@
 
 import asyncio
 import logging
-import base64
-import json
 import os
 import platform
 import re
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Dict, Optional, Any, List, Tuple
@@ -16,13 +13,24 @@ from collections import deque
 import cv2
 import httpx
 import numpy as np
-from pydantic import BaseModel, Field
-from pydantic.config import ConfigDict
 from dotenv import load_dotenv
 
 from ..task_types import NoteEntry, Task
 from ..model_providers import BaseModelProvider, get_VLM_provider
 from ..io_manager.url_utils import is_snapshot_url
+from .prompting import (
+    TaskUpdate,
+    VideoIngestorOutput,
+    VLM_INGESTOR_PROMPT_INSTRUCTIONS,
+    build_video_ingestor_prompt,
+)
+from . import background_loop as _background_loop
+from .evidence import build_evidence_clip_frames, sample_evidence_frame
+from .frame_utils import (
+    frame_to_base64,
+    frame_to_jpeg_bytes,
+    mean_absolute_frame_difference,
+)
 
 # Load environment variables
 load_dotenv()
@@ -31,156 +39,23 @@ load_dotenv()
 logger = logging.getLogger('VideoStreamIngestor')
 
 _flask_background_loop: Optional[asyncio.AbstractEventLoop] = None
-_background_loop_thread: Optional[threading.Thread] = None
-_background_loop_lock = threading.Lock()
 
 
-def _run_background_loop(loop: asyncio.AbstractEventLoop) -> None:
-    """Run a persistent event loop in a daemon thread."""
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
+_run_background_loop = _background_loop._run_background_loop
 
 
 def get_background_loop() -> Optional[asyncio.AbstractEventLoop]:
-    """Return a running background loop, creating a fallback one if needed."""
-    global _flask_background_loop, _background_loop_thread
+    """Return a running background loop, creating a fallback one if needed.
 
-    loop = _flask_background_loop
-    if loop is not None and not loop.is_closed() and loop.is_running():
-        return loop
-
-    with _background_loop_lock:
-        loop = _flask_background_loop
-        if loop is not None and not loop.is_closed() and loop.is_running():
-            return loop
-
-        loop = asyncio.new_event_loop()
-        thread = threading.Thread(
-            target=_run_background_loop,
-            args=(loop,),
-            daemon=True,
-            name="VideoMemoryBackgroundLoop",
-        )
-        thread.start()
-
-        deadline = time.monotonic() + 0.5
-        while not loop.is_running() and time.monotonic() < deadline:
-            time.sleep(0.01)
-
-        if not loop.is_running():
-            logger.error("Failed to start fallback background event loop")
-            try:
-                loop.close()
-            except Exception:
-                pass
-            return None
-
-        _flask_background_loop = loop
-        _background_loop_thread = thread
-        logger.info("Started fallback background event loop for VideoStreamIngestor")
-        return loop
-
-# Pydantic models for structured output
-class TaskUpdate(BaseModel):
-    """Model for task update output."""
-    model_config = ConfigDict(extra="forbid")
-    task_number: int = Field(..., description="The task number")
-    task_note: str = Field(..., description="Updated description/note for the task")
-    task_done: bool = Field(..., description="Whether the task is completed")
-
-
-class VideoIngestorOutput(BaseModel):
-    """Model for the complete output structure."""
-    model_config = ConfigDict(extra="forbid")
-    task_updates: List[TaskUpdate] = Field(default_factory=list, description="List of task updates")
-
-
-VLM_INGESTOR_PROMPT_INSTRUCTIONS = """<instructions>
-
-You are a video ingestor. Output one JSON object containing task_updates.
-
-When task_newest_note is "None", you MUST ALWAYS output at least one task_update. Describe what you see in the image relevant to the task. NEVER return {"task_updates": []} when the newest note is "None".
-
-
-CRITICAL: Any change in count, quantity, or state MUST be reported, including:
-- Changes from a non-zero count to zero
-- Changes from zero to a non-zero count
-- Any numerical change in counts or quantities
-- Changes in status, positions, or states
-
-Include updates for:
-- New observations related to the task
-- Changes in status, counts, positions, or states (including transitions to/from zero)
-- Progress that advances task tracking
-
-Output format (JSON only, nothing else):
-{"task_updates": [{task_number: <number>, task_note: <description>, task_done: <true/false>}, ...]}
-
-Examples:
-First observation (newest_note is None): {"task_updates": [{task_number: 0, task_note: "No people visible in frame.", task_done: false}]}
-
-When you observe a clap for "Count claps" task: {"task_updates": [{task_number: 0, task_note: "Clap detected. Total count: 1 clap.", task_done: false}]}
-
-When you observe 4 more claps (building on previous count): {"task_updates": [{task_number: 0, task_note: "4 more claps detected. Total count: 5 claps.", task_done: false}]}
-
-When you observe people for "Keep track of number of people": {"task_updates": [{task_number: 1, task_note: "Currently 2 people visible in frame.", task_done: false}]}
-
-When only 1 person is visible: {"task_updates": [{task_number: 1, task_note: "1 person is visible in frame.", task_done: false}]}
-
-When the person leaves the frame: {"task_updates": [{task_number: 1, task_note: "Person left frame. Now 0 people visible.", task_done: false}]}
-
-When tracking counts and the count changes to zero (e.g., most recent note says "1 item" but image shows 0): {"task_updates": [{task_number: 0, task_note: "No items visible. Count is now 0.", task_done: false}]}
-
-When tracking counts and the count changes from zero to non-zero (e.g., most recent note says "0 items" but image shows 2): {"task_updates": [{task_number: 0, task_note: "2 items are now visible.", task_done: false}]}
-
-When task_newest_note is "None" (first observation): {"task_updates": [{task_number: 0, task_note: "Initial observation: 1 person visible in frame.", task_done: false}]}
-
-When there is no new information and the task notes perfectly match the image (and newest note is NOT "None"): {"task_updates": []}
-
-For multiple task updates: {"task_updates": [{task_number: 0, task_note: "Clap count: 5", task_done: false}, {task_number: 1, task_note: "2 people visible", task_done: false}]}
-
-When task is complete: {"task_updates": [{task_number: 0, task_note: "Task completed - 10 claps counted", task_done: true}]}
-</instructions>"""
-
-
-def build_video_ingestor_prompt(
-    tasks: List[Task],
-    *,
-    context_label: Optional[Any] = None,
-    include_done: bool = False,
-) -> str:
-    """Build the canonical VLM prompt for a set of tasks.
-
-    Args:
-        tasks: Task objects to include in the prompt.
-        context_label: Optional label used in prompt-size warning logs.
-        include_done: When true, include completed tasks as a fallback context.
+    Keep this wrapper so callers can still set
+    ``video_stream_ingestor._flask_background_loop`` directly.
     """
-    selected_tasks = list(tasks) if include_done else [task for task in tasks if not task.done]
-    if not selected_tasks:
-        return ""
 
-    tasks_lines = ["<tasks>"]
-    for task in selected_tasks:
-        tasks_lines.append("<task>")
-        tasks_lines.append(f"<task_number>{task.task_number}</task_number>")
-        tasks_lines.append(f"<task_desc>{task.task_desc}</task_desc>")
-
-        newest_note = task.task_note[-1] if task.task_note else NoteEntry(content="None", timestamp=time.time())
-        note_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(newest_note.timestamp))
-        tasks_lines.append(
-            f"<task_newest_note timestamp=\"{note_time}\">{newest_note.content}</task_newest_note>"
-        )
-        tasks_lines.append("</task>")
-    tasks_lines.append("</tasks>")
-
-    prompt_so_far = "\n".join(tasks_lines)
-    prompt_size_chars = len(prompt_so_far)
-    if prompt_size_chars > 10000:
-        context_suffix = f" (camera={context_label})" if context_label is not None else ""
-        logger.warning("Prompt is getting large: %s characters%s", prompt_size_chars, context_suffix)
-
-    return prompt_so_far + "\n\n" + VLM_INGESTOR_PROMPT_INSTRUCTIONS
+    global _flask_background_loop
+    loop = _background_loop.get_background_loop(_flask_background_loop)
+    if loop is not None:
+        _flask_background_loop = loop
+    return loop
 
 class VideoStreamIngestor:
     """Manages tasks for a video input stream using event-driven architecture."""
@@ -350,7 +225,7 @@ class VideoStreamIngestor:
  
     async def start(self):
         """Start the video stream ingestor and all processing loops."""
-        logger.debug(f"[DEBUG] VideoStreamIngestor.start: Called for camera_index={self.camera_index}")
+        logger.debug("VideoStreamIngestor.start called for camera_index=%s", self.camera_index)
         
         if self._running:
             logger.info(f"Already running for camera index={self.camera_index}")
@@ -723,57 +598,38 @@ class VideoStreamIngestor:
         Uses mean absolute pixel difference on the 0-255 pixel scale.
         Returns True if the frame should be skipped.
         """
-        import numpy as np
         if self._last_processed_frame is None:
             return False
         if frame.shape != self._last_processed_frame.shape:
             return False
-        diff = np.abs(frame.astype(np.int16) - self._last_processed_frame.astype(np.int16)).mean()
+        diff = mean_absolute_frame_difference(frame, self._last_processed_frame)
         return diff < self._frame_diff_threshold
     
     def _frame_to_base64(self, frame: Any) -> str:
         """Convert OpenCV frame to base64 encoded image."""
-        try:
-            frame_bytes = self._frame_to_jpeg_bytes(frame)
-            if not frame_bytes:
-                return ""
-            return base64.b64encode(frame_bytes).decode('utf-8')
-        except Exception as e:
-            logger.error(f"Error encoding frame: {e}")
-            return ""
+        return frame_to_base64(frame)
 
     def _frame_to_jpeg_bytes(self, frame: Any, quality: int = 85) -> bytes:
         """Convert OpenCV frame to JPEG bytes."""
-        if frame is None:
-            return b""
-        success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
-        if not success:
-            return b""
-        return buffer.tobytes()
+        return frame_to_jpeg_bytes(frame, quality=quality)
 
     def _record_evidence_frame(self, frame: Any) -> None:
         """Sample frames into a small rolling buffer for note evidence clips."""
-        if frame is None or getattr(frame, "size", 0) == 0:
-            return
-        now = time.time()
-        if self._evidence_frame_buffer and (now - self._last_evidence_buffer_sample_at) < self._evidence_clip_sample_interval_s:
-            return
-        self._evidence_frame_buffer.append((now, frame.copy()))
-        self._last_evidence_buffer_sample_at = now
+        self._last_evidence_buffer_sample_at = sample_evidence_frame(
+            self._evidence_frame_buffer,
+            frame,
+            last_sample_at=self._last_evidence_buffer_sample_at,
+            sample_interval_s=self._evidence_clip_sample_interval_s,
+        )
 
     def _build_evidence_clip_frames(self, trigger_frame: Any) -> List[Any]:
         """Build a short preroll evidence clip ending on the trigger frame."""
-        if trigger_frame is None or getattr(trigger_frame, "size", 0) == 0:
-            return []
-
-        clip_frames = [frame.copy() for _, frame in self._evidence_frame_buffer if getattr(frame, "size", 0) > 0]
-        clip_frames.append(trigger_frame.copy())
-
-        hold_frames = int(round(self._evidence_clip_fps * self._evidence_clip_end_hold_seconds))
-        for _ in range(max(0, hold_frames)):
-            clip_frames.append(trigger_frame.copy())
-
-        return clip_frames
+        return build_evidence_clip_frames(
+            self._evidence_frame_buffer,
+            trigger_frame,
+            fps=self._evidence_clip_fps,
+            end_hold_seconds=self._evidence_clip_end_hold_seconds,
+        )
     
     def _build_prompt(self) -> str:
         """Build the prompt for the LLM based on tasks and history."""
@@ -812,66 +668,6 @@ class VideoStreamIngestor:
             self.camera_index,
         )
         self._schedule_stop_if_idle()
-    
-    async def _run_ml_inference(self, frame: Any, prompt: str) -> Optional[Dict[str, Any]]:
-        """Run multimodal LLM inference on a frame with the given prompt."""
-        if not self._model_provider or not self._tasks_list:
-            return None
-        
-        try:
-            image_base64 = self._frame_to_base64(frame)
-            if not image_base64:
-                return None
-            
-            # Wrap synchronous API call in asyncio.to_thread to prevent blocking
-            # This avoids connection pool issues when multiple frames are processed concurrently
-            
-            def _sync_generate_content():
-                """Synchronous wrapper for generate_content to run in thread pool."""
-                return self._model_provider._sync_generate_content(
-                    image_base64=image_base64,
-                    prompt=prompt,
-                    response_model=VideoIngestorOutput,
-                    usage_context={"source": "task_ingestor"},
-                )
-            
-            # Time the API call
-            api_call_start = time.time()
-            # Run the blocking call in a thread pool to avoid blocking the event loop
-            response: VideoIngestorOutput = await asyncio.to_thread(_sync_generate_content)
-            api_call_time = time.time() - api_call_start
-            n_updates = len(response.task_updates)
-            logger.debug(f"API call [camera={self.camera_index}]: generate_content took {api_call_time:.3f}s")
-            if n_updates > 0:
-                logger.info(
-                    "LLM returned %d task_update(s) [camera=%s]: %s",
-                    n_updates,
-                    self.camera_index,
-                    [(u.task_number, u.task_note[:50] + "..." if len(u.task_note) > 50 else u.task_note) for u in response.task_updates],
-                )
-            else:
-                logger.debug(
-                    "LLM returned empty task_updates [camera=%s] (model saw no change from newest notes)",
-                    self.camera_index,
-                )
-
-            # Providers return a validated Pydantic model instance.
-            return response.model_dump()
-        except Exception as e:
-            # Handle network errors gracefully - these can happen due to connection issues
-            # but shouldn't crash the entire processing loop
-            import httpx
-            if isinstance(e, (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
-                logger.warning(
-                    "LLM inference network error (will skip this frame) [camera=%s]: %s: %s. "
-                    "If using Docker, ensure VLM base URL is reachable (e.g. host IP, not localhost).",
-                    self.camera_index,
-                    type(e).__name__,
-                    e,
-                )
-            else:
-                logger.error(f"LLM inference error [camera={self.camera_index}]: {e}", exc_info=True)
-            return None
     
     def _process_ml_results(self, ml_results: Dict[str, Any]):
         """Process ML inference results: update task notes and queue actions."""
@@ -947,7 +743,11 @@ class VideoStreamIngestor:
         Args:
             task: Task object (shared by reference with task_manager)
         """
-        logger.debug(f"[DEBUG] VideoStreamIngestor.add_task: Called for task '{task.task_desc}', camera_index={self.camera_index}")
+        logger.debug(
+            "VideoStreamIngestor.add_task called for task %r, camera_index=%s",
+            task.task_desc,
+            self.camera_index,
+        )
         
         # Set task number if not already set
         task.task_number = len(self._tasks_list)
@@ -1031,10 +831,7 @@ class VideoStreamIngestor:
         
         self._loop = None
 
-        # 5. Release camera if still open
-        if self._camera:
-            self._camera.release()
-            self._camera = None
+        self._release_camera()
         
         logger.info(f"Stopped ingestor for camera index={self.camera_index}")
     
@@ -1087,13 +884,13 @@ class VideoStreamIngestor:
 
         if self._running:
             logger.debug(
-                "[DEBUG] VideoStreamIngestor.ensure_started: Ingestor already running for camera_index=%s",
+                "VideoStreamIngestor.ensure_started: ingestor already running for camera_index=%s",
                 self.camera_index,
             )
             return
 
         logger.debug(
-            "[DEBUG] VideoStreamIngestor.ensure_started: scheduling start() for camera_index=%s",
+            "VideoStreamIngestor.ensure_started: scheduling start() for camera_index=%s",
             self.camera_index,
         )
 
@@ -1102,7 +899,7 @@ class VideoStreamIngestor:
                 await self.start()
             except Exception as e:
                 logger.error(
-                    "[ERROR] VideoStreamIngestor.start_with_error_handling: Error in start(): %s",
+                    "VideoStreamIngestor.start_with_error_handling: error in start(): %s",
                     e,
                     exc_info=True,
                 )
@@ -1116,7 +913,7 @@ class VideoStreamIngestor:
             if bg_loop and bg_loop.is_running():
                 asyncio.run_coroutine_threadsafe(start_with_error_handling(), bg_loop)
                 logger.debug(
-                    "[DEBUG] VideoStreamIngestor.ensure_started: Scheduled start() on Flask background loop"
+                    "VideoStreamIngestor.ensure_started: scheduled start() on background loop"
                 )
             else:
                 logger.warning("No event loop available. Could not start ingestor automatically.")
