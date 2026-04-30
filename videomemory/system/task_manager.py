@@ -400,7 +400,12 @@ class TaskManager:
         self._ingestors[io_id] = ingestor
         return ingestor
 
-    def ensure_device_ingestor(self, io_id: str) -> Optional[VideoStreamIngestor]:
+    def ensure_device_ingestor(
+        self,
+        io_id: str,
+        *,
+        keep_alive_without_tasks: Optional[bool] = None,
+    ) -> Optional[VideoStreamIngestor]:
         """Create and start an ingestor for a camera device if needed."""
         if self._io_manager is None:
             return None
@@ -415,7 +420,12 @@ class TaskManager:
         if ingestor is None:
             ingestor = self._create_ingestor_for_stream(io_id, stream_info)
 
-        ingestor.set_keep_alive_without_tasks(self._should_keep_network_camera_warm(io_id))
+        desired_keep_alive = (
+            self._should_keep_network_camera_warm(io_id)
+            if keep_alive_without_tasks is None
+            else bool(keep_alive_without_tasks)
+        )
+        ingestor.set_keep_alive_without_tasks(desired_keep_alive)
         ingestor.ensure_started()
         return ingestor
 

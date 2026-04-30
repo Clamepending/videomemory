@@ -472,6 +472,36 @@ sync_openclaw_webhook_settings() {
   fi
 }
 
+copy_if_exists() {
+  src="$1"
+  dest="$2"
+  [ -f "$src" ] || fail "Missing file: $src"
+  mkdir -p "$(dirname "$dest")"
+  cp "$src" "$dest"
+}
+
+copy_executable_if_exists() {
+  src="$1"
+  dest="$2"
+  copy_if_exists "$src" "$dest"
+  chmod 755 "$dest"
+}
+
+install_openclaw_files() {
+  copy_if_exists \
+    "$REPO_DIR/docs/openclaw-videomemory-task-helper.mjs" \
+    "$OPENCLAW_HOME/hooks/bin/videomemory-task-helper.mjs"
+  copy_if_exists \
+    "$REPO_DIR/deploy/openclaw-real-home/hooks/transforms/videomemory-alert.mjs" \
+    "$OPENCLAW_HOME/hooks/transforms/videomemory-alert.mjs"
+  copy_if_exists \
+    "$REPO_DIR/docs/openclaw-skill.md" \
+    "$OPENCLAW_HOME/workspace/skills/videomemory/SKILL.md"
+  copy_executable_if_exists \
+    "$REPO_DIR/scripts/openclaw_send_current_camera_image.sh" \
+    "$OPENCLAW_HOME/workspace/bin/openclaw_send_current_camera_image.sh"
+}
+
 pick_user_facing_ui_url() {
   if [ -n "$TAILSCALE_BIN" ]; then
     tailscale_ip="$("$TAILSCALE_BIN" ip -4 2>/dev/null | sed -n '1p' || true)"
@@ -512,6 +542,7 @@ prepare_runtime
 stop_local_videomemory
 start_local_videomemory
 wait_for_health
+install_openclaw_files
 sync_model_keys
 sync_openclaw_webhook_settings
 
@@ -527,5 +558,7 @@ if [ -n "$REPO_COMMIT" ]; then
   log "Running repo commit: $REPO_COMMIT"
 fi
 log "User-facing VideoMemory UI: $USER_FACING_UI_URL"
+log "OpenClaw camera image helper: $OPENCLAW_HOME/workspace/bin/openclaw_send_current_camera_image.sh"
 log "VideoMemory log: $LOG_FILE"
 log "Reply to the user with this VideoMemory UI link: $USER_FACING_UI_URL"
+log "If OpenClaw was already chatting before this relaunch, send /new once so the next session loads the refreshed VideoMemory image helper guidance."

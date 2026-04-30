@@ -10,13 +10,14 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 # Add parent directory to path so we can import videomemory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from flask import Flask, render_template, request, jsonify, Response, redirect, send_file
+from flask import Flask, render_template, request, jsonify, Response, redirect, send_file, url_for
 from dotenv import load_dotenv
 import videomemory.system
 import videomemory.tools
@@ -187,6 +188,12 @@ videomemory.tools.tasks.set_managers(io_manager, task_manager)
 # Per-device preview stream FPS state (used by Devices page UI).
 _preview_fps_lock = threading.Lock()
 _preview_fps_state = {}
+_direct_camera_capture_locks_guard = threading.Lock()
+_direct_camera_capture_locks: Dict[str, threading.Lock] = {}
+_capture_cleanup_lock = threading.Lock()
+_last_capture_cleanup_at = 0.0
+_local_preview_ingestor_lock = threading.Lock()
+_local_preview_ingestor_leases: Dict[str, int] = {}
 
 
 def _record_preview_frame(io_id: str) -> None:
@@ -224,6 +231,179 @@ def _get_preview_fps(io_id: str) -> float:
         if last_age > 3.0:
             return 0.0
         return float(state.get("fps", 0.0))
+
+
+def _get_direct_camera_capture_lock(io_id: str) -> threading.Lock:
+    """Return a per-device lock for ad hoc local-camera capture requests.
+
+    Local USB cameras often reject overlapping opens from parallel Flask
+    requests. Serializing direct capture keeps `/api/device/.../preview` and
+    `/api/caption_frame` from racing each other when no ingestor is already
+    holding fresh frames for reuse.
+    """
+    device_key = str(io_id or "")
+    with _direct_camera_capture_locks_guard:
+        lock = _direct_camera_capture_locks.get(device_key)
+        if lock is None:
+            lock = threading.Lock()
+            _direct_camera_capture_locks[device_key] = lock
+        return lock
+
+
+def _device_has_active_tasks(io_id: str) -> bool:
+    """Return whether a device currently has any active tasks."""
+    try:
+        return any(task.get("status") == "active" for task in task_manager.list_tasks(io_id))
+    except Exception as e:
+        flask_logger.debug("Failed to inspect active tasks for %s: %s", io_id, e, exc_info=True)
+        return False
+
+
+def _is_local_camera_device(device_info: Optional[Dict[str, Any]]) -> bool:
+    """Return whether a device entry represents a directly-opened local camera."""
+    if not device_info:
+        return False
+    if device_info.get("source") == "network":
+        return False
+    return not bool(device_info.get("pull_url") or device_info.get("url"))
+
+
+def _wait_for_ingestor_frame(
+    io_id: str,
+    wait_timeout_s: float,
+    *,
+    minimum_mean: Optional[float] = 1.0,
+) -> Optional[np.ndarray]:
+    """Poll a shared ingestor briefly for its latest frame."""
+    deadline = time.monotonic() + max(0.0, wait_timeout_s)
+    while True:
+        latest_frame = task_manager.get_latest_frame_for_device(io_id)
+        if latest_frame is not None and latest_frame.size > 0:
+            if minimum_mean is None or latest_frame.mean() >= minimum_mean:
+                return latest_frame
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
+
+
+def _acquire_local_preview_ingestor(
+    io_id: str,
+    device_info: Optional[Dict[str, Any]],
+) -> Optional[Any]:
+    """Acquire a shared ingestor lease for a local camera preview/capture."""
+    if not _is_local_camera_device(device_info):
+        return None
+
+    with _local_preview_ingestor_lock:
+        _local_preview_ingestor_leases[io_id] = _local_preview_ingestor_leases.get(io_id, 0) + 1
+        ingestor = task_manager.ensure_device_ingestor(io_id, keep_alive_without_tasks=True)
+        if ingestor is not None:
+            return ingestor
+
+        remaining_leases = _local_preview_ingestor_leases.get(io_id, 0) - 1
+        if remaining_leases > 0:
+            _local_preview_ingestor_leases[io_id] = remaining_leases
+        else:
+            _local_preview_ingestor_leases.pop(io_id, None)
+        return None
+
+
+def _release_local_preview_ingestor(io_id: str) -> None:
+    """Release a shared ingestor lease held by a local camera preview/capture."""
+    with _local_preview_ingestor_lock:
+        lease_count = _local_preview_ingestor_leases.get(io_id, 0)
+        if lease_count <= 0:
+            return
+        if lease_count > 1:
+            _local_preview_ingestor_leases[io_id] = lease_count - 1
+            return
+
+        _local_preview_ingestor_leases.pop(io_id, None)
+        ingestor = task_manager.get_ingestor(io_id)
+        if ingestor is None:
+            return
+
+        try:
+            ingestor.set_keep_alive_without_tasks(False)
+        except Exception as e:
+            flask_logger.debug(
+                "Failed to reset keep_alive_without_tasks for local preview %s: %s",
+                io_id,
+                e,
+                exc_info=True,
+            )
+
+        if not _device_has_active_tasks(io_id):
+            task_manager.release_device_ingestor(io_id)
+
+
+def _get_saved_capture_dir() -> Path:
+    capture_dir = data_dir / "captures"
+    capture_dir.mkdir(parents=True, exist_ok=True)
+    return capture_dir
+
+
+def _is_valid_capture_id(capture_id: str) -> bool:
+    token = str(capture_id or "").strip()
+    return bool(token) and all(ch.isalnum() or ch in {"-", "_"} for ch in token)
+
+
+def _maybe_cleanup_saved_captures() -> None:
+    """Best-effort pruning of old saved captures to avoid unbounded growth."""
+    global _last_capture_cleanup_at
+
+    now = time.time()
+    with _capture_cleanup_lock:
+        if now - _last_capture_cleanup_at < 60:
+            return
+        _last_capture_cleanup_at = now
+
+    capture_dir = _get_saved_capture_dir()
+    try:
+        retention_s = max(0, int(os.getenv("VIDEOMEMORY_CAPTURE_RETENTION_SECONDS", "86400")))
+    except ValueError:
+        retention_s = 86400
+    try:
+        max_files = max(1, int(os.getenv("VIDEOMEMORY_CAPTURE_MAX_FILES", "200")))
+    except ValueError:
+        max_files = 200
+
+    capture_files = sorted(
+        capture_dir.glob("*.jpg"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    cutoff = now - retention_s if retention_s > 0 else None
+    for index, path in enumerate(capture_files):
+        should_delete = index >= max_files
+        if cutoff is not None:
+            try:
+                should_delete = should_delete or path.stat().st_mtime < cutoff
+            except FileNotFoundError:
+                continue
+        if not should_delete:
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            flask_logger.debug("Failed pruning saved capture %s", path, exc_info=True)
+
+
+def _save_device_capture(io_id: str, frame_bytes: bytes, *, source: str) -> Dict[str, Any]:
+    """Persist one fresh capture so chat integrations can fetch/send it later."""
+    _maybe_cleanup_saved_captures()
+    capture_dir = _get_saved_capture_dir()
+    safe_io_id = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(io_id or "device")).strip("-_")
+    safe_io_id = safe_io_id or "device"
+    capture_id = f"{safe_io_id}-{int(time.time() * 1000)}-{os.urandom(4).hex()}"
+    file_path = capture_dir / f"{capture_id}.jpg"
+    file_path.write_bytes(frame_bytes)
+    return {
+        "capture_id": capture_id,
+        "file_path": file_path,
+        "source": source,
+        "bytes": len(frame_bytes),
+    }
 
 
 def _get_latest_persisted_debug_snapshot(io_id: str) -> Optional[Dict[str, Any]]:
@@ -310,6 +490,11 @@ def settings_page():
 def usage_page():
     """Render the usage page."""
     return render_template('usage.html')
+
+@app.route('/storage')
+def storage_page():
+    """Render the storage page."""
+    return render_template('storage.html')
 
 @app.route('/documentation')
 def documentation_page():
@@ -434,6 +619,8 @@ def update_task(task_id):
     
     Body (JSON):
         new_description (str, required): The new description for the task.
+        save_note_frames (bool, optional): Optional per-task override for saving note frames.
+        save_note_videos (bool, optional): Optional per-task override for saving note videos.
     """
     try:
         data = request.json
@@ -441,10 +628,17 @@ def update_task(task_id):
             return jsonify({'status': 'error', 'error': 'Request body must be JSON'}), 400
         
         new_description = data.get('new_description', '').strip()
+        save_note_frames = _coerce_optional_boolean_request_value(data.get('save_note_frames'))
+        save_note_videos = _coerce_optional_boolean_request_value(data.get('save_note_videos'))
         if not new_description:
             return jsonify({'status': 'error', 'error': 'new_description is required'}), 400
         
-        result = task_manager.edit_task(task_id, new_description)
+        result = task_manager.edit_task(
+            task_id,
+            new_description,
+            save_note_frames=save_note_frames,
+            save_note_videos=save_note_videos,
+        )
         
         if result.get('status') == 'error':
             return jsonify(result), 404 if 'not found' in result.get('message', '').lower() else 400
@@ -797,7 +991,7 @@ def _ensure_network_camera_ingestor(
     wait_timeout_s: float = 0.0,
 ) -> Optional[np.ndarray]:
     """Warm a background ingestor for a network camera and optionally wait for a frame."""
-    if device_info is None or device_info.get("source") != "network":
+    if device_info is None or _is_local_camera_device(device_info):
         return None
 
     try:
@@ -809,15 +1003,7 @@ def _ensure_network_camera_ingestor(
     if wait_timeout_s <= 0:
         return None
 
-    import time
-    deadline = time.monotonic() + wait_timeout_s
-    while time.monotonic() < deadline:
-        latest_frame = task_manager.get_latest_frame_for_device(io_id)
-        if latest_frame is not None and latest_frame.size > 0 and latest_frame.mean() >= 1:
-            return latest_frame
-        time.sleep(0.05)
-
-    return None
+    return _wait_for_ingestor_frame(io_id, wait_timeout_s, minimum_mean=1.0)
 
 
 @app.route('/api/device/<io_id>/preview', methods=['GET'])
@@ -825,8 +1011,8 @@ def get_device_preview(io_id):
     """Get a preview image from a camera device.
     
     Only works for camera devices. Returns a placeholder or error for other devices.
-    Tries to use frames from active video ingestors first (faster), falls back to
-    opening camera directly if no ingestor is active.
+    Tries to use frames from active video ingestors first and, for local cameras,
+    briefly warms a shared ingestor instead of opening the device independently.
     """
     frame_data = _get_device_preview_frame_bytes(io_id)
     if frame_data is None:
@@ -849,12 +1035,19 @@ def _get_device_preview_frame_bytes(io_id: str) -> Optional[bytes]:
         if 'camera' not in category:
             return None
 
+        is_local_camera = _is_local_camera_device(device_info)
+        local_preview_warmup_s = max(
+            0.0,
+            float(os.getenv("VIDEOMEMORY_LOCAL_PREVIEW_WARMUP_S", "1.0")),
+        )
+
         # Try active ingestor frame first for lower latency and less camera churn.
         latest_frame = task_manager.get_latest_frame_for_device(io_id)
         if (
-            (latest_frame is None or latest_frame.size == 0 or latest_frame.mean() < 1)
-            and device_info.get("source") == "network"
-        ):
+            latest_frame is None or latest_frame.size == 0 or (
+                not is_local_camera and latest_frame.mean() < 1
+            )
+        ) and not is_local_camera:
             latest_frame = _ensure_network_camera_ingestor(
                 io_id,
                 device_info,
@@ -863,9 +1056,21 @@ def _get_device_preview_frame_bytes(io_id: str) -> Optional[bytes]:
                     float(os.getenv("VIDEOMEMORY_NETWORK_PREVIEW_WARMUP_S", "0.75")),
                 ),
             )
+        elif latest_frame is None or latest_frame.size == 0:
+            preview_ingestor = _acquire_local_preview_ingestor(io_id, device_info) if is_local_camera else None
+            try:
+                if preview_ingestor is not None:
+                    latest_frame = _wait_for_ingestor_frame(
+                        io_id,
+                        local_preview_warmup_s,
+                        minimum_mean=None,
+                    )
+            finally:
+                if preview_ingestor is not None:
+                    _release_local_preview_ingestor(io_id)
+
         if latest_frame is not None and latest_frame.size > 0:
-            frame_mean = latest_frame.mean()
-            if frame_mean >= 1:
+            if is_local_camera or latest_frame.mean() >= 1:
                 _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 return buffer.tobytes()
 
@@ -873,14 +1078,66 @@ def _get_device_preview_frame_bytes(io_id: str) -> Optional[bytes]:
         if pull_url:
             return _get_network_preview_frame(pull_url)
 
-        try:
-            camera_index = int(io_id)
-        except (ValueError, TypeError):
-            return None
-        return _get_camera_preview_frame(camera_index)
+        return None
     except Exception as e:
         flask_logger.debug(f"Error building preview for {io_id}: {e}")
         return None
+
+
+def _capture_device_frame_bytes(io_id: str) -> tuple[Optional[bytes], Optional[str], Optional[Dict[str, Any]]]:
+    """Return a fresh or near-live JPEG frame for a camera device.
+
+    This is stricter than the preview endpoint: it prefers a currently running
+    ingestor frame when available, otherwise it performs a direct capture from
+    the device or network source and returns JPEG bytes plus a source label.
+    """
+    try:
+        device_info = io_manager.get_stream_info(io_id)
+        if device_info is None:
+            return None, None, None
+
+        category = device_info.get('category', '').lower()
+        if 'camera' not in category:
+            return None, None, device_info
+
+        is_local_camera = _is_local_camera_device(device_info)
+        local_capture_warmup_s = max(
+            0.0,
+            float(os.getenv("VIDEOMEMORY_LOCAL_PREVIEW_WARMUP_S", "1.0")),
+        )
+
+        latest_frame = task_manager.get_latest_frame_for_device(io_id)
+        if latest_frame is not None and latest_frame.size > 0 and (
+            is_local_camera or latest_frame.mean() >= 1
+        ):
+            _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            return buffer.tobytes(), "ingestor_live", device_info
+
+        pull_url = device_info.get('pull_url') or device_info.get('url')
+        if pull_url:
+            frame_bytes = _get_network_preview_frame(pull_url)
+            source = "network_snapshot" if is_snapshot_url(pull_url) else "network_stream"
+            return frame_bytes, source, device_info
+
+        preview_ingestor = _acquire_local_preview_ingestor(io_id, device_info) if is_local_camera else None
+        try:
+            if preview_ingestor is not None:
+                latest_frame = _wait_for_ingestor_frame(
+                    io_id,
+                    local_capture_warmup_s,
+                    minimum_mean=None,
+                )
+                if latest_frame is not None and latest_frame.size > 0:
+                    _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                    return buffer.tobytes(), "shared_ingestor_warm", device_info
+        finally:
+            if preview_ingestor is not None:
+                _release_local_preview_ingestor(io_id)
+
+        return None, None, device_info
+    except Exception as e:
+        flask_logger.debug("Error capturing fresh frame for %s: %s", io_id, e, exc_info=True)
+        return None, None, None
 
 
 @app.route('/api/device/<io_id>/preview/stream', methods=['GET'])
@@ -894,6 +1151,7 @@ def get_device_preview_stream(io_id):
     max_grabs = max(1, int(os.getenv("VIDEOMEMORY_PREVIEW_MAX_GRABS", "8")))
     drain_ms = max(0.0, float(os.getenv("VIDEOMEMORY_PREVIEW_DRAIN_MS", "80")))
     warmup_seconds = max(0.0, float(os.getenv("VIDEOMEMORY_NETWORK_PREVIEW_WARMUP_S", "0.75")))
+    local_warmup_seconds = max(0.0, float(os.getenv("VIDEOMEMORY_LOCAL_PREVIEW_WARMUP_S", "1.0")))
 
     def _open_preview_capture(source):
         cap = cv2.VideoCapture()
@@ -965,19 +1223,28 @@ def get_device_preview_stream(io_id):
         cap = None
         cap_source = None
         warmup_deadline = None
+        local_preview_acquired = False
+        local_camera = False
         try:
             initial_device_info = io_manager.get_stream_info(io_id)
-            if initial_device_info is not None and initial_device_info.get("source") == "network":
+            if initial_device_info is not None and not _is_local_camera_device(initial_device_info):
                 _ensure_network_camera_ingestor(io_id, initial_device_info, wait_timeout_s=0.0)
                 if warmup_seconds > 0:
                     warmup_deadline = time.monotonic() + warmup_seconds
+            elif initial_device_info is not None and 'camera' in (initial_device_info.get('category', '').lower()):
+                local_camera = True
+                local_preview_acquired = _acquire_local_preview_ingestor(io_id, initial_device_info) is not None
+                if local_preview_acquired and local_warmup_seconds > 0:
+                    warmup_deadline = time.monotonic() + local_warmup_seconds
 
             while True:
                 loop_started = time.monotonic()
                 frame_data = None
 
                 latest_frame = task_manager.get_latest_frame_for_device(io_id)
-                if latest_frame is not None and latest_frame.size > 0 and latest_frame.mean() >= 1:
+                if latest_frame is not None and latest_frame.size > 0 and (
+                    local_camera or latest_frame.mean() >= 1
+                ):
                     if cap is not None:
                         cap.release()
                         cap = None
@@ -987,12 +1254,16 @@ def get_device_preview_stream(io_id):
                 else:
                     device_info = io_manager.get_stream_info(io_id)
                     if device_info is not None and 'camera' in (device_info.get('category', '').lower()):
-                        if (
-                            device_info.get("source") == "network"
-                            and warmup_deadline is not None
-                            and time.monotonic() < warmup_deadline
-                        ):
+                        local_camera = _is_local_camera_device(device_info)
+                        if warmup_deadline is not None and time.monotonic() < warmup_deadline:
                             time.sleep(min(0.05, frame_delay_s))
+                            continue
+                        if local_camera:
+                            if not local_preview_acquired:
+                                local_preview_acquired = _acquire_local_preview_ingestor(io_id, device_info) is not None
+                                if local_preview_acquired and local_warmup_seconds > 0:
+                                    warmup_deadline = time.monotonic() + local_warmup_seconds
+                            time.sleep(frame_delay_s)
                             continue
                         pull_url = device_info.get('pull_url') or device_info.get('url')
                         if pull_url:
@@ -1044,6 +1315,8 @@ def get_device_preview_stream(io_id):
         finally:
             if cap is not None:
                 cap.release()
+            if local_preview_acquired:
+                _release_local_preview_ingestor(io_id)
 
     return Response(
         generate(),
@@ -1054,6 +1327,86 @@ def get_device_preview_stream(io_id):
             "Expires": "0",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@app.route('/api/device/<io_id>/capture', methods=['POST'])
+def capture_device_frame(io_id):
+    """Take a fresh capture for a camera device.
+
+    Default response is image/jpeg bytes so shell clients can simply write the
+    response to a file. Pass ?format=json to receive metadata including a
+    fetchable capture URL and the local saved path.
+    """
+    response_format = str(request.args.get("format", "image")).strip().lower()
+    if response_format not in {"image", "jpeg", "json"}:
+        return jsonify({
+            'status': 'error',
+            'error': "format must be one of image, jpeg, json",
+        }), 400
+
+    frame_bytes, capture_source, device_info = _capture_device_frame_bytes(io_id)
+    if frame_bytes is None:
+        device_info = device_info or {}
+        return jsonify({
+            'status': 'error',
+            'error': 'No fresh frame available for this device',
+            'io_id': io_id,
+            'device': {
+                'name': device_info.get('name', ''),
+                'source': device_info.get('source', ''),
+                'url': _public_ingest_url(device_info.get('url', '')) if device_info.get('url') else '',
+                'pull_url': device_info.get('pull_url', ''),
+            },
+            'hint': 'Ensure the camera is connected and actively producing frames before retrying the capture.',
+        }), 404
+
+    capture_record = _save_device_capture(io_id, frame_bytes, source=capture_source or "capture")
+    capture_url = url_for('get_saved_capture', capture_id=capture_record["capture_id"])
+
+    if response_format == "json":
+        return jsonify({
+            'status': 'success',
+            'io_id': io_id,
+            'capture_id': capture_record['capture_id'],
+            'capture_url': capture_url,
+            'local_path': str(capture_record['file_path']),
+            'mime_type': 'image/jpeg',
+            'bytes': capture_record['bytes'],
+            'source': capture_record['source'],
+        })
+
+    response = send_file(
+        capture_record['file_path'],
+        mimetype='image/jpeg',
+        conditional=True,
+        max_age=0,
+    )
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    response.headers['Location'] = capture_url
+    response.headers['X-VideoMemory-Capture-Id'] = capture_record['capture_id']
+    response.headers['X-VideoMemory-Capture-Path'] = str(capture_record['file_path'])
+    response.headers['X-VideoMemory-Capture-Source'] = capture_record['source']
+    return response
+
+
+@app.route('/api/captures/<capture_id>', methods=['GET'])
+def get_saved_capture(capture_id):
+    """Fetch a previously saved fresh capture."""
+    if not _is_valid_capture_id(capture_id):
+        return jsonify({'status': 'error', 'error': 'Invalid capture id'}), 400
+
+    capture_path = _get_saved_capture_dir() / f"{capture_id}.jpg"
+    if not capture_path.exists():
+        return jsonify({'status': 'error', 'error': 'Capture not found'}), 404
+
+    return send_file(
+        capture_path,
+        mimetype='image/jpeg',
+        conditional=True,
+        max_age=0,
     )
 
 
@@ -1390,11 +1743,12 @@ def _build_usage_payload(range_key: Optional[str]) -> dict[str, Any]:
     start_ts = now_ts - _USAGE_RANGE_SECONDS[normalized_range]
     events = db.list_model_usage_events(start_at=start_ts, end_at=now_ts, newest_first=False)
     recent_events = db.list_model_usage_events(start_at=start_ts, end_at=now_ts, newest_first=True, limit=200)
+    now_dt = datetime.fromtimestamp(now_ts).astimezone()
     return build_usage_dashboard_payload(
         events,
         range_key=normalized_range,
         recent_events=recent_events,
-        now=datetime.fromtimestamp(now_ts).astimezone(),
+        now=now_dt,
     )
 
 
@@ -1460,6 +1814,19 @@ def export_usage_csv():
         )
     except Exception as e:
         flask_logger.error("Error exporting usage CSV: %s", e, exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+@app.route('/api/storage', methods=['GET'])
+def get_storage_data():
+    """Return storage usage breakdown for the Storage page."""
+    try:
+        payload = db.get_storage_snapshot()
+        payload['status'] = 'success'
+        payload['generated_at'] = time.time()
+        return jsonify(payload)
+    except Exception as e:
+        flask_logger.error("Error loading storage data: %s", e, exc_info=True)
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
@@ -1600,6 +1967,113 @@ def openapi_spec():
                     },
                 }
             },
+            "/api/device/{io_id}/preview": {
+                "get": {
+                    "operationId": "get_device_preview",
+                    "summary": "Fetch the latest preview image for a device",
+                    "description": (
+                        "Returns the latest available JPEG frame for the specified camera device. "
+                        "Use this for requests like 'send me a picture/photo of the camera' or "
+                        "'show me the current frame'."
+                    ),
+                    "parameters": [{
+                        "name": "io_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                        "description": "Device identifier from GET /api/devices",
+                    }],
+                    "responses": {
+                        "200": {
+                            "description": "JPEG preview bytes",
+                            "content": {
+                                "image/jpeg": {
+                                    "schema": {"type": "string", "format": "binary"},
+                                }
+                            },
+                        },
+                        "404": {"description": "No frame is currently available for the specified device"},
+                    },
+                }
+            },
+            "/api/device/{io_id}/capture": {
+                "post": {
+                    "operationId": "capture_device_frame",
+                    "summary": "Take a fresh capture for a device",
+                    "description": (
+                        "Captures a fresh JPEG frame for the specified camera device. "
+                        "By default the endpoint returns image/jpeg bytes so shell tools can "
+                        "write the file directly. Pass ?format=json to receive capture metadata "
+                        "including a fetchable capture URL and the local saved path."
+                    ),
+                    "parameters": [
+                        {
+                            "name": "io_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                            "description": "Device identifier from GET /api/devices",
+                        },
+                        {
+                            "name": "format",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "enum": ["image", "jpeg", "json"]},
+                            "description": "Response format. Default is image/jpeg bytes.",
+                        },
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Fresh capture bytes or metadata",
+                            "content": {
+                                "image/jpeg": {
+                                    "schema": {"type": "string", "format": "binary"},
+                                },
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "status": {"type": "string"},
+                                            "io_id": {"type": "string"},
+                                            "capture_id": {"type": "string"},
+                                            "capture_url": {"type": "string"},
+                                            "local_path": {"type": "string"},
+                                            "mime_type": {"type": "string"},
+                                            "bytes": {"type": "integer"},
+                                            "source": {"type": "string"},
+                                        },
+                                    }
+                                },
+                            },
+                        },
+                        "404": {"description": "No fresh capture is currently available for the specified device"},
+                    },
+                }
+            },
+            "/api/captures/{capture_id}": {
+                "get": {
+                    "operationId": "get_saved_capture",
+                    "summary": "Download a previously saved fresh capture",
+                    "parameters": [{
+                        "name": "capture_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                        "description": "Capture identifier returned by POST /api/device/{io_id}/capture?format=json",
+                    }],
+                    "responses": {
+                        "200": {
+                            "description": "JPEG capture bytes",
+                            "content": {
+                                "image/jpeg": {
+                                    "schema": {"type": "string", "format": "binary"},
+                                }
+                            },
+                        },
+                        "404": {"description": "Capture not found"},
+                    },
+                }
+            },
             "/api/caption_frame": {
                 "post": {
                     "operationId": "caption_frame",
@@ -1707,6 +2181,8 @@ def openapi_spec():
                             "required": ["new_description"],
                             "properties": {
                                 "new_description": {"type": "string", "description": "The updated task description"},
+                                "save_note_frames": {"type": "boolean", "description": "Optional per-task override for saving a frame with each task note."},
+                                "save_note_videos": {"type": "boolean", "description": "Optional per-task override for saving an evidence clip with each task note."},
                             },
                         }}},
                     },
@@ -1735,6 +2211,40 @@ def openapi_spec():
                     "responses": {
                         "200": {"description": "Task stopped"},
                         "404": {"description": "Task not found"},
+                    },
+                }
+            },
+            "/api/task-note/{note_id}/frame": {
+                "get": {
+                    "operationId": "get_task_note_frame",
+                    "summary": "Fetch saved note frame",
+                    "description": "Returns the exact saved frame associated with a task note when frame evidence was stored.",
+                    "parameters": [{"name": "note_id", "in": "path", "required": True, "schema": {"type": "integer"}}],
+                    "responses": {
+                        "200": {"description": "JPEG frame bytes"},
+                        "404": {"description": "No saved frame for this note"},
+                    },
+                }
+            },
+            "/api/task-note/{note_id}/video": {
+                "get": {
+                    "operationId": "get_task_note_video",
+                    "summary": "Fetch saved note video",
+                    "description": "Returns the exact saved evidence clip associated with a task note when video evidence was stored.",
+                    "parameters": [{"name": "note_id", "in": "path", "required": True, "schema": {"type": "integer"}}],
+                    "responses": {
+                        "200": {"description": "Video clip bytes"},
+                        "404": {"description": "No saved video for this note"},
+                    },
+                }
+            },
+            "/api/storage": {
+                "get": {
+                    "operationId": "get_storage_data",
+                    "summary": "Summarize storage usage",
+                    "description": "Returns storage totals for note media, database files, logs, and the overall VideoMemory workspace.",
+                    "responses": {
+                        "200": {"description": "Storage summary and per-task breakdown"},
                     },
                 }
             },

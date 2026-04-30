@@ -19,6 +19,9 @@ Use these stable endpoints from your external agent:
 
 - `GET /api/health`
 - `GET /api/devices`
+- `POST /api/device/{io_id}/capture`
+- `GET /api/device/{io_id}/preview`
+- `GET /api/captures/{capture_id}`
 - `POST /api/devices/network`
 - `DELETE /api/devices/network/{io_id}`
 - `GET /api/tasks`

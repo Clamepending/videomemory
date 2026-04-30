@@ -87,6 +87,39 @@ Use this for one-off questions like:
 
 Prefer this endpoint over downloading the raw snapshot and using a separate vision tool. It keeps the reasoning inside VideoMemory's configured model path.
 
+#### Capture a fresh image for one device
+
+```
+POST /api/device/{io_id}/capture
+```
+
+Returns a fresh JPEG capture for a device. By default it returns raw `image/jpeg`
+bytes so shell clients can write directly to a file. Pass `?format=json` if you
+want metadata such as a saved `capture_url` and `local_path`.
+
+Use this for requests like:
+- "Send me a picture of the camera right now."
+- "Capture a photo from the USB camera."
+- "Take a fresh snapshot."
+
+Prefer this endpoint when the user wants a newly captured image rather than a
+cached/latest preview frame.
+
+#### Fetch the latest preview image for one device
+
+```
+GET /api/device/{io_id}/preview
+```
+
+Returns the latest available JPEG frame for a device when available.
+
+Use this for requests like:
+- "Show me the latest preview."
+- "What does the debug preview look like?"
+- "Attach the most recent cached camera image."
+
+Prefer this endpoint over `POST /api/caption_frame` when the user explicitly wants the image itself rather than a textual description, but use `POST /api/device/{io_id}/capture` when they want a fresh photo right now.
+
 ---
 
 ### Tasks
@@ -177,12 +210,14 @@ Run your conversational SimpleAgent separately and have it call VideoMemory APIs
 1. **Check health:** `GET /api/health`
 2. **Configure API keys:** `GET /api/settings` to check what's set, then `PUT /api/settings/GOOGLE_API_KEY` (or other keys) if needed.
 3. **List devices:** `GET /api/devices` to discover cameras and their `io_id`s.
-4. **One-off frame questions:** `POST /api/caption_frame` when the user wants a current description instead of a monitoring task.
-5. **Create a task:** `POST /api/tasks` with an `io_id` and `task_description`.
-6. **Monitor progress:** `GET /api/task/{task_id}` to read the notes (video analysis results).
-7. **Edit if needed:** `PUT /api/task/{task_id}` to amend the task description (e.g., add an action trigger).
-8. **Handle external actions:** If you need notifications or messaging channels, use an external agent service.
-9. **Stop or delete:** `POST /api/task/{task_id}/stop` or `DELETE /api/task/{task_id}`.
+4. **Fresh image requests:** `POST /api/device/{io_id}/capture` when the user wants a new photo right now.
+5. **Preview/debug image requests:** `GET /api/device/{io_id}/preview` for the latest cached/live preview frame.
+6. **One-off frame questions:** `POST /api/caption_frame` when the user wants a current description instead of a monitoring task.
+7. **Create a task:** `POST /api/tasks` with an `io_id` and `task_description`.
+8. **Monitor progress:** `GET /api/task/{task_id}` to read the notes (video analysis results).
+9. **Edit if needed:** `PUT /api/task/{task_id}` to amend the task description (e.g., add an action trigger).
+10. **Handle external actions:** If you need notifications or messaging channels, use an external agent service.
+11. **Stop or delete:** `POST /api/task/{task_id}/stop` or `DELETE /api/task/{task_id}`.
 
 ## Error Format
 
