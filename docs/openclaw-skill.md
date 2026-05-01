@@ -231,7 +231,15 @@ curl -fsSL -X POST http://videomemory:5050/api/tasks \
   -d '{"io_id":"net0","task_description":"Watch for a red marker and record it, but do not notify anyone.","bot_id":"openclaw","semantic_filter_keywords":"red marker"}'
 ```
 
-Use `semantic_filter_keywords` when the user provides the visual object/region that should gate expensive VLM calls. This applies the device-level semantic filter before frames enter the VLM chunk queue. It is especially useful on the Raspberry Pi. Aliases accepted by `POST /api/tasks`: `required_keywords` and `semantic_keywords`.
+### Semantic Filter Keywords
+
+Use `semantic_filter_keywords` when the user provides the visual object/region that should gate expensive VLM calls. This is a local, device-level pre-filter: VideoMemory first runs frame-difference filtering, then the semantic-autogaze model checks whether the requested keywords appear in the frame, and only frames that pass are queued into VLM chunks.
+
+This is especially useful on the Raspberry Pi because it avoids many expensive provider calls. Choose short visual nouns from the trigger condition, such as `backpack`, `red marker`, `card`, `person`, or `dog`. Do not put follow-up actions, notification instructions, or long prose into semantic keywords.
+
+Important behavior: task creation explicitly sets the device semantic filter. If `semantic_filter_keywords` / `--semantic-keywords` are provided, the semantic filter is enabled with those keywords. If no semantic keywords are provided, VideoMemory disables the device semantic filter so a stale previous keyword filter cannot accidentally affect the new task.
+
+Aliases accepted by `POST /api/tasks`: `required_keywords` and `semantic_keywords`.
 
 Create a split trigger-plus-action task:
 

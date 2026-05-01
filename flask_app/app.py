@@ -2827,7 +2827,15 @@ def _parse_task_semantic_filter_config(data: Dict[str, Any]) -> tuple[Optional[D
         )
     )
     if not keywords:
-        return None, None
+        return {
+            "enabled": False,
+            "keywords": "",
+            "threshold": 0.5,
+            "threshold_mode": "absolute",
+            "reduce": "max",
+            "smoothing": 0.0,
+            "ensemble": "off",
+        }, None
 
     threshold_mode = str(
         data.get("semantic_filter_threshold_mode", nested_config.get("threshold_mode", "absolute"))

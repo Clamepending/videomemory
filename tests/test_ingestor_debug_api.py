@@ -373,6 +373,37 @@ class IngestorDebugApiTests(unittest.TestCase):
         self.assertEqual(config["threshold"], 0.42)
         self.assertEqual(config["ensemble"], "hflip")
 
+    def test_create_task_without_semantic_keywords_disables_filter(self):
+        captured = {}
+
+        def fake_add_task(*args, **kwargs):
+            captured["kwargs"] = kwargs
+            return {
+                "status": "success",
+                "task_id": "1",
+                "io_id": args[0],
+                "task_description": args[1],
+                "semantic_filter": kwargs["semantic_filter_config"],
+            }
+
+        with (
+            patch.object(app_module, "_build_task_creation_model_error", return_value=None),
+            patch.object(app_module.videomemory.tools.tasks, "add_task", side_effect=fake_add_task),
+        ):
+            resp = self.client.post(
+                "/api/tasks",
+                json={
+                    "io_id": "0",
+                    "task_description": "Watch generally.",
+                    "bot_id": "openclaw",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 201)
+        config = captured["kwargs"]["semantic_filter_config"]
+        self.assertFalse(config["enabled"])
+        self.assertEqual(config["keywords"], "")
+
     def test_debug_page_inline_scripts_are_valid_javascript(self):
         if shutil.which("node") is None:
             self.skipTest("node is required for JS syntax validation")
