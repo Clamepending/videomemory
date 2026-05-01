@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 
@@ -143,6 +143,7 @@ def add_task(
     bot_id: Optional[str] = None,
     save_note_frames: Optional[bool] = None,
     save_note_videos: Optional[bool] = None,
+    semantic_filter_config: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """Adds a task for a specific input device using its io_id.
     
@@ -152,6 +153,7 @@ def add_task(
         bot_id: Optional identifier of the bot that created this task (for multi-bot / debug).
         save_note_frames: Optional per-task override for saving note frames.
         save_note_videos: Optional per-task override for saving note videos.
+        semantic_filter_config: Optional device-level semantic filter settings to apply before starting the task.
     
     Returns:
         dict: A dictionary containing the task information and status.
@@ -201,6 +203,7 @@ def add_task(
                 bot_id=bot_id,
                 save_note_frames=save_note_frames,
                 save_note_videos=save_note_videos,
+                semantic_filter_config=semantic_filter_config,
             )
             logger.debug(f"[DEBUG] add_task: task_manager.add_task returned: {result}")
             result["device_info"] = device_info
