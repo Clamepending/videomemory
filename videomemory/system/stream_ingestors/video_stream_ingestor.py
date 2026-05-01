@@ -143,6 +143,10 @@ class VideoStreamIngestor:
         self._semantic_evaluations: int = 0
         self._latest_semantic_filter_timestamp: Optional[float] = None
         self._semantic_filter_fps_ema: float = 0.0
+        self._semantic_preview_refresh_seconds = max(
+            0.1,
+            float(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_REFRESH_SECONDS", "1.0")),
+        )
         
         # Frame capture failure tracking (for network stream reconnection)
         self._consecutive_capture_failures: int = 0
@@ -837,6 +841,10 @@ class VideoStreamIngestor:
 
         if self._is_frame_duplicate(frame):
             self._record_duplicate_skip()
+            if self._semantic_preview_needs_refresh():
+                semantic_result = self._apply_semantic_filter(frame)
+                if not semantic_result.should_keep:
+                    self._record_semantic_skip()
             chunk_frames.append(frame.copy())
             return False
 
@@ -919,6 +927,15 @@ class VideoStreamIngestor:
                 ", ".join(result.keywords) if result else "",
             )
 
+    def _semantic_preview_needs_refresh(self) -> bool:
+        """Return whether debug preview should refresh semantic scoring despite frame-diff skips."""
+
+        if not self._semantic_filter.config.enabled or not self._semantic_filter.config.keywords.strip():
+            return False
+        if self._latest_semantic_filter_timestamp is None:
+            return True
+        return (time.time() - self._latest_semantic_filter_timestamp) >= self._semantic_preview_refresh_seconds
+
     def _update_filter_preview(self, frame: Any) -> None:
         """Update frame-diff and semantic state for debug preview without VLM work."""
 
@@ -927,6 +944,11 @@ class VideoStreamIngestor:
             return
         if self._is_frame_duplicate(frame):
             self._record_duplicate_skip()
+            if not self._semantic_preview_needs_refresh():
+                return
+            semantic_result = self._apply_semantic_filter(frame)
+            if not semantic_result.should_keep:
+                self._record_semantic_skip()
             return
         self._remember_frame_for_diff(frame)
         semantic_result = self._apply_semantic_filter(frame)
