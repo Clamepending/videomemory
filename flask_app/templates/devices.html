@@ -653,7 +653,7 @@
                                     <img class="device-preview" id="${previewId}" data-fps-id="${fpsId}" alt="Camera preview" style="display: none;" />
                                 </div>
                                 <div class="device-preview-meta"><span class="device-fps" id="${fpsId}">Preview off</span></div>
-                                <button class="device-debug-link" type="button" onclick="startPreview('${escapeHtml(device.io_id)}', '${previewId}', '${fpsId}', this)">
+                                <button class="device-debug-link device-preview-start" type="button" onclick="startPreview('${escapeHtml(device.io_id)}', '${previewId}', '${fpsId}', this)">
                                     Start Preview
                                 </button>
                             `;
@@ -691,7 +691,7 @@
                 contentDiv.innerHTML = html;
 
                 revokePreviewObjectUrls(previousContent);
-                startFpsTracking();
+                stopFpsTracking();
                 
             } catch (error) {
                 contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;

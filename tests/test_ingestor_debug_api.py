@@ -135,7 +135,7 @@ class IngestorDebugApiTests(unittest.TestCase):
         self.assertEqual(data["dedup_status"]["consecutive_skips"], 4)
         self.assertIn("count desk items", data["prompt"])
 
-    def test_debug_frame_endpoint_falls_back_to_latest_live_frame_before_first_vlm_call(self):
+    def test_debug_frame_endpoint_does_not_fall_back_to_live_frame_before_first_vlm_call(self):
         frame = np.zeros((12, 16, 3), dtype=np.uint8)
         frame[:, :] = (25, 90, 210)
         task = Task(
@@ -149,6 +149,7 @@ class IngestorDebugApiTests(unittest.TestCase):
         ingestor = SimpleNamespace(
             _running=True,
             get_latest_output=lambda: None,
+            get_latest_model_input=lambda: None,
             get_latest_frame=lambda: frame,
             get_latest_frame_timestamp=lambda: 1712609854.0,
             get_latest_inference_error=lambda: None,
@@ -161,13 +162,12 @@ class IngestorDebugApiTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
-        self.assertEqual(data["source"], "live_frame")
-        self.assertTrue(data["frame_base64"])
+        self.assertIsNone(data.get("source"))
+        self.assertIsNone(data["frame_base64"])
         self.assertIn("count desk items", data["prompt"])
-        self.assertIn("first VLM call", data["source_label"])
-        self.assertIn("has not been recorded yet", data["prompt_notice"])
+        self.assertIn("No model provider input", data["error"])
 
-    def test_debug_frame_endpoint_prefers_live_frame_when_latest_inference_failed(self):
+    def test_debug_frame_endpoint_does_not_use_live_frame_when_latest_inference_failed(self):
         stale_frame = np.zeros((12, 16, 3), dtype=np.uint8)
         stale_frame[:, :] = (0, 0, 255)
         live_frame = np.zeros((12, 16, 3), dtype=np.uint8)
@@ -183,6 +183,12 @@ class IngestorDebugApiTests(unittest.TestCase):
         ingestor = SimpleNamespace(
             _running=True,
             get_latest_output=lambda: {
+                "frame": stale_frame,
+                "prompt": "stale prompt",
+                "timestamp": 1712609800.0,
+                "task_updates": [],
+            },
+            get_latest_model_input=lambda: {
                 "frame": stale_frame,
                 "prompt": "stale prompt",
                 "timestamp": 1712609800.0,
@@ -204,12 +210,12 @@ class IngestorDebugApiTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
-        self.assertEqual(data["source"], "live_frame")
-        self.assertIn("failed", data["source_label"])
-        self.assertIn("quota exceeded", data["prompt_notice"].lower())
+        self.assertIsNone(data.get("source"))
+        self.assertIsNone(data["frame_base64"])
+        self.assertIn("Last VLM call did not include a frame", data["error"])
         self.assertEqual(data["inference_error"]["message"], "429 RESOURCE_EXHAUSTED")
 
-    def test_debug_frame_endpoint_labels_live_frame_as_newer_than_last_vlm_call(self):
+    def test_debug_frame_endpoint_keeps_last_model_input_when_live_frame_is_newer(self):
         stale_frame = np.zeros((12, 16, 3), dtype=np.uint8)
         stale_frame[:, :] = (0, 0, 255)
         live_frame = np.zeros((12, 16, 3), dtype=np.uint8)
@@ -230,6 +236,12 @@ class IngestorDebugApiTests(unittest.TestCase):
                 "timestamp": 1712609800.0,
                 "task_updates": [],
             },
+            get_latest_model_input=lambda: {
+                "frame": stale_frame,
+                "prompt": "stale prompt",
+                "timestamp": 1712609800.0,
+                "task_updates": [],
+            },
             get_latest_frame=lambda: live_frame,
             get_latest_frame_timestamp=lambda: 1712609860.0,
             get_latest_inference_error=lambda: None,
@@ -242,9 +254,9 @@ class IngestorDebugApiTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
-        self.assertEqual(data["source"], "live_frame")
-        self.assertIn("newer than the last recorded VLM call", data["source_label"])
-        self.assertIn("older than this frame", data["prompt_notice"])
+        self.assertEqual(data["source"], "model_input")
+        self.assertTrue(data["frame_base64"])
+        self.assertIn("exact image sent to the model provider", data["source_label"])
 
     def test_debug_tasks_endpoint_falls_back_to_task_manager_when_ingestor_has_no_tasks(self):
         task = Task(

@@ -277,6 +277,30 @@
             margin-bottom: 16px;
         }
 
+        .task-form-message {
+            display: none;
+            margin-bottom: 14px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.45;
+            white-space: pre-line;
+        }
+
+        .task-form-message.error {
+            display: block;
+            color: #ffc9c9;
+            background: rgba(239, 68, 68, 0.14);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+        }
+
+        .task-form-message.success {
+            display: block;
+            color: #b8f7d8;
+            background: rgba(25, 195, 125, 0.12);
+            border: 1px solid rgba(25, 195, 125, 0.3);
+        }
+
         .form-actions {
             display: flex;
             gap: 10px;
@@ -434,6 +458,7 @@
                 <button class="form-cancel-btn" onclick="toggleAddForm()">Cancel</button>
                 <button class="form-submit-btn" id="submitTaskBtn" onclick="submitTask()">Create Task</button>
             </div>
+            <div id="taskFormMessage" class="task-form-message" role="status" aria-live="polite"></div>
         </div>
         <div id="tasksContent">
             <div class="loading">Loading tasks...</div>
@@ -514,8 +539,16 @@
             form.classList.toggle('visible');
             if (form.classList.contains('visible')) {
                 applyTaskEvidenceDefaults();
+                setTaskFormMessage('');
                 document.getElementById('taskDescription').focus();
             }
+        }
+
+        function setTaskFormMessage(message, type = '') {
+            const el = document.getElementById('taskFormMessage');
+            if (!el) return;
+            el.textContent = message || '';
+            el.className = `task-form-message ${message && type ? type : ''}`.trim();
         }
 
         async function submitTask() {
@@ -523,11 +556,19 @@
             const desc = document.getElementById('taskDescription').value.trim();
             const saveNoteFrames = document.getElementById('saveNoteFrames').checked;
             const saveNoteVideos = document.getElementById('saveNoteVideos').checked;
-            if (!ioId || !desc) return;
+            if (!ioId) {
+                setTaskFormMessage('Choose a device before creating a task.', 'error');
+                return;
+            }
+            if (!desc) {
+                setTaskFormMessage('Enter a task description before creating a task.', 'error');
+                return;
+            }
 
             const btn = document.getElementById('submitTaskBtn');
             btn.disabled = true;
             btn.textContent = 'Creating…';
+            setTaskFormMessage('');
 
             try {
                 const resp = await fetch('/api/tasks', {
@@ -541,21 +582,27 @@
                     })
                 });
                 if (!resp.ok) {
-                    const err = await resp.json();
+                    let err = {};
+                    try {
+                        err = await resp.json();
+                    } catch (_) {
+                        err = { error: `Failed to create task (${resp.status})` };
+                    }
                     const details = [
                         err.error || 'Failed to create task',
                         err.hint || '',
                         err.settings_url ? `Settings: ${err.settings_url}` : ''
                     ].filter(Boolean).join('\n\n');
-                    alert('Error: ' + details);
+                    setTaskFormMessage(details, 'error');
                     return;
                 }
                 document.getElementById('taskDescription').value = '';
                 applyTaskEvidenceDefaults();
                 document.getElementById('addTaskForm').classList.remove('visible');
+                setTaskFormMessage('Task created.', 'success');
                 loadTasks();
             } catch (e) {
-                alert('Error: ' + e.message);
+                setTaskFormMessage(e.message, 'error');
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Create Task';

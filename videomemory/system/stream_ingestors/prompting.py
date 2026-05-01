@@ -81,6 +81,7 @@ def build_video_ingestor_prompt(
     tasks: List[Task],
     *,
     context_label: Optional[Any] = None,
+    visual_context: Optional[str] = None,
     include_done: bool = False,
 ) -> str:
     """Build the canonical VLM prompt for a set of tasks."""
@@ -102,6 +103,12 @@ def build_video_ingestor_prompt(
         )
         tasks_lines.append("</task>")
     tasks_lines.append("</tasks>")
+
+    if visual_context:
+        tasks_lines.append("")
+        tasks_lines.append("<visual_context>")
+        tasks_lines.append(visual_context)
+        tasks_lines.append("</visual_context>")
 
     prompt_so_far = "\n".join(tasks_lines)
     prompt_size_chars = len(prompt_so_far)

@@ -466,6 +466,45 @@
                 <div class="setting-status" id="status-LOCAL_MODEL_BASE_URL"></div>
             </div>
 
+            <div class="setting-row" data-key="VIDEOMEMORY_VIDEO_CHUNK_SECONDS">
+                <div class="setting-label">
+                    <label>Video Chunk Length (seconds)</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_VIDEO_CHUNK_SECONDS"></span>
+                </div>
+                <div class="setting-hint">How long to collect motion-filtered frames before sending a chunk to the model. Default: 2.0.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_SECONDS" placeholder="2.0" min="0.1" step="0.1">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_VIDEO_CHUNK_SECONDS')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_VIDEO_CHUNK_SECONDS"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES">
+                <div class="setting-label">
+                    <label>Max Frames Per Model Contact Sheet</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES"></span>
+                </div>
+                <div class="setting-hint">Uses all valid frames when the chunk has this many or fewer; otherwise evenly samples down to this max before building the contact sheet. Default: 4.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES" placeholder="4" min="1" step="1">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE">
+                <div class="setting-label">
+                    <label>Max Queued Chunks</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE"></span>
+                </div>
+                <div class="setting-hint">Backpressure limit when model calls are slower than capture. If full, the oldest queued chunk is dropped. Default: 5.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE" placeholder="5" min="1" step="1">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE"></div>
+            </div>
+
             <div class="setting-row" data-key="VIDEOMEMORY_SAVE_NOTE_FRAMES">
                 <div class="setting-label">
                     <label>Save Images With Task Notes</label>

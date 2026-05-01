@@ -6,6 +6,7 @@ import os
 import sys
 from typing import Dict, List, Optional, Any, Callable
 from .stream_ingestors.video_stream_ingestor import VideoStreamIngestor
+from .stream_ingestors.semantic_autogaze_runtime import MODEL_NAME as SEMANTIC_AUTOGAZE_MODEL_NAME
 from .io_manager import IOmanager
 from .task_types import NoteEntry, Task, STATUS_ACTIVE, STATUS_DONE, STATUS_TERMINATED
 from .database import TaskDatabase
@@ -320,6 +321,9 @@ class TaskManager:
             saved_threshold = self._db.get_ingestor_frame_diff_threshold(io_id)
             if saved_threshold is not None:
                 ingestor.set_frame_diff_threshold(saved_threshold)
+            semantic_config = self._db.get_ingestor_semantic_filter_config(io_id)
+            if semantic_config is not None:
+                ingestor.set_semantic_filter_config(semantic_config)
         except Exception as e:
             logger.error("Failed to apply saved ingestor preferences for %s: %s", io_id, e, exc_info=True)
 
@@ -607,6 +611,13 @@ class TaskManager:
         if io_id:
             return [task for task in self._tasks.values() if task.io_id == io_id]
         return list(self._tasks.values())
+
+    def peek_task_objects(self, io_id: Optional[str] = None) -> List[Task]:
+        """Return task objects without attempting to resume ingestors."""
+
+        if io_id:
+            return [task for task in self._tasks.values() if task.io_id == io_id]
+        return list(self._tasks.values())
     
     def update_task_status(self, task_id: str, done: bool) -> bool:
         """Update the status of a task.
@@ -801,6 +812,36 @@ class TaskManager:
             len(failed_ingestors),
         )
         return result
+
+    def reload_video_chunk_settings(self) -> Dict[str, Any]:
+        """Hot-reload video chunk settings on active ingestors."""
+
+        updated_ingestors = 0
+        failed_ingestors: List[str] = []
+
+        for io_id, ingestor in self._ingestors.items():
+            try:
+                ingestor.reload_video_chunk_settings()
+                updated_ingestors += 1
+            except Exception as exc:
+                failed_ingestors.append(io_id)
+                logger.error(
+                    "Failed to update video chunk settings for io_id=%s: %s",
+                    io_id,
+                    exc,
+                    exc_info=True,
+                )
+
+        result = {
+            "updated_ingestors": updated_ingestors,
+            "failed_ingestors": failed_ingestors,
+        }
+        logger.info(
+            "Reloaded video chunk settings (updated_ingestors=%d, failed=%d)",
+            updated_ingestors,
+            len(failed_ingestors),
+        )
+        return result
     
     def get_ingestor(self, io_id: str) -> Optional[VideoStreamIngestor]:
         """Get the active VideoStreamIngestor for a device, if any.
@@ -812,6 +853,11 @@ class TaskManager:
             The VideoStreamIngestor instance, or None if no ingestor is active for this device
         """
         self._resume_pending_tasks_for_io(io_id)
+        return self._ingestors.get(io_id)
+
+    def peek_ingestor(self, io_id: str) -> Optional[VideoStreamIngestor]:
+        """Return an existing ingestor without attempting to resume one."""
+
         return self._ingestors.get(io_id)
     
     def has_ingestor(self, io_id: str) -> bool:
@@ -880,6 +926,85 @@ class TaskManager:
             source=source,
             has_ingestor=ingestor is not None,
         )
+
+    def get_ingestor_semantic_filter_config(self, io_id: str) -> Dict[str, Any]:
+        """Get current or saved semantic-filter settings for a device."""
+        ingestor = self._ingestors.get(io_id)
+        if ingestor is not None:
+            payload = ingestor.get_semantic_filter_status()
+            payload.update({"io_id": io_id, "source": "active_ingestor", "has_ingestor": True})
+            return payload
+
+        saved_config = None
+        if self._db is not None:
+            try:
+                saved_config = self._db.get_ingestor_semantic_filter_config(io_id)
+            except Exception as e:
+                logger.error("Failed to load saved semantic filter config for %s: %s", io_id, e, exc_info=True)
+
+        if saved_config is None:
+            saved_config = {
+                "enabled": False,
+                "keywords": "",
+                "threshold": 0.5,
+                "threshold_mode": "absolute",
+                "reduce": "max",
+                "smoothing": 0.0,
+                "ensemble": "off",
+            }
+            source = "default"
+        else:
+            source = "database"
+
+        return {
+            "io_id": io_id,
+            "source": source,
+            "has_ingestor": False,
+            "model": SEMANTIC_AUTOGAZE_MODEL_NAME,
+            **saved_config,
+        }
+
+    def set_ingestor_semantic_filter_config(self, io_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist and apply semantic-filter settings for a device."""
+        ingestor = self._ingestors.get(io_id)
+        if ingestor is not None:
+            applied = ingestor.set_semantic_filter_config(config)
+            config_to_save = applied
+            source = "active_ingestor"
+        else:
+            config_to_save = {
+                "enabled": bool(config.get("enabled", False)),
+                "keywords": str(config.get("keywords", "") or ""),
+                "threshold": float(config.get("threshold", 0.5)),
+                "threshold_mode": str(config.get("threshold_mode", "absolute") or "absolute"),
+                "reduce": str(config.get("reduce", "max") or "max"),
+                "smoothing": float(config.get("smoothing", 0.0)),
+                "ensemble": str(config.get("ensemble", "off") or "off"),
+            }
+            source = "database"
+
+        if self._db is not None:
+            self._db.set_ingestor_semantic_filter_config(io_id, config_to_save)
+
+        return {
+            "io_id": io_id,
+            "source": source,
+            "has_ingestor": ingestor is not None,
+            "model": SEMANTIC_AUTOGAZE_MODEL_NAME,
+            **{
+                k: config_to_save[k]
+                for k in (
+                    "enabled",
+                    "keywords",
+                    "threshold",
+                    "threshold_mode",
+                    "reduce",
+                    "smoothing",
+                    "ensemble",
+                )
+                if k in config_to_save
+            },
+        }
 
     def _build_frame_skip_threshold_response(
         self,

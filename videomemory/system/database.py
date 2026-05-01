@@ -102,6 +102,13 @@ class TaskDatabase:
                 CREATE TABLE IF NOT EXISTS ingestor_preferences (
                     io_id TEXT PRIMARY KEY,
                     frame_diff_threshold REAL NOT NULL,
+                    semantic_filter_enabled INTEGER NOT NULL DEFAULT 0,
+                    semantic_filter_keywords TEXT NOT NULL DEFAULT '',
+                    semantic_filter_threshold REAL NOT NULL DEFAULT 0.5,
+                    semantic_filter_threshold_mode TEXT NOT NULL DEFAULT 'absolute',
+                    semantic_filter_reduce TEXT NOT NULL DEFAULT 'max',
+                    semantic_filter_smoothing REAL NOT NULL DEFAULT 0.0,
+                    semantic_filter_ensemble TEXT NOT NULL DEFAULT 'off',
                     updated_at REAL NOT NULL
                 );
 
@@ -163,6 +170,21 @@ class TaskDatabase:
             if usage_columns and 'was_success' not in usage_columns:
                 conn.execute("ALTER TABLE model_usage_events ADD COLUMN was_success INTEGER NOT NULL DEFAULT 1")
                 logger.info("Migrated model_usage_events table: added was_success column")
+
+            preference_columns = [row[1] for row in conn.execute("PRAGMA table_info(ingestor_preferences)").fetchall()]
+            preference_migrations = {
+                "semantic_filter_enabled": "INTEGER NOT NULL DEFAULT 0",
+                "semantic_filter_keywords": "TEXT NOT NULL DEFAULT ''",
+                "semantic_filter_threshold": "REAL NOT NULL DEFAULT 0.5",
+                "semantic_filter_threshold_mode": "TEXT NOT NULL DEFAULT 'absolute'",
+                "semantic_filter_reduce": "TEXT NOT NULL DEFAULT 'max'",
+                "semantic_filter_smoothing": "REAL NOT NULL DEFAULT 0.0",
+                "semantic_filter_ensemble": "TEXT NOT NULL DEFAULT 'off'",
+            }
+            for column, definition in preference_migrations.items():
+                if column not in preference_columns:
+                    conn.execute(f"ALTER TABLE ingestor_preferences ADD COLUMN {column} {definition}")
+                    logger.info("Migrated ingestor_preferences table: added %s column", column)
 
     def _note_frame_relpath(self, task_id: str, note_id: int) -> Path:
         """Build a relative file path for a task note frame."""
@@ -825,10 +847,76 @@ class TaskDatabase:
         """Persist the frame diff threshold for a specific device."""
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT OR REPLACE INTO ingestor_preferences
+                """INSERT INTO ingestor_preferences
                    (io_id, frame_diff_threshold, updated_at)
-                   VALUES (?, ?, ?)""",
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(io_id) DO UPDATE SET
+                       frame_diff_threshold = excluded.frame_diff_threshold,
+                       updated_at = excluded.updated_at""",
                 (io_id, float(threshold), time.time()),
+            )
+
+    def get_ingestor_semantic_filter_config(self, io_id: str) -> Optional[Dict[str, Any]]:
+        """Get saved semantic filter preferences for a specific device."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                """SELECT semantic_filter_enabled, semantic_filter_keywords,
+                          semantic_filter_threshold, semantic_filter_threshold_mode,
+                          semantic_filter_reduce, semantic_filter_smoothing,
+                          semantic_filter_ensemble
+                   FROM ingestor_preferences WHERE io_id = ?""",
+                (io_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "enabled": bool(row["semantic_filter_enabled"]),
+            "keywords": row["semantic_filter_keywords"] or "",
+            "threshold": float(row["semantic_filter_threshold"]),
+            "threshold_mode": row["semantic_filter_threshold_mode"] or "absolute",
+            "reduce": row["semantic_filter_reduce"] or "max",
+            "smoothing": float(row["semantic_filter_smoothing"]),
+            "ensemble": row["semantic_filter_ensemble"] or "off",
+        }
+
+    def set_ingestor_semantic_filter_config(self, io_id: str, config: Dict[str, Any]) -> None:
+        """Persist semantic filter preferences for a specific device."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT frame_diff_threshold FROM ingestor_preferences WHERE io_id = ?",
+                (io_id,),
+            ).fetchone()
+            current_threshold = float(row["frame_diff_threshold"]) if row is not None else None
+            if current_threshold is None:
+                current_threshold = 5.0
+            conn.execute(
+                """INSERT INTO ingestor_preferences
+                   (io_id, frame_diff_threshold, semantic_filter_enabled,
+                    semantic_filter_keywords, semantic_filter_threshold,
+                    semantic_filter_threshold_mode, semantic_filter_reduce,
+                    semantic_filter_smoothing, semantic_filter_ensemble, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(io_id) DO UPDATE SET
+                       semantic_filter_enabled = excluded.semantic_filter_enabled,
+                       semantic_filter_keywords = excluded.semantic_filter_keywords,
+                       semantic_filter_threshold = excluded.semantic_filter_threshold,
+                       semantic_filter_threshold_mode = excluded.semantic_filter_threshold_mode,
+                       semantic_filter_reduce = excluded.semantic_filter_reduce,
+                       semantic_filter_smoothing = excluded.semantic_filter_smoothing,
+                       semantic_filter_ensemble = excluded.semantic_filter_ensemble,
+                       updated_at = excluded.updated_at""",
+                (
+                    io_id,
+                    float(current_threshold),
+                    1 if config.get("enabled") else 0,
+                    str(config.get("keywords", "") or ""),
+                    float(config.get("threshold", 0.5)),
+                    str(config.get("threshold_mode", "absolute") or "absolute"),
+                    str(config.get("reduce", "max") or "max"),
+                    float(config.get("smoothing", 0.0)),
+                    str(config.get("ensemble", "off") or "off"),
+                    time.time(),
+                ),
             )
 
     def get_all_settings(self) -> Dict[str, str]:

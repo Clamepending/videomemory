@@ -27,10 +27,17 @@ from .prompting import (
 from . import background_loop as _background_loop
 from .evidence import build_evidence_clip_frames, sample_evidence_frame
 from .frame_utils import (
+    build_chunk_metadata,
+    build_frame_contact_sheet,
     frame_to_base64,
     frame_to_jpeg_bytes,
+    is_chunk_complete,
     mean_absolute_frame_difference,
+    normalize_frames,
+    subsample_frames,
 )
+from .semantic_autogaze_runtime import MODEL_NAME as SEMANTIC_AUTOGAZE_MODEL_NAME
+from .semantic_filter import SemanticFilterResult, SemanticFrameFilter, coerce_config
 
 # Load environment variables
 load_dotenv()
@@ -65,6 +72,9 @@ class VideoStreamIngestor:
     DEFAULT_EVIDENCE_CLIP_FPS = 6.0
     DEFAULT_EVIDENCE_CLIP_PREROLL_SECONDS = 4.0
     DEFAULT_EVIDENCE_CLIP_END_HOLD_SECONDS = 1.0
+    DEFAULT_VIDEO_CHUNK_SECONDS = 2.0
+    DEFAULT_VIDEO_CHUNK_SUBSAMPLE_FRAMES = 4
+    DEFAULT_VIDEO_CHUNK_QUEUE_MAXSIZE = 5
     
     def __init__(self, camera_source, model_provider: BaseModelProvider, target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None, on_detection_event=None):
         """Initialize the video stream ingestor.
@@ -86,6 +96,8 @@ class VideoStreamIngestor:
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
         self._running = False
         self._loop: Optional[asyncio.Task] = None
+        self._chunk_processor_task: Optional[asyncio.Task] = None
+        self._chunk_queue: Optional[asyncio.Queue] = None
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
         self._snapshot_client: Optional[httpx.Client] = None
         self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
@@ -98,6 +110,9 @@ class VideoStreamIngestor:
         self._total_output_count: int = 0  # Track total number of outputs processed (for debugging)
         self._process_loop_ticks: int = 0
         self._latest_inference_error: Optional[Dict[str, Any]] = None
+        self._latest_model_input: Optional[Dict[str, Any]] = None
+        self._queued_chunk_created_at: deque = deque()
+        self._queued_chunk_frame_counts: deque = deque()
 
         evidence_clip_fps = float(os.getenv("VIDEOMEMORY_NOTE_VIDEO_FPS", self.DEFAULT_EVIDENCE_CLIP_FPS))
         evidence_clip_preroll_seconds = float(
@@ -116,10 +131,18 @@ class VideoStreamIngestor:
         self._last_evidence_buffer_sample_at: float = 0.0
         
         # Frame deduplication: skip VLM calls when the average pixel difference stays below threshold
-        self._last_processed_frame: Optional[Any] = None  # Last frame sent to VLM
+        self._last_diff_reference_frame: Optional[Any] = None
         self._frame_diff_threshold: float = self.DEFAULT_FRAME_DIFF_THRESHOLD  # Mean absolute pixel difference threshold (0-255 scale)
         self._frames_skipped: int = 0  # Total frames skipped (lifetime)
         self._consecutive_skips: int = 0  # Frames skipped since last VLM call (for UI)
+        self._load_video_chunk_settings_from_env()
+        self._semantic_filter = SemanticFrameFilter()
+        self._semantic_frames_skipped: int = 0
+        self._semantic_consecutive_skips: int = 0
+        self._latest_semantic_filter_result: Optional[SemanticFilterResult] = None
+        self._semantic_evaluations: int = 0
+        self._latest_semantic_filter_timestamp: Optional[float] = None
+        self._semantic_filter_fps_ema: float = 0.0
         
         # Frame capture failure tracking (for network stream reconnection)
         self._consecutive_capture_failures: int = 0
@@ -179,6 +202,61 @@ class VideoStreamIngestor:
                 type(self._model_provider).__name__,
             )
 
+    def _load_video_chunk_settings_from_env(self) -> None:
+        """Load chunking knobs from environment-backed settings."""
+
+        self._video_chunk_seconds = max(
+            0.1,
+            float(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_SECONDS", self.DEFAULT_VIDEO_CHUNK_SECONDS)),
+        )
+        self._video_chunk_subsample_frames = max(
+            1,
+            int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES", self.DEFAULT_VIDEO_CHUNK_SUBSAMPLE_FRAMES)),
+        )
+        self._video_chunk_queue_maxsize = max(
+            1,
+            int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE", self.DEFAULT_VIDEO_CHUNK_QUEUE_MAXSIZE)),
+        )
+
+    def reload_video_chunk_settings(self) -> Dict[str, Any]:
+        """Reload chunking settings for active ingestors."""
+
+        self._load_video_chunk_settings_from_env()
+        if self._chunk_queue is not None and hasattr(self._chunk_queue, "_maxsize"):
+            self._chunk_queue._maxsize = self._video_chunk_queue_maxsize
+        while len(self._queued_chunk_created_at) > self._video_chunk_queue_maxsize:
+            self._queued_chunk_created_at.popleft()
+        while len(self._queued_chunk_frame_counts) > self._video_chunk_queue_maxsize:
+            self._queued_chunk_frame_counts.popleft()
+        return self.get_video_chunk_settings()
+
+    def get_video_chunk_settings(self) -> Dict[str, Any]:
+        """Return active video chunking settings."""
+
+        return {
+            "video_chunk_seconds": float(self._video_chunk_seconds),
+            "video_chunk_subsample_frames": int(self._video_chunk_subsample_frames),
+            "video_chunk_queue_maxsize": int(self._video_chunk_queue_maxsize),
+        }
+
+    def get_chunk_queue_status(self) -> Dict[str, Any]:
+        """Return current VLM chunk queue backlog stats for debug UI."""
+
+        queue_size = self._chunk_queue.qsize() if self._chunk_queue is not None else 0
+        oldest_age_ms = None
+        newest_age_ms = None
+        now = time.time()
+        if self._queued_chunk_created_at:
+            oldest_age_ms = max(0.0, (now - float(self._queued_chunk_created_at[0])) * 1000.0)
+            newest_age_ms = max(0.0, (now - float(self._queued_chunk_created_at[-1])) * 1000.0)
+        return {
+            **self.get_video_chunk_settings(),
+            "queued_chunks": int(queue_size),
+            "oldest_queued_chunk_age_ms": oldest_age_ms,
+            "newest_queued_chunk_age_ms": newest_age_ms,
+            "queued_chunk_frame_counts": list(self._queued_chunk_frame_counts),
+        }
+
     def _build_inference_error_info(self, error: Exception) -> Dict[str, Any]:
         """Build a small debug payload describing the latest inference failure."""
         message = str(error).strip()
@@ -234,6 +312,11 @@ class VideoStreamIngestor:
         self._running = True
         logger.info(f"Starting ingestor for camera index={self.camera_index}")
         
+        self._chunk_queue = asyncio.Queue(maxsize=self._video_chunk_queue_maxsize)
+        self._chunk_processor_task = asyncio.create_task(
+            self._chunk_processing_loop(),
+            name=f"chunk_processor_{self.camera_index}",
+        )
         self._loop = asyncio.create_task(self._capture_loop(), name=f"capture_{self.camera_index}")
         
         logger.info(f"Started capture loop for camera index={self.camera_index}")
@@ -434,62 +517,115 @@ class VideoStreamIngestor:
 
         return current_frame
 
-    def _VLM_processing(self, frame) -> Optional[Dict[str, Any]]:
-        """Run VLM processing on a single frame: dedup, prompt, inference, result handling.
+    def _VLM_processing(
+        self,
+        frames,
+    ) -> Optional[Dict[str, Any]]:
+        """Run VLM processing on a motion-triggered frame chunk.
 
         Synchronous — calls the model provider's _sync_generate_content directly.
-        Reusable from both the live capture loop (via asyncio.to_thread) and
-        offline scripts (called directly).
-
-        Args:
-            frame: OpenCV frame (already resized to target resolution), or None.
+        The capture loop decides whether a chunk contains enough motion to send,
+        but the chunk itself contains frames from the whole time window.
 
         Returns:
             Results dict with task_updates, processing_time_ms, prompt, and frame
-            if VLM was called and returned results. None if skipped (no frame,
-            no tasks, duplicate frame, or inference error).
+            if VLM was called and returned results. None if skipped.
         """
-        if frame is None or not self._tasks_list:
+        if frames is None or not self._tasks_list:
+            return None
+
+        frames = normalize_frames(frames)
+        if not frames:
             return None
 
         self._process_loop_ticks += 1
+        self._log_periodic_frame_debug(frames[-1])
 
-        if self._process_loop_ticks % 100 == 0:
-            frame_mean = frame.mean()
-            logger.debug(
-                f"Camera index={self.camera_index}: frame shape={frame.shape}, "
-                f"mean={frame_mean:.2f}, min={frame.min()}, max={frame.max()}"
-            )
-
-        if self._is_frame_duplicate(frame):
-            self._frames_skipped += 1
-            self._consecutive_skips += 1
-            if self._frames_skipped % 100 == 1:
-                logger.info(
-                    "Skipping duplicate frames [camera=%s]: %d total skipped (diff < %.1f). "
-                    "If the scene is static, the model won't be called.",
-                    self.camera_index,
-                    self._frames_skipped,
-                    self._frame_diff_threshold,
-                )
-            if self._output_history:
-                output = {**self._output_history[-1], "skipped": True}
-                self._output_history.append(output)
-                return output
-            logger.debug(
-                "Skipping duplicate frame before any successful VLM output exists [camera=%s]",
-                self.camera_index,
-            )
+        model_input = self._prepare_model_input(frames)
+        if model_input is None:
             return None
-
-        prompt = self._build_prompt()
-        image_base64 = self._frame_to_base64(frame)
-        if not image_base64:
-            return None
+        sampled_frames, model_frame, prompt, image_base64 = model_input
 
         t0 = time.time()
         if self._total_output_count == 0:
             logger.info("First VLM inference attempt [camera=%s] (base_url from provider env)", self.camera_index)
+
+        self._record_model_input_attempt(
+            model_frame=model_frame,
+            sampled_frames=sampled_frames,
+            raw_frame_count=len(frames),
+            prompt=prompt,
+        )
+        results = self._call_model(image_base64, prompt)
+        self._consecutive_skips = 0
+
+        if results:
+            self._record_vlm_results(
+                results,
+                model_frame=model_frame,
+                sampled_frames=sampled_frames,
+                raw_frame_count=len(frames),
+                prompt=prompt,
+                started_at=t0,
+            )
+
+        return results
+
+    def _record_model_input_attempt(
+        self,
+        *,
+        model_frame: Any,
+        sampled_frames: List[Any],
+        raw_frame_count: int,
+        prompt: str,
+    ) -> None:
+        """Store the exact model input image before the provider call returns."""
+
+        self._latest_model_input = {
+            "timestamp": time.time(),
+            "frame": model_frame.copy(),
+            "evidence_frame": sampled_frames[-1].copy(),
+            "prompt": prompt,
+            "chunk": build_chunk_metadata(
+                duration_seconds=self._video_chunk_seconds,
+                sampled_frame_count=len(sampled_frames),
+                raw_frame_count=raw_frame_count,
+            ),
+        }
+
+    def _log_periodic_frame_debug(self, frame: Any) -> None:
+        """Log occasional low-level frame stats for capture debugging."""
+
+        if self._process_loop_ticks % 100 != 0:
+            return
+        frame_mean = frame.mean()
+        logger.debug(
+            f"Camera index={self.camera_index}: frame shape={frame.shape}, "
+            f"mean={frame_mean:.2f}, min={frame.min()}, max={frame.max()}"
+        )
+
+    def _prepare_model_input(
+        self,
+        frames: List[Any],
+    ) -> Optional[Tuple[List[Any], Any, str, str]]:
+        """Build a contact sheet from every valid chunk frame and encode it."""
+
+        sampled_frames = subsample_frames(normalize_frames(frames), self._video_chunk_subsample_frames)
+        model_frame = build_frame_contact_sheet(sampled_frames, output_size=self._target_resolution)
+        if model_frame is None:
+            return None
+
+        prompt = self._build_prompt(
+            frame_count=len(sampled_frames),
+        )
+        image_base64 = self._frame_to_base64(model_frame)
+        if not image_base64:
+            return None
+
+        return sampled_frames, model_frame, prompt, image_base64
+
+    def _call_model(self, image_base64: str, prompt: str) -> Optional[Dict[str, Any]]:
+        """Call the configured VLM provider and normalize inference errors."""
 
         try:
             response: VideoIngestorOutput = self._model_provider._sync_generate_content(
@@ -498,8 +634,8 @@ class VideoStreamIngestor:
                 response_model=VideoIngestorOutput,
                 usage_context={"source": "task_ingestor"},
             )
-            results = response.model_dump()
             self._latest_inference_error = None
+            return response.model_dump()
         except Exception as e:
             import httpx
             self._latest_inference_error = self._build_inference_error_info(e)
@@ -510,21 +646,97 @@ class VideoStreamIngestor:
                 )
             else:
                 logger.error(f"LLM inference error [camera={self.camera_index}]: {e}", exc_info=True)
-            results = None
+            return None
 
-        self._last_processed_frame = frame.copy()
-        self._consecutive_skips = 0
+    def _record_vlm_results(
+        self,
+        results: Dict[str, Any],
+        *,
+        model_frame: Any,
+        sampled_frames: List[Any],
+        raw_frame_count: int,
+        prompt: str,
+        started_at: float,
+    ) -> None:
+        """Attach debug metadata, store history, and apply task updates."""
 
-        if results:
-            results["processing_time_ms"] = round((time.time() - t0) * 1000)
-            results["timestamp"] = time.time()
-            results["frame"] = frame.copy()
-            results["prompt"] = prompt
-            self._output_history.append(results)
-            self._total_output_count += 1
-            self._process_ml_results(results)
+        results["processing_time_ms"] = round((time.time() - started_at) * 1000)
+        results["timestamp"] = time.time()
+        results["frame"] = model_frame.copy()
+        results["evidence_frame"] = sampled_frames[-1].copy()
+        results["prompt"] = prompt
+        results["chunk"] = build_chunk_metadata(
+            duration_seconds=self._video_chunk_seconds,
+            sampled_frame_count=len(sampled_frames),
+            raw_frame_count=raw_frame_count,
+        )
+        self._output_history.append(results)
+        self._total_output_count += 1
+        self._process_ml_results(results)
 
-        return results
+    async def _chunk_processing_loop(self) -> None:
+        """Process completed chunks sequentially while capture continues."""
+
+        while self._running:
+            queue = self._chunk_queue
+            if queue is None:
+                await asyncio.sleep(0.1)
+                continue
+            try:
+                chunk = await asyncio.wait_for(queue.get(), timeout=0.2)
+                if self._queued_chunk_created_at:
+                    self._queued_chunk_created_at.popleft()
+                if self._queued_chunk_frame_counts:
+                    self._queued_chunk_frame_counts.popleft()
+            except asyncio.TimeoutError:
+                continue
+            try:
+                await asyncio.to_thread(
+                    self._VLM_processing,
+                    chunk,
+                )
+            except Exception as e:
+                logger.error(
+                    "Error processing video chunk for camera index=%s: %s",
+                    self.camera_index,
+                    e,
+                    exc_info=True,
+                )
+            finally:
+                queue.task_done()
+
+    def _enqueue_frame_chunk(self, frames: List[Any]) -> None:
+        """Queue a completed motion-triggered chunk without blocking capture."""
+
+        if not frames or not self._tasks_list:
+            return
+
+        queue = self._chunk_queue
+        if queue is None:
+            return
+
+        chunk = [frame.copy() for frame in frames]
+        try:
+            queue.put_nowait(chunk)
+            self._queued_chunk_created_at.append(time.time())
+            self._queued_chunk_frame_counts.append(len(chunk))
+        except asyncio.QueueFull:
+            try:
+                queue.get_nowait()
+                queue.task_done()
+                if self._queued_chunk_created_at:
+                    self._queued_chunk_created_at.popleft()
+                if self._queued_chunk_frame_counts:
+                    self._queued_chunk_frame_counts.popleft()
+            except asyncio.QueueEmpty:
+                pass
+            queue.put_nowait(chunk)
+            self._queued_chunk_created_at.append(time.time())
+            self._queued_chunk_frame_counts.append(len(chunk))
+            logger.warning(
+                "Dropped oldest queued video chunk for camera=%s because inference is behind capture",
+                self.camera_index,
+            )
 
     async def _capture_loop(self):
         """Capture frames and run VLM processing in a single loop.
@@ -562,21 +774,40 @@ class VideoStreamIngestor:
                     await asyncio.sleep(0.1)
 
             self._consecutive_capture_failures = 0
+            chunk_frames: List[Any] = []
+            chunk_has_motion = False
+            chunk_start_monotonic = time.monotonic()
 
             while self._running:
                 try:
                     frame = await asyncio.to_thread(self._frame_capture)
                     if frame is None:
-                        if self.is_network_stream and self._consecutive_capture_failures >= self._max_capture_failures:
-                            reopened = await self._reconnect_network_stream()
-                            if reopened:
-                                self._consecutive_capture_failures = 0
+                        await self._handle_missing_frame()
+                        continue
+
+                    now_monotonic = time.monotonic()
+                    if not self._tasks_list:
+                        self._update_filter_preview(frame)
+                        chunk_frames = []
+                        chunk_has_motion = False
+                        chunk_start_monotonic = now_monotonic
                         await asyncio.sleep(0.05)
                         continue
-                    await asyncio.to_thread(self._VLM_processing, frame)
+
+                    chunk_has_motion = self._add_frame_to_chunk(chunk_frames, frame) or chunk_has_motion
+
+                    if is_chunk_complete(chunk_start_monotonic, now_monotonic, self._video_chunk_seconds):
+                        if chunk_has_motion:
+                            self._enqueue_frame_chunk(chunk_frames)
+                        chunk_frames = []
+                        chunk_has_motion = False
+                        chunk_start_monotonic = now_monotonic
                 except Exception as e:
                     logger.error(f"Error in capture/process loop for camera index={self.camera_index}: {e}", exc_info=True)
                     await asyncio.sleep(0.1)
+
+            if chunk_frames and chunk_has_motion:
+                self._enqueue_frame_chunk(chunk_frames)
 
             logger.info(f"Stopped capture loop for camera index={self.camera_index}")
 
@@ -591,20 +822,117 @@ class VideoStreamIngestor:
             if self._loop is current_task:
                 self._loop = None
             self._release_camera()
-    
+
+    async def _handle_missing_frame(self) -> None:
+        """Handle capture failures and reconnect network streams when needed."""
+
+        if self.is_network_stream and self._consecutive_capture_failures >= self._max_capture_failures:
+            reopened = await self._reconnect_network_stream()
+            if reopened:
+                self._consecutive_capture_failures = 0
+        await asyncio.sleep(0.05)
+
+    def _add_frame_to_chunk(self, chunk_frames: List[Any], frame: Any) -> bool:
+        """Append a frame and return whether it crossed the motion threshold."""
+
+        if self._is_frame_duplicate(frame):
+            self._record_duplicate_skip()
+            chunk_frames.append(frame.copy())
+            return False
+
+        self._remember_frame_for_diff(frame)
+        semantic_result = self._apply_semantic_filter(frame)
+        if not semantic_result.should_keep:
+            self._record_semantic_skip()
+            chunk_frames.append(frame.copy())
+            return False
+
+        chunk_frames.append(frame.copy())
+        return True
+
     def _is_frame_duplicate(self, frame: Any) -> bool:
         """Check if a frame is effectively identical to the last processed frame.
         
         Uses mean absolute pixel difference on the 0-255 pixel scale.
         Returns True if the frame should be skipped.
         """
-        if self._last_processed_frame is None:
+        if self._last_diff_reference_frame is None:
             return False
-        if frame.shape != self._last_processed_frame.shape:
+        if frame.shape != self._last_diff_reference_frame.shape:
             return False
-        diff = mean_absolute_frame_difference(frame, self._last_processed_frame)
+        diff = mean_absolute_frame_difference(frame, self._last_diff_reference_frame)
         return diff < self._frame_diff_threshold
-    
+
+    def _remember_frame_for_diff(self, frame: Any) -> None:
+        """Update the frame-diff reference after a frame passes motion filtering."""
+
+        self._last_diff_reference_frame = frame.copy()
+
+    def _record_duplicate_skip(self) -> None:
+        """Record a frame-diff skip for UI/debug counters."""
+
+        self._frames_skipped += 1
+        self._consecutive_skips += 1
+        if self._frames_skipped % 100 == 1:
+            logger.info(
+                "Skipping duplicate frames [camera=%s]: %d total skipped (diff < %.1f). "
+                "If the scene is static, the model won't be called.",
+                self.camera_index,
+                self._frames_skipped,
+                self._frame_diff_threshold,
+            )
+
+    def _apply_semantic_filter(self, frame: Any) -> SemanticFilterResult:
+        """Run the optional semantic filter after pixel-diff filtering."""
+
+        previous_timestamp = self._latest_semantic_filter_timestamp
+        now = time.time()
+        result = self._semantic_filter.score(frame)
+        self._latest_semantic_filter_result = result
+        self._latest_semantic_filter_timestamp = now
+        self._semantic_evaluations += 1
+        if previous_timestamp is not None and now > previous_timestamp:
+            instant_fps = 1.0 / max(now - previous_timestamp, 1e-6)
+            self._semantic_filter_fps_ema = (
+                instant_fps
+                if self._semantic_filter_fps_ema <= 0
+                else (0.85 * self._semantic_filter_fps_ema) + (0.15 * instant_fps)
+            )
+        if result.should_keep:
+            self._semantic_consecutive_skips = 0
+        return result
+
+    def _record_semantic_skip(self) -> None:
+        """Record a semantic-filter skip for UI/debug counters."""
+
+        self._semantic_frames_skipped += 1
+        self._semantic_consecutive_skips += 1
+        result = self._latest_semantic_filter_result
+        if self._semantic_frames_skipped % 25 == 1:
+            logger.info(
+                "Skipping semantically irrelevant frames [camera=%s]: %d total skipped "
+                "(score %.3f, threshold %.3f, keywords=%s)",
+                self.camera_index,
+                self._semantic_frames_skipped,
+                result.score if result else 0.0,
+                result.threshold if result else 0.0,
+                ", ".join(result.keywords) if result else "",
+            )
+
+    def _update_filter_preview(self, frame: Any) -> None:
+        """Update frame-diff and semantic state for debug preview without VLM work."""
+
+        config = self._semantic_filter.config
+        if not config.enabled or not config.keywords.strip():
+            return
+        if self._is_frame_duplicate(frame):
+            self._record_duplicate_skip()
+            return
+        self._remember_frame_for_diff(frame)
+        semantic_result = self._apply_semantic_filter(frame)
+        if not semantic_result.should_keep:
+            self._record_semantic_skip()
+
     def _frame_to_base64(self, frame: Any) -> str:
         """Convert OpenCV frame to base64 encoded image."""
         return frame_to_base64(frame)
@@ -631,9 +959,27 @@ class VideoStreamIngestor:
             end_hold_seconds=self._evidence_clip_end_hold_seconds,
         )
     
-    def _build_prompt(self) -> str:
+    def _build_prompt(
+        self,
+        *,
+        frame_count: int = 1,
+    ) -> str:
         """Build the prompt for the LLM based on tasks and history."""
-        return build_video_ingestor_prompt(self._tasks_list, context_label=self.camera_index)
+        visual_context = None
+        if frame_count > 1:
+            visual_context = (
+                f"The attached image is a chronological contact sheet of {frame_count} "
+                f"frames from one {self._video_chunk_seconds:.2f}s video chunk. "
+                "Frame labels count upward in time from earliest to latest. "
+                f"If more than {self._video_chunk_subsample_frames} frames were available, "
+                "these frames were evenly sampled from the chunk. "
+                "Use all frames to detect short actions or state changes that may appear in only one frame."
+            )
+        return build_video_ingestor_prompt(
+            self._tasks_list,
+            context_label=self.camera_index,
+            visual_context=visual_context,
+        )
 
     def _schedule_stop_if_idle(self) -> None:
         if len(self._tasks_list) != 0:
@@ -675,8 +1021,12 @@ class VideoStreamIngestor:
             return
 
         task_updates = ml_results.get("task_updates", [])
-        note_frame_bytes = self._frame_to_jpeg_bytes(ml_results.get("frame"))
-        note_video_frames = self._build_evidence_clip_frames(ml_results.get("frame"))
+        note_frame = ml_results.get("frame")
+        evidence_frame = ml_results.get("evidence_frame")
+        if evidence_frame is None:
+            evidence_frame = note_frame
+        note_frame_bytes = self._frame_to_jpeg_bytes(note_frame)
+        note_video_frames = self._build_evidence_clip_frames(evidence_frame)
         available_task_numbers = [t.task_number for t in self._tasks_list]
         completed_task_seen = False
 
@@ -831,6 +1181,15 @@ class VideoStreamIngestor:
         
         self._loop = None
 
+        if self._chunk_processor_task and not self._chunk_processor_task.done():
+            self._chunk_processor_task.cancel()
+            try:
+                await asyncio.wait_for(self._chunk_processor_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+        self._chunk_processor_task = None
+        self._chunk_queue = None
+
         self._release_camera()
         
         logger.info(f"Stopped ingestor for camera index={self.camera_index}")
@@ -853,6 +1212,13 @@ class VideoStreamIngestor:
         if self._latest_inference_error is None:
             return None
         return dict(self._latest_inference_error)
+
+    def get_latest_model_input(self) -> Optional[Dict[str, Any]]:
+        """Return the latest exact image/prompt sent to the model provider."""
+
+        if self._latest_model_input is None:
+            return None
+        return dict(self._latest_model_input)
 
     def get_latest_frame_timestamp(self) -> Optional[float]:
         """Return when the latest frame was captured."""
@@ -932,6 +1298,82 @@ class VideoStreamIngestor:
             "frame_diff_threshold": float(self._frame_diff_threshold),
             "threshold_unit": self.FRAME_DIFF_THRESHOLD_UNIT,
         }
+
+    def get_semantic_filter_status(self) -> Dict[str, Any]:
+        """Return semantic frame-filter config and latest scoring status."""
+
+        config = self._semantic_filter.config
+        result = self._latest_semantic_filter_result
+        payload: Dict[str, Any] = {
+            "enabled": config.enabled,
+            "keywords": config.keywords,
+            "threshold": float(config.threshold),
+            "threshold_mode": config.threshold_mode,
+            "reduce": config.reduce,
+            "smoothing": float(config.smoothing),
+            "ensemble": config.ensemble,
+            "frames_skipped": self._semantic_frames_skipped,
+            "consecutive_skips": self._semantic_consecutive_skips,
+            "evaluations": self._semantic_evaluations,
+            "latest_evaluation_timestamp": self._latest_semantic_filter_timestamp,
+            "evaluation_fps": float(self._semantic_filter_fps_ema),
+            "model": SEMANTIC_AUTOGAZE_MODEL_NAME,
+        }
+        if result is not None:
+            payload.update(
+                {
+                    "last_score": float(result.score),
+                    "last_threshold": float(result.threshold),
+                    "last_should_keep": bool(result.should_keep),
+                    "last_keywords": result.keywords,
+                    "last_inference_ms": float(result.inference_ms),
+                    "last_error": result.error,
+                    "has_heatmap": result.overlay_frame is not None,
+                }
+            )
+        return payload
+
+    def get_semantic_filter_config(self) -> Dict[str, Any]:
+        """Return the active semantic-filter configuration."""
+
+        return self.get_semantic_filter_status()
+
+    def set_semantic_filter_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Update the optional semantic-filter configuration."""
+
+        current = self._semantic_filter.config
+        merged = {
+            "enabled": current.enabled,
+            "keywords": current.keywords,
+            "threshold": current.threshold,
+            "threshold_mode": current.threshold_mode,
+            "reduce": current.reduce,
+            "smoothing": current.smoothing,
+            "ensemble": current.ensemble,
+        }
+        merged.update(config)
+        next_config = coerce_config(merged)
+        self._semantic_filter.update_config(next_config)
+        logger.info(
+            "Updated semantic filter [camera=%s]: enabled=%s keywords=%r threshold=%.3f mode=%s reduce=%s smoothing=%.2f ensemble=%s",
+            self.camera_index,
+            next_config.enabled,
+            next_config.keywords,
+            next_config.threshold,
+            next_config.threshold_mode,
+            next_config.reduce,
+            next_config.smoothing,
+            next_config.ensemble,
+        )
+        return self.get_semantic_filter_status()
+
+    def get_latest_semantic_filter_heatmap(self) -> Optional[Any]:
+        """Return the latest semantic-filter heatmap overlay frame."""
+
+        result = self._latest_semantic_filter_result
+        if result is None or result.overlay_frame is None:
+            return None
+        return result.overlay_frame.copy()
 
     def get_frame_diff_threshold(self) -> float:
         """Return the active average-pixel-difference threshold."""

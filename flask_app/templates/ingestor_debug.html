@@ -89,12 +89,81 @@
             border-bottom: 1px solid #404040;
         }
 
-        #currentFrame {
+        #currentFrame,
+        #semanticLiveFrame {
             max-width: 100%;
             border: 2px solid #404040;
             border-radius: 8px;
             display: block;
             margin: 10px 0;
+        }
+
+        .semantic-live-frame-wrap {
+            min-height: 260px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 10px;
+            background: #111;
+            border: 1px solid #333;
+            overflow: hidden;
+        }
+
+        #semanticLiveFrame {
+            width: 100%;
+            border: none;
+            margin: 0;
+            object-fit: contain;
+        }
+
+        .semantic-live-metrics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .semantic-live-metric {
+            color: #b8f7d8;
+            background: rgba(25, 195, 125, 0.12);
+            border: 1px solid rgba(25, 195, 125, 0.3);
+            border-radius: 999px;
+            font-size: 12px;
+            padding: 4px 10px;
+        }
+
+        .semantic-live-note {
+            margin-top: 8px;
+            color: #888;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .chunk-queue-bar {
+            position: relative;
+            width: 100%;
+            height: 14px;
+            margin-top: 12px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #242424;
+            border: 1px solid #3a3a3a;
+        }
+
+        .chunk-queue-fill {
+            width: 0%;
+            height: 100%;
+            border-radius: inherit;
+            background: #19c37d;
+            transition: width 0.2s ease, background 0.2s ease;
+        }
+
+        .chunk-queue-fill.warn {
+            background: #d4a017;
+        }
+
+        .chunk-queue-fill.danger {
+            background: #e05252;
         }
 
         .frame-timestamp {
@@ -181,6 +250,79 @@
 
         .frame-skip-status {
             color: #888;
+        }
+
+        .semantic-preview {
+            margin-top: 14px;
+        }
+
+        .semantic-preview img {
+            width: 100%;
+            max-height: 520px;
+            object-fit: contain;
+            border-radius: 8px;
+            background: #1e1e1e;
+            border: 1px solid #333;
+        }
+
+        .semantic-controls-grid {
+            display: grid;
+            grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .semantic-controls-grid label {
+            color: #aaa;
+            font-size: 12px;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .semantic-controls-grid input,
+        .semantic-controls-grid select {
+            width: 100%;
+            background: #1f1f1f;
+            border: 1px solid #444;
+            color: #ececec;
+            border-radius: 6px;
+            padding: 7px 8px;
+        }
+
+        .semantic-threshold-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .semantic-threshold-row input[type="range"] {
+            flex: 1;
+            accent-color: #19c37d;
+            padding: 0;
+        }
+
+        .semantic-threshold-value {
+            min-width: 44px;
+            color: #19c37d;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            text-align: right;
+        }
+
+        .semantic-toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+            color: #ececec;
+            font-size: 13px;
+        }
+
+        .semantic-status {
+            color: #888;
+            font-size: 12px;
+            margin-top: 8px;
         }
 
         .prompt-pre {
@@ -365,6 +507,10 @@
                     badge.textContent = 'Last Output';
                     badge.className = 'debug-status-badge stopped';
                     return true;
+                } else if (data.semantic_preview_available) {
+                    badge.textContent = 'Preview';
+                    badge.className = 'debug-status-badge stopped';
+                    return true;
                 } else {
                     badge.textContent = 'No Ingestor';
                     badge.className = 'debug-status-badge no-ingestor';
@@ -388,11 +534,16 @@
             document.getElementById('debugContent').innerHTML = `
                 <div class="debug-grid">
                     <div class="debug-panel full-width">
-                        <h2>Current Frame</h2>
-                        <img id="currentFrame" alt="Current frame" />
-                        <div class="frame-timestamp" id="frameTimestamp"></div>
-                        <div id="frameErrorBadge" class="frame-error-badge" style="display: none;"></div>
-                        <div id="frameDedupBadge" class="frame-dedup-badge" style="display: none;"></div>
+                        <h2>Realtime Semantic Filter Preview</h2>
+                        <div class="semantic-live-frame-wrap">
+                            <img id="semanticLiveFrame" alt="Realtime semantic filter heatmap stream" />
+                        </div>
+                        <div id="semanticLiveMetrics" class="semantic-live-metrics">
+                            <span class="semantic-live-metric">Waiting for frames…</span>
+                        </div>
+                        <div id="semanticLiveNote" class="semantic-live-note">
+                            This stream shows the latest frame that passed frame-difference filtering, with the local semantic heatmap overlay when semantic filtering is enabled.
+                        </div>
                         <div class="frame-controls">
                             <div class="frame-controls-header">
                                 <div class="frame-controls-title">Frame skip threshold</div>
@@ -412,6 +563,90 @@
                                 <span class="frame-skip-status" id="frameSkipThresholdStatus">Loading threshold…</span>
                             </div>
                         </div>
+                        <div class="frame-controls">
+                            <div class="frame-controls-header">
+                                <div class="frame-controls-title">Semantic filter</div>
+                                <div class="frame-controls-help">Runs after frame-diff filtering. When enabled, frames below the semantic threshold are skipped before VLM analysis.</div>
+                            </div>
+                            <label class="semantic-toggle-row">
+                                <input id="semanticEnabled" type="checkbox" style="width:auto;" />
+                                Enable semantic filtering
+                            </label>
+                            <div class="semantic-controls-grid">
+                                <div>
+                                    <label for="semanticKeywords">Keywords</label>
+                                    <input id="semanticKeywords" type="text" placeholder="person, face, hand" />
+                                </div>
+                                <div>
+                                    <label for="semanticReduce">Combine keywords</label>
+                                    <select id="semanticReduce">
+                                        <option value="max">max</option>
+                                        <option value="mean">mean</option>
+                                        <option value="min">min</option>
+                                        <option value="sum">sum</option>
+                                        <option value="softmax">softmax</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="semanticEnsemble">Ensemble</label>
+                                    <label class="semantic-toggle-row" style="margin-top: 8px;">
+                                        <input id="semanticEnsemble" type="checkbox" style="width:auto;" />
+                                        Horizontal flip ensemble
+                                    </label>
+                                </div>
+                                <div>
+                                    <label for="semanticThresholdMode">Threshold mode</label>
+                                    <select id="semanticThresholdMode">
+                                        <option value="absolute">absolute score</option>
+                                        <option value="percentile">percentile</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="semanticThreshold">Threshold</label>
+                                    <div class="semantic-threshold-row">
+                                        <input id="semanticThreshold" type="range" min="0" max="1" step="0.01" value="0.50" />
+                                        <span id="semanticThresholdValue" class="semantic-threshold-value">0.50</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label for="semanticSmoothing">Temporal smoothing</label>
+                                    <div class="semantic-threshold-row">
+                                        <input id="semanticSmoothing" type="range" min="0" max="0.95" step="0.05" value="0.00" />
+                                        <span id="semanticSmoothingValue" class="semantic-threshold-value">0.00</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="semantic-status" id="semanticFilterStatus">Loading semantic filter…</div>
+                        </div>
+                        <div class="frame-controls">
+                            <div class="frame-controls-header">
+                                <div class="frame-controls-title">VLM chunk queue</div>
+                                <div class="frame-controls-help">After frame-diff and semantic filtering, accepted chunks wait here for model-provider calls.</div>
+                            </div>
+                            <div id="chunkQueueMetrics" class="semantic-live-metrics">
+                                <span class="semantic-live-metric">Loading queue…</span>
+                            </div>
+                            <div class="chunk-queue-bar" aria-label="VLM chunk queue usage">
+                                <div id="chunkQueueFill" class="chunk-queue-fill"></div>
+                            </div>
+                            <div class="semantic-controls-grid">
+                                <div>
+                                    <label for="chunkMaxFrames">Max frames per chunk sent to VLM</label>
+                                    <div class="semantic-threshold-row">
+                                        <input id="chunkMaxFrames" type="range" min="1" max="60" step="1" value="4" />
+                                        <span id="chunkMaxFramesValue" class="semantic-threshold-value">4</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="semantic-status" id="chunkSettingsStatus">Loading chunk settings…</div>
+                        </div>
+                    </div>
+                    <div class="debug-panel full-width">
+                        <h2>Model Provider Input</h2>
+                        <img id="currentFrame" alt="Exact image sent to the model provider" />
+                        <div class="frame-timestamp" id="frameTimestamp"></div>
+                        <div id="frameErrorBadge" class="frame-error-badge" style="display: none;"></div>
+                        <div id="frameDedupBadge" class="frame-dedup-badge" style="display: none;"></div>
                     </div>
                     <div class="debug-panel">
                         <h2>Ingestor Tasks</h2>
@@ -464,6 +699,7 @@
                 } else if (dedupBadge) {
                     dedupBadge.style.display = 'none';
                 }
+                updateSemanticFilterDisplay(data.semantic_filter, data.semantic_heatmap_base64);
                 if (data.prompt) {
                     prompt.textContent = data.prompt_notice ? `${data.prompt_notice}\n\n${data.prompt}` : data.prompt;
                 } else if (data.prompt_notice) {
@@ -473,6 +709,208 @@
                 }
             } catch (e) {
                 console.error('Error fetching frame:', e);
+            }
+        }
+
+        function updateSemanticFilterDisplay(status) {
+            if (!status) return;
+            renderSemanticLiveMetrics({ semantic_filter: status }, { updateQueue: false });
+        }
+
+        function renderSemanticLiveMetrics(data, options = {}) {
+            const metrics = document.getElementById('semanticLiveMetrics');
+            const note = document.getElementById('semanticLiveNote');
+            if (!metrics) return;
+
+            const status = data.semantic_filter || {};
+            const dedup = data.dedup_status || {};
+            const fps = Number(firstDefined(status.evaluation_fps, 0));
+            const inferenceMs = Number(firstDefined(status.last_inference_ms, 0));
+            const score = Number(firstDefined(status.last_score, 0));
+            const threshold = Number(firstDefined(status.last_threshold, status.threshold, 0));
+            const smoothing = Number(firstDefined(status.smoothing, 0));
+            const ensemble = firstDefined(status.ensemble, 'off');
+            const evaluations = Number(firstDefined(status.evaluations, 0));
+            const diffSkips = Number(firstDefined(dedup.consecutive_skips, 0));
+            const semanticSkips = Number(firstDefined(status.consecutive_skips, 0));
+            const semanticAgeMs = Number(firstDefined(data.semantic_result_age_ms, 0));
+            const frameAgeMs = Number(firstDefined(data.frame_age_ms, 0));
+
+            const chips = [];
+            chips.push(status.enabled ? 'semantic on' : 'semantic off');
+            chips.push(data.has_heatmap ? 'heatmap live' : (data.has_frame ? 'raw frame live' : 'waiting for frame'));
+            if (status.enabled && fps > 0) chips.push(`${fps.toFixed(1)} semantic fps`);
+            if (status.enabled && inferenceMs > 0) chips.push(`${inferenceMs.toFixed(1)} ms local model`);
+            if (status.enabled && smoothing > 0) chips.push(`${smoothing.toFixed(2)} smoothing`);
+            if (status.enabled && ensemble !== 'off') chips.push(`${ensemble} ensemble`);
+            if (status.enabled && semanticAgeMs > 0) chips.push(`${semanticAgeMs < 1000 ? semanticAgeMs.toFixed(0) + ' ms' : (semanticAgeMs / 1000).toFixed(1) + ' s'} heatmap age`);
+            if (!data.has_heatmap && frameAgeMs > 0) chips.push(`${frameAgeMs < 1000 ? frameAgeMs.toFixed(0) + ' ms' : (frameAgeMs / 1000).toFixed(1) + ' s'} frame age`);
+            if (evaluations > 0) chips.push(`${evaluations} evals`);
+            if (status.enabled) chips.push(`score ${score.toFixed(3)} / ${threshold.toFixed(3)}`);
+            if (diffSkips > 0) chips.push(`${diffSkips} diff skips`);
+            if (semanticSkips > 0) chips.push(`${semanticSkips} semantic skips`);
+
+            metrics.innerHTML = chips
+                .map(chip => `<span class="semantic-live-metric">${escapeHtml(chip)}</span>`)
+                .join('');
+
+            if (note) {
+                if (status.last_error) {
+                    note.textContent = `Semantic filter error: ${status.last_error}`;
+                } else if (!data.has_frame) {
+                    note.textContent = 'No frame is available from the ingestor yet.';
+                } else if (!status.enabled) {
+                    note.textContent = 'Semantic filtering is off. The preview stream shows the latest ingestor frame.';
+                } else if (!data.has_heatmap) {
+                    note.textContent = 'Waiting for a frame to pass frame-difference filtering so the local semantic model can generate the first heatmap.';
+                } else {
+                    note.textContent = 'Showing the latest local semantic heatmap. VLM outputs below update only when provider calls return.';
+                }
+            }
+            if (options.updateQueue !== false) {
+                renderChunkQueueMetrics(data.chunk_queue);
+            }
+        }
+
+        function formatDurationMs(ms) {
+            const value = Number(ms || 0);
+            if (value < 1000) return `${value.toFixed(0)} ms`;
+            return `${(value / 1000).toFixed(1)} s`;
+        }
+
+        function renderChunkQueueMetrics(queue) {
+            const metrics = document.getElementById('chunkQueueMetrics');
+            const fill = document.getElementById('chunkQueueFill');
+            if (!metrics) return;
+            if (!queue) {
+                metrics.innerHTML = '<span class="semantic-live-metric">waiting for queue status…</span>';
+                if (fill) {
+                    fill.style.width = '0%';
+                    fill.className = 'chunk-queue-fill';
+                }
+                return;
+            }
+            const queued = Number(firstDefined(queue.queued_chunks, 0));
+            const max = Number(firstDefined(queue.video_chunk_queue_maxsize, 0));
+            const ratio = max > 0 ? Math.min(1, queued / max) : 0;
+            const maxFrames = Number(firstDefined(queue.video_chunk_subsample_frames, 0));
+            const frameCounts = Array.isArray(queue.queued_chunk_frame_counts) ? queue.queued_chunk_frame_counts : [];
+            const chips = [
+                `${queued}/${max || '?'} chunks queued`,
+                `${Math.round(ratio * 100)}% full`,
+                `max ${maxFrames || '?'} frames/contact sheet`,
+            ];
+            if (queue.oldest_queued_chunk_age_ms != null) {
+                chips.push(`oldest ${formatDurationMs(queue.oldest_queued_chunk_age_ms)}`);
+            }
+            if (frameCounts.length > 0) {
+                chips.push(`queued frames: ${frameCounts.join(', ')}`);
+            }
+            metrics.innerHTML = chips
+                .map(chip => `<span class="semantic-live-metric">${escapeHtml(chip)}</span>`)
+                .join('');
+            if (fill) {
+                let levelClass = '';
+                if (ratio >= 0.8) {
+                    levelClass = ' danger';
+                } else if (ratio >= 0.6) {
+                    levelClass = ' warn';
+                }
+                fill.style.width = `${Math.round(ratio * 100)}%`;
+                fill.className = `chunk-queue-fill${levelClass}`;
+            }
+        }
+
+        function setChunkMaxFramesUi(value, statusText = '') {
+            const slider = document.getElementById('chunkMaxFrames');
+            const valueLabel = document.getElementById('chunkMaxFramesValue');
+            const status = document.getElementById('chunkSettingsStatus');
+            const numericValue = Math.max(1, Math.round(Number(value || 1)));
+            if (slider && document.activeElement !== slider) {
+                slider.value = String(numericValue);
+            }
+            if (valueLabel) valueLabel.textContent = String(numericValue);
+            if (status && statusText) status.textContent = statusText;
+        }
+
+        async function loadChunkSettings() {
+            try {
+                const resp = await fetchNoStore('/api/settings');
+                const data = await resp.json();
+                const settings = data.settings || {};
+                const setting = settings.VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES;
+                setChunkMaxFramesUi(setting ? setting.value : 4, 'Applied live: chunks above this cap are evenly subsampled before the VLM call.');
+            } catch (e) {
+                console.error('Error loading chunk settings:', e);
+                setChunkMaxFramesUi(4, 'Failed to load chunk settings');
+            }
+        }
+
+        let chunkMaxFramesSaveTimer = null;
+        let chunkMaxFramesSaveInFlight = false;
+
+        async function saveChunkMaxFrames(value) {
+            if (chunkMaxFramesSaveInFlight) return;
+            chunkMaxFramesSaveInFlight = true;
+            const count = Math.max(1, Math.round(Number(value || 1)));
+            try {
+                const resp = await fetchNoStore('/api/settings/VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: String(count) }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    setChunkMaxFramesUi(count, data.error || 'Failed to save max frames');
+                    return;
+                }
+                setChunkMaxFramesUi(count, 'Applied live to active ingestors');
+            } catch (e) {
+                console.error('Error saving chunk max frames:', e);
+                setChunkMaxFramesUi(count, 'Failed to save max frames');
+            } finally {
+                chunkMaxFramesSaveInFlight = false;
+            }
+        }
+
+        function bindChunkControls() {
+            const slider = document.getElementById('chunkMaxFrames');
+            if (!slider || slider.dataset.bound === 'true') return;
+            slider.dataset.bound = 'true';
+            slider.addEventListener('input', () => {
+                setChunkMaxFramesUi(slider.value, 'Saving…');
+                if (chunkMaxFramesSaveTimer) clearTimeout(chunkMaxFramesSaveTimer);
+                chunkMaxFramesSaveTimer = setTimeout(() => saveChunkMaxFrames(slider.value), 180);
+            });
+            slider.addEventListener('change', () => {
+                if (chunkMaxFramesSaveTimer) {
+                    clearTimeout(chunkMaxFramesSaveTimer);
+                    chunkMaxFramesSaveTimer = null;
+                }
+                saveChunkMaxFrames(slider.value);
+            });
+        }
+
+        let semanticLiveStreamStarted = false;
+
+        function startSemanticLiveStream() {
+            const img = document.getElementById('semanticLiveFrame');
+            if (!img || semanticLiveStreamStarted) return;
+            semanticLiveStreamStarted = true;
+            img.src = `/api/device/${IO_ID}/debug/semantic-preview/stream?t=${Date.now()}`;
+        }
+
+        async function updateSemanticLiveStatus() {
+            try {
+                const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/semantic-preview/status`);
+                const data = await resp.json();
+                if (!resp.ok) {
+                    renderSemanticLiveMetrics({ has_frame: false, has_heatmap: false, semantic_filter: { last_error: data.error || 'Failed to load semantic preview' } });
+                    return;
+                }
+                renderSemanticLiveMetrics(data);
+            } catch (e) {
+                console.error('Error fetching semantic live status:', e);
             }
         }
 
@@ -561,6 +999,122 @@
             });
         }
 
+        function setSemanticFilterUi(data, statusText = '') {
+            const enabled = document.getElementById('semanticEnabled');
+            const keywords = document.getElementById('semanticKeywords');
+            const reduce = document.getElementById('semanticReduce');
+            const ensemble = document.getElementById('semanticEnsemble');
+            const mode = document.getElementById('semanticThresholdMode');
+            const threshold = document.getElementById('semanticThreshold');
+            const thresholdValue = document.getElementById('semanticThresholdValue');
+            const smoothing = document.getElementById('semanticSmoothing');
+            const smoothingValue = document.getElementById('semanticSmoothingValue');
+            const status = document.getElementById('semanticFilterStatus');
+            if (!enabled) return;
+            const numericThreshold = Number(firstDefined(data.threshold, 0.5));
+            const numericSmoothing = Number(firstDefined(data.smoothing, 0.0));
+            if (document.activeElement !== enabled) enabled.checked = Boolean(data.enabled);
+            if (keywords && document.activeElement !== keywords) keywords.value = data.keywords || '';
+            if (reduce && document.activeElement !== reduce) reduce.value = data.reduce || 'max';
+            if (ensemble && document.activeElement !== ensemble) ensemble.checked = data.ensemble === 'hflip';
+            if (mode && document.activeElement !== mode) mode.value = data.threshold_mode || 'absolute';
+            if (threshold && document.activeElement !== threshold) threshold.value = numericThreshold.toFixed(2);
+            if (thresholdValue) thresholdValue.textContent = numericThreshold.toFixed(2);
+            if (smoothing && document.activeElement !== smoothing) smoothing.value = numericSmoothing.toFixed(2);
+            if (smoothingValue) smoothingValue.textContent = numericSmoothing.toFixed(2);
+            if (status) {
+                const pieces = [];
+                pieces.push(statusText || (data.source === 'active_ingestor' ? 'Applied to the running ingestor' : 'Saved for next ingestor start'));
+                if (data.last_inference_ms != null) pieces.push(`last inference ${Number(data.last_inference_ms).toFixed(1)} ms`);
+                if (data.last_error) pieces.push(`error: ${data.last_error}`);
+                status.textContent = pieces.join(' · ');
+            }
+        }
+
+        async function loadSemanticFilter() {
+            try {
+                const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/semantic-filter`);
+                const data = await resp.json();
+                if (!resp.ok) {
+                    setSemanticFilterUi({ enabled: false, keywords: '', threshold: 0.5, threshold_mode: 'absolute', reduce: 'max', smoothing: 0.0, ensemble: 'off' }, data.error || 'Failed to load semantic filter');
+                    return;
+                }
+                setSemanticFilterUi(data);
+            } catch (e) {
+                console.error('Error loading semantic filter:', e);
+                setSemanticFilterUi({ enabled: false, keywords: '', threshold: 0.5, threshold_mode: 'absolute', reduce: 'max', smoothing: 0.0, ensemble: 'off' }, 'Failed to load semantic filter');
+            }
+        }
+
+        let semanticSaveTimer = null;
+        let semanticSaveInFlight = false;
+
+        async function saveSemanticFilter() {
+            if (semanticSaveInFlight) return;
+            semanticSaveInFlight = true;
+            const enabled = document.getElementById('semanticEnabled');
+            const keywords = document.getElementById('semanticKeywords');
+            const reduce = document.getElementById('semanticReduce');
+            const ensemble = document.getElementById('semanticEnsemble');
+            const mode = document.getElementById('semanticThresholdMode');
+            const threshold = document.getElementById('semanticThreshold');
+            const smoothing = document.getElementById('semanticSmoothing');
+            try {
+                const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/semantic-filter`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        enabled: Boolean(enabled && enabled.checked),
+                        keywords: keywords ? keywords.value : '',
+                        reduce: reduce ? reduce.value : 'max',
+                        ensemble: ensemble && ensemble.checked ? 'hflip' : 'off',
+                        threshold_mode: mode ? mode.value : 'absolute',
+                        threshold: threshold ? Number(threshold.value) : 0.5,
+                        smoothing: smoothing ? Number(smoothing.value) : 0.0,
+                    }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    setSemanticFilterUi(data, data.error || 'Failed to save semantic filter');
+                    return;
+                }
+                setSemanticFilterUi(data, data.has_ingestor ? 'Applied live to the running ingestor' : 'Saved for next ingestor start');
+            } catch (e) {
+                console.error('Error saving semantic filter:', e);
+                const status = document.getElementById('semanticFilterStatus');
+                if (status) status.textContent = 'Failed to save semantic filter';
+            } finally {
+                semanticSaveInFlight = false;
+            }
+        }
+
+        function scheduleSemanticFilterSave() {
+            const status = document.getElementById('semanticFilterStatus');
+            const threshold = document.getElementById('semanticThreshold');
+            const thresholdValue = document.getElementById('semanticThresholdValue');
+            const smoothing = document.getElementById('semanticSmoothing');
+            const smoothingValue = document.getElementById('semanticSmoothingValue');
+            if (threshold && thresholdValue) {
+                thresholdValue.textContent = Number(threshold.value).toFixed(2);
+            }
+            if (smoothing && smoothingValue) {
+                smoothingValue.textContent = Number(smoothing.value).toFixed(2);
+            }
+            if (status) status.textContent = 'Saving…';
+            if (semanticSaveTimer) clearTimeout(semanticSaveTimer);
+            semanticSaveTimer = setTimeout(saveSemanticFilter, 90);
+        }
+
+        function bindSemanticFilterControls() {
+            ['semanticEnabled', 'semanticKeywords', 'semanticReduce', 'semanticEnsemble', 'semanticThresholdMode', 'semanticThreshold', 'semanticSmoothing'].forEach(id => {
+                const element = document.getElementById(id);
+                if (!element || element.dataset.bound === 'true') return;
+                element.dataset.bound = 'true';
+                element.addEventListener('input', scheduleSemanticFilterSave);
+                element.addEventListener('change', scheduleSemanticFilterSave);
+            });
+        }
+
         async function updateTasks() {
             try {
                 const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/tasks`);
@@ -645,15 +1199,22 @@
             const hasIngestor = await checkStatus();
             if (!hasIngestor) {
                 if (panelsRendered) { panelsRendered = false; }
+                semanticLiveStreamStarted = false;
                 renderNoIngestor();
                 return;
             }
             if (!panelsRendered) {
                 renderDebugPanels();
+                bindChunkControls();
                 bindFrameSkipControls();
+                bindSemanticFilterControls();
+                loadChunkSettings();
                 loadFrameSkipThreshold();
+                loadSemanticFilter();
+                startSemanticLiveStream();
                 panelsRendered = true;
             }
+            updateSemanticLiveStatus();
             updateFrame();
             updateTasks();
             updateHistory();

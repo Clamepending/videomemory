@@ -4,7 +4,9 @@ import unittest
 
 import numpy as np
 
+from videomemory.system.stream_ingestors.frame_utils import subsample_frames
 from videomemory.system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
+from videomemory.system.stream_ingestors.prompting import VideoIngestorOutput
 from videomemory.system.task_types import Task
 
 
@@ -151,6 +153,94 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
         self.assertIs(ingestor._tasks_list[0], keep_task)
         self.assertEqual(keep_task.task_number, 0)
         self.assertFalse(keep_task.done)
+
+    def test_vlm_processing_subsamples_when_chunk_exceeds_max_frame_cap(self):
+        provider = Mock()
+        provider._sync_generate_content.return_value = VideoIngestorOutput(task_updates=[])
+        ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=provider)
+        ingestor._tasks_list = [self._task()]
+        ingestor._video_chunk_subsample_frames = 3
+
+        frames = []
+        for value in range(5):
+            frame = np.zeros((12, 16, 3), dtype=np.uint8)
+            frame[:, :] = value * 40
+            frames.append(frame)
+
+        result = ingestor._VLM_processing(frames)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["chunk"]["duration_seconds"], 2.0)
+        self.assertEqual(result["chunk"]["sampled_frame_count"], 3)
+        self.assertEqual(result["chunk"]["raw_frame_count"], 5)
+        self.assertEqual(result["frame"].shape, (480, 640, 3))
+        self.assertIn("chronological contact sheet of 3", provider._sync_generate_content.call_args.kwargs["prompt"])
+        self.assertIn("2.00s video chunk", provider._sync_generate_content.call_args.kwargs["prompt"])
+
+        latest_model_input = ingestor.get_latest_model_input()
+        self.assertIsNotNone(latest_model_input)
+        self.assertEqual(latest_model_input["chunk"]["sampled_frame_count"], 3)
+
+    def test_vlm_processing_uses_all_frames_when_below_frame_cap(self):
+        provider = Mock()
+        provider._sync_generate_content.return_value = VideoIngestorOutput(task_updates=[])
+        ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=provider)
+        ingestor._tasks_list = [self._task()]
+        ingestor._video_chunk_subsample_frames = 8
+
+        frames = []
+        for value in range(5):
+            frame = np.zeros((12, 16, 3), dtype=np.uint8)
+            frame[:, :] = value * 40
+            frames.append(frame)
+
+        result = ingestor._VLM_processing(frames)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["chunk"]["sampled_frame_count"], 5)
+        self.assertEqual(result["chunk"]["raw_frame_count"], 5)
+        self.assertIn("chronological contact sheet of 5", provider._sync_generate_content.call_args.kwargs["prompt"])
+
+    def test_vlm_processing_records_model_input_when_provider_fails(self):
+        provider = Mock()
+        provider._sync_generate_content.side_effect = RuntimeError("provider down")
+        ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=provider)
+        ingestor._tasks_list = [self._task()]
+
+        frames = [np.zeros((12, 16, 3), dtype=np.uint8) for _ in range(4)]
+
+        result = ingestor._VLM_processing(frames)
+
+        self.assertIsNone(result)
+        latest_model_input = ingestor.get_latest_model_input()
+        self.assertIsNotNone(latest_model_input)
+        self.assertEqual(latest_model_input["chunk"]["sampled_frame_count"], 4)
+        self.assertIsNotNone(ingestor.get_latest_inference_error())
+
+    def test_subsample_frames_keeps_evenly_spaced_frames(self):
+        frames = []
+        for value in range(5):
+            frame = np.zeros((1, 1, 3), dtype=np.uint8)
+            frame[:, :] = value
+            frames.append(frame)
+
+        sampled = subsample_frames(frames, 3)
+
+        self.assertEqual([int(frame[0, 0, 0]) for frame in sampled], [0, 2, 4])
+
+    def test_chunk_keeps_duplicate_frames_after_motion_trigger(self):
+        ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=object())
+        ingestor._frame_diff_threshold = 5.0
+        first = np.zeros((2, 2, 3), dtype=np.uint8)
+        duplicate = first.copy()
+
+        chunk_frames = []
+        first_has_motion = ingestor._add_frame_to_chunk(chunk_frames, first)
+        duplicate_has_motion = ingestor._add_frame_to_chunk(chunk_frames, duplicate)
+
+        self.assertTrue(first_has_motion)
+        self.assertFalse(duplicate_has_motion)
+        self.assertEqual(len(chunk_frames), 2)
 
 
 class VideoStreamIngestorStartupTests(unittest.IsolatedAsyncioTestCase):

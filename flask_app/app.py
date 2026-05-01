@@ -1426,16 +1426,23 @@ def get_device_preview_fps(io_id):
 def get_ingestor_status(io_id):
     """Check whether an ingestor is running for a device."""
     try:
-        has = task_manager.has_ingestor(io_id)
-        ingestor = task_manager.get_ingestor(io_id) if has else None
+        ingestor = (
+            task_manager.peek_ingestor(io_id)
+            if hasattr(task_manager, 'peek_ingestor')
+            else task_manager.get_ingestor(io_id)
+        )
+        has = ingestor is not None
         running = ingestor._running if ingestor else False
         has_debug_artifact = _get_latest_persisted_debug_snapshot(io_id) is not None
         latest_inference_error = ingestor.get_latest_inference_error() if ingestor is not None else None
+        device_info = io_manager.get_stream_info(io_id)
+        semantic_preview_available = bool(device_info and 'camera' in (device_info.get('category', '').lower()))
         return jsonify({
             'has_ingestor': has,
             'running': running,
             'has_debug_artifact': has_debug_artifact,
             'latest_inference_error': latest_inference_error,
+            'semantic_preview_available': semantic_preview_available,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1470,77 +1477,320 @@ def ingestor_frame_skip_threshold(io_id):
         flask_logger.error(f"Error updating frame-skip threshold for {io_id}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/device/<io_id>/debug/semantic-filter', methods=['GET', 'PUT'])
+def ingestor_semantic_filter(io_id):
+    """Get or update optional semantic frame-filter settings for a device ingestor."""
+    try:
+        if io_manager.get_stream_info(io_id) is None:
+            return jsonify({'error': 'Device not found'}), 404
+
+        if request.method == 'GET':
+            return jsonify(task_manager.get_ingestor_semantic_filter_config(io_id))
+
+        data = request.get_json(silent=True) or {}
+        threshold_mode = str(data.get('threshold_mode', 'absolute')).strip().lower()
+        if threshold_mode not in {'absolute', 'percentile'}:
+            return jsonify({'error': 'threshold_mode must be absolute or percentile'}), 400
+        reduce = str(data.get('reduce', 'max')).strip().lower()
+        if reduce not in {'max', 'mean', 'min', 'sum', 'softmax'}:
+            return jsonify({'error': 'reduce must be max, mean, min, sum, or softmax'}), 400
+        ensemble = str(data.get('ensemble', 'off')).strip().lower()
+        if ensemble not in {'off', 'hflip', 'hvflip'}:
+            return jsonify({'error': 'ensemble must be off, hflip, or hvflip'}), 400
+        try:
+            threshold = float(data.get('threshold', 0.5))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'threshold must be numeric'}), 400
+        max_threshold = 1.0 if threshold_mode == 'absolute' else 0.99
+        if threshold < 0 or threshold > max_threshold:
+            return jsonify({'error': f'threshold must be between 0 and {max_threshold}'}), 400
+        try:
+            smoothing = float(data.get('smoothing', 0.0))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'smoothing must be numeric'}), 400
+        if smoothing < 0 or smoothing > 0.95:
+            return jsonify({'error': 'smoothing must be between 0 and 0.95'}), 400
+
+        result = task_manager.set_ingestor_semantic_filter_config(io_id, {
+            'enabled': bool(data.get('enabled', False)),
+            'keywords': str(data.get('keywords', '') or ''),
+            'threshold': threshold,
+            'threshold_mode': threshold_mode,
+            'reduce': reduce,
+            'smoothing': smoothing,
+            'ensemble': ensemble,
+        })
+        return jsonify(result)
+    except Exception as e:
+        flask_logger.error(f"Error updating semantic filter for {io_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/device/<io_id>/debug/semantic-preview/status', methods=['GET'])
+def ingestor_semantic_preview_status(io_id):
+    """Return lightweight realtime semantic-preview status for the debug UI."""
+    try:
+        def _default_chunk_queue_status() -> Dict[str, Any]:
+            try:
+                chunk_seconds = float(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_SECONDS", "2.0"))
+            except (TypeError, ValueError):
+                chunk_seconds = 2.0
+            try:
+                max_frames = int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES", "4"))
+            except (TypeError, ValueError):
+                max_frames = 4
+            try:
+                max_queue = int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE", "5"))
+            except (TypeError, ValueError):
+                max_queue = 5
+            return {
+                'video_chunk_seconds': max(0.1, chunk_seconds),
+                'video_chunk_subsample_frames': max(1, max_frames),
+                'video_chunk_queue_maxsize': max(1, max_queue),
+                'queued_chunks': 0,
+                'oldest_queued_chunk_age_ms': None,
+                'newest_queued_chunk_age_ms': None,
+                'queued_chunk_frame_counts': [],
+            }
+
+        ingestor = (
+            task_manager.peek_ingestor(io_id)
+            if hasattr(task_manager, 'peek_ingestor')
+            else task_manager.get_ingestor(io_id)
+        )
+        if ingestor is None:
+            return jsonify({
+                'has_ingestor': False,
+                'running': False,
+                'has_frame': False,
+                'has_heatmap': False,
+                'dedup_status': None,
+                'chunk_queue': _default_chunk_queue_status(),
+                'semantic_filter': task_manager.get_ingestor_semantic_filter_config(io_id),
+            }), 200
+
+        latest_frame = ingestor.get_latest_frame() if hasattr(ingestor, 'get_latest_frame') else None
+        latest_heatmap = (
+            ingestor.get_latest_semantic_filter_heatmap()
+            if hasattr(ingestor, 'get_latest_semantic_filter_heatmap')
+            else None
+        )
+        latest_frame_timestamp = (
+            ingestor.get_latest_frame_timestamp()
+            if hasattr(ingestor, 'get_latest_frame_timestamp')
+            else None
+        )
+        frame_age_ms = None
+        if latest_frame_timestamp is not None:
+            frame_age_ms = max(0.0, (time.time() - latest_frame_timestamp) * 1000.0)
+        semantic_status = (
+            ingestor.get_semantic_filter_status()
+            if hasattr(ingestor, 'get_semantic_filter_status')
+            else None
+        )
+        semantic_result_age_ms = None
+        if semantic_status and semantic_status.get('latest_evaluation_timestamp') is not None:
+            semantic_result_age_ms = max(
+                0.0,
+                (time.time() - float(semantic_status['latest_evaluation_timestamp'])) * 1000.0,
+            )
+        return jsonify({
+            'has_ingestor': True,
+            'running': bool(getattr(ingestor, '_running', False)),
+            'has_frame': latest_frame is not None and getattr(latest_frame, 'size', 0) > 0,
+            'has_heatmap': latest_heatmap is not None and getattr(latest_heatmap, 'size', 0) > 0,
+            'frame_age_ms': frame_age_ms,
+            'semantic_result_age_ms': semantic_result_age_ms,
+            'dedup_status': ingestor.get_dedup_status() if hasattr(ingestor, 'get_dedup_status') else None,
+            'chunk_queue': ingestor.get_chunk_queue_status() if hasattr(ingestor, 'get_chunk_queue_status') else None,
+            'semantic_filter': semantic_status,
+        })
+    except Exception as e:
+        flask_logger.error(f"Error reading semantic preview status for {io_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/device/<io_id>/debug/semantic-preview/stream', methods=['GET'])
+def ingestor_semantic_preview_stream(io_id):
+    """Stream the latest semantic-filter overlay for fast local tuning."""
+    fps = max(1.0, min(60.0, float(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_FPS", "24"))))
+    frame_delay_s = 1.0 / fps
+    idle_delay_s = min(0.02, frame_delay_s)
+    max_width = max(320, min(1280, int(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_MAX_WIDTH", "640"))))
+    jpeg_quality = max(35, min(95, int(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_JPEG_QUALITY", "68"))))
+    boundary = "frame"
+    device_info = io_manager.get_stream_info(io_id)
+    local_preview_acquired = False
+    if device_info is not None and not _is_local_camera_device(device_info):
+        _ensure_network_camera_ingestor(io_id, device_info, wait_timeout_s=0.0)
+    elif device_info is not None and 'camera' in (device_info.get('category', '').lower()):
+        local_preview_acquired = _acquire_local_preview_ingestor(io_id, device_info) is not None
+
+    def _placeholder_frame(message: str) -> Any:
+        frame = np.zeros((480, 854, 3), dtype=np.uint8)
+        cv2.putText(frame, "Semantic Preview", (28, 52), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (25, 195, 125), 2, cv2.LINE_AA)
+        y = 112
+        for line in message.split("\n"):
+            cv2.putText(frame, line, (28, y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (220, 220, 220), 1, cv2.LINE_AA)
+            y += 34
+        return frame
+
+    def _latest_preview_frame() -> tuple[Optional[Any], Optional[str]]:
+        ingestor = (
+            task_manager.peek_ingestor(io_id)
+            if hasattr(task_manager, 'peek_ingestor')
+            else task_manager.get_ingestor(io_id)
+        )
+        if ingestor is None:
+            bucket = int(time.monotonic())
+            return (
+                _placeholder_frame("No active ingestor is running.\nCreate/start a task to see the live semantic heatmap."),
+                f"placeholder:no-ingestor:{bucket}",
+            )
+        heatmap = (
+            ingestor.get_latest_semantic_filter_heatmap()
+            if hasattr(ingestor, 'get_latest_semantic_filter_heatmap')
+            else None
+        )
+        if heatmap is not None and getattr(heatmap, 'size', 0) > 0:
+            status = (
+                ingestor.get_semantic_filter_status()
+                if hasattr(ingestor, 'get_semantic_filter_status')
+                else {}
+            )
+            marker = status.get('latest_evaluation_timestamp') or status.get('evaluations')
+            return heatmap, f"heatmap:{marker}"
+        frame = ingestor.get_latest_frame() if hasattr(ingestor, 'get_latest_frame') else None
+        if frame is not None and getattr(frame, 'size', 0) > 0:
+            marker = (
+                ingestor.get_latest_frame_timestamp()
+                if hasattr(ingestor, 'get_latest_frame_timestamp')
+                else time.monotonic()
+            )
+            return frame, f"frame:{marker}"
+        bucket = int(time.monotonic())
+        return (
+            _placeholder_frame("Ingestor is running, but no frame is available yet.\nIf this persists, the camera capture path is not returning frames."),
+            f"placeholder:no-frame:{bucket}",
+        )
+
+    def generate():
+        last_marker = None
+        try:
+            while True:
+                started_at = time.monotonic()
+                frame, marker = _latest_preview_frame()
+                sent_frame = False
+                if frame is not None and marker != last_marker:
+                    height, width = frame.shape[:2]
+                    if width > max_width:
+                        scale = max_width / float(width)
+                        frame = cv2.resize(
+                            frame,
+                            (max_width, max(1, int(height * scale))),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                    ok, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+                    if ok:
+                        last_marker = marker
+                        sent_frame = True
+                        yield (
+                            b"--" + boundary.encode("ascii") + b"\r\n"
+                            b"Content-Type: image/jpeg\r\n"
+                            b"X-Frame-Marker: " + str(marker).encode("utf-8", errors="replace") + b"\r\n"
+                            b"Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                            b"Pragma: no-cache\r\n"
+                            b"Expires: 0\r\n\r\n" +
+                            buffer.tobytes() + b"\r\n"
+                        )
+                elapsed = time.monotonic() - started_at
+                target_delay = frame_delay_s if sent_frame else idle_delay_s
+                time.sleep(max(0.005, target_delay - elapsed))
+        finally:
+            if local_preview_acquired:
+                _release_local_preview_ingestor(io_id)
+
+    response = Response(
+        generate(),
+        mimetype=f"multipart/x-mixed-replace; boundary={boundary}",
+        direct_passthrough=True,
+    )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 @app.route('/api/device/<io_id>/debug/frame-and-prompt', methods=['GET'])
 def get_ingestor_frame_and_prompt(io_id):
     """Get the latest frame and prompt from a device's ingestor."""
     try:
-        ingestor = task_manager.get_ingestor(io_id)
+        ingestor = (
+            task_manager.peek_ingestor(io_id)
+            if hasattr(task_manager, 'peek_ingestor')
+            else task_manager.get_ingestor(io_id)
+        )
         latest_output = ingestor.get_latest_output() if ingestor is not None else None
-        latest_frame = ingestor.get_latest_frame() if ingestor is not None else None
-        latest_frame_timestamp = ingestor.get_latest_frame_timestamp() if ingestor is not None else None
+        latest_model_input = (
+            ingestor.get_latest_model_input()
+            if ingestor is not None and hasattr(ingestor, 'get_latest_model_input')
+            else None
+        )
         latest_error = ingestor.get_latest_inference_error() if ingestor is not None else None
         dedup = ingestor.get_dedup_status() if ingestor is not None else None
+        semantic_status = (
+            ingestor.get_semantic_filter_status()
+            if ingestor is not None and hasattr(ingestor, 'get_semantic_filter_status')
+            else None
+        )
+        semantic_heatmap = (
+            ingestor.get_latest_semantic_filter_heatmap()
+            if ingestor is not None and hasattr(ingestor, 'get_latest_semantic_filter_heatmap')
+            else None
+        )
+        semantic_heatmap_base64 = None
+        if semantic_heatmap is not None and getattr(semantic_heatmap, "size", 0) > 0:
+            _, heatmap_buffer = cv2.imencode('.jpg', semantic_heatmap, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            semantic_heatmap_base64 = base64.b64encode(heatmap_buffer).decode('utf-8')
         prompt = _build_device_debug_prompt(io_id, ingestor=ingestor)
         latest_output_timestamp = None
         if latest_output:
             latest_output_timestamp = latest_output.get('timestamp')
         latest_error_timestamp = latest_error.get('timestamp') if latest_error else None
-        prefer_live_frame = (
-            latest_frame is not None
-            and getattr(latest_frame, "size", 0) > 0
-            and (
-                latest_output is None
-                or (latest_frame_timestamp is not None and latest_output_timestamp is not None and latest_frame_timestamp > latest_output_timestamp)
-                or (latest_error_timestamp is not None and (latest_output_timestamp is None or latest_error_timestamp >= latest_output_timestamp))
-            )
-        )
 
-        if latest_output and not prefer_live_frame:
-            output_frame = latest_output.get('frame')
-            latest_prompt = latest_output.get('prompt') or prompt
+        model_input = latest_model_input or latest_output
+        latest_error_is_newer = (
+            latest_error_timestamp is not None
+            and latest_output_timestamp is not None
+            and latest_error_timestamp >= latest_output_timestamp
+        )
+        if latest_error_is_newer:
+            model_input = None
+        if model_input:
+            output_frame = model_input.get('frame')
+            latest_prompt = model_input.get('prompt') or prompt
             if output_frame is not None:
                 _, buffer = cv2.imencode('.jpg', output_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 image_base64 = base64.b64encode(buffer).decode('utf-8')
-                source_label = 'Showing last VLM call'
+                chunk = model_input.get('chunk') or {}
+                sampled_frame_count = chunk.get('sampled_frame_count')
+                source_label = 'Showing exact image sent to the model provider'
+                if sampled_frame_count and int(sampled_frame_count) > 1:
+                    source_label = f'Showing exact tiled contact sheet sent to the model provider ({sampled_frame_count} frames)'
                 if ingestor is not None and not ingestor._running:
-                    source_label = 'Showing last VLM call from before the ingestor stopped'
+                    source_label += ' from before the ingestor stopped'
                 return jsonify({
                     'frame_base64': image_base64,
                     'prompt': latest_prompt or '',
                     'dedup_status': dedup,
-                    'source': 'live_output',
+                    'semantic_filter': semantic_status,
+                    'semantic_heatmap_base64': semantic_heatmap_base64,
+                    'source': 'model_input',
                     'source_label': source_label,
+                    'chunk': chunk,
                     'inference_error': latest_error,
                 })
-
-        if latest_frame is not None and getattr(latest_frame, "size", 0) > 0:
-            _, buffer = cv2.imencode('.jpg', latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            image_base64 = base64.b64encode(buffer).decode('utf-8')
-            source_label = 'Showing latest live frame before the first VLM call'
-            prompt_notice_parts = []
-            if ingestor is not None and not ingestor._running:
-                source_label = 'Showing latest captured frame from before the ingestor stopped'
-            if latest_error_timestamp is not None and (latest_output_timestamp is None or latest_error_timestamp >= latest_output_timestamp):
-                error_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest_error_timestamp))
-                source_label = f"Showing latest live frame. Last model call failed at {error_time}"
-                if latest_error and latest_error.get('user_message'):
-                    prompt_notice_parts.append(latest_error['user_message'])
-                prompt_notice_parts.append('Showing the current camera frame even though the latest VLM call failed.')
-            elif latest_output_timestamp is not None and latest_frame_timestamp is not None and latest_frame_timestamp > latest_output_timestamp:
-                source_label = 'Showing latest live frame (newer than the last recorded VLM call)'
-                prompt_notice_parts.append('Showing the current camera frame. The latest successful VLM result is older than this frame.')
-            elif latest_output is None:
-                prompt_notice_parts.append('Prompt shown for the active tasks. A model result has not been recorded yet.')
-
-            return jsonify({
-                'frame_base64': image_base64,
-                'prompt': prompt or '',
-                'prompt_notice': '\n\n'.join(prompt_notice_parts),
-                'dedup_status': dedup,
-                'source': 'live_frame',
-                'source_label': source_label,
-                'inference_error': latest_error,
-            })
 
         persisted_snapshot = _get_latest_persisted_debug_snapshot(io_id)
         if persisted_snapshot is not None:
@@ -1557,6 +1807,8 @@ def get_ingestor_frame_and_prompt(io_id):
                 'prompt': prompt or '',
                 'prompt_notice': '\n\n'.join(prompt_notice_parts),
                 'dedup_status': dedup,
+                'semantic_filter': semantic_status,
+                'semantic_heatmap_base64': semantic_heatmap_base64,
                 'source': 'persisted_note_frame',
                 'source_label': f'Showing most recent note-backed frame from {note_time}',
                 'note_content': note.content,
@@ -1570,7 +1822,7 @@ def get_ingestor_frame_and_prompt(io_id):
         elif not ingestor._running:
             error = 'Ingestor not running and no persisted debug frame is available'
         elif not latest_output:
-            error = 'No VLM output available yet'
+            error = 'No model provider input has been recorded yet'
         else:
             error = 'Last VLM call did not include a frame'
 
@@ -1579,6 +1831,8 @@ def get_ingestor_frame_and_prompt(io_id):
             'frame_base64': None,
             'prompt': prompt or '',
             'dedup_status': dedup,
+            'semantic_filter': semantic_status,
+            'semantic_heatmap_base64': semantic_heatmap_base64,
             'inference_error': latest_error,
         }), 200
     except Exception as e:
@@ -1589,7 +1843,11 @@ def get_ingestor_frame_and_prompt(io_id):
 def get_ingestor_history(io_id):
     """Get output history from a device's ingestor."""
     try:
-        ingestor = task_manager.get_ingestor(io_id)
+        ingestor = (
+            task_manager.peek_ingestor(io_id)
+            if hasattr(task_manager, 'peek_ingestor')
+            else task_manager.get_ingestor(io_id)
+        )
         if ingestor is None:
             return jsonify({'history': [], 'count': 0, 'total_count': 0}), 200
         
@@ -1611,10 +1869,18 @@ def get_ingestor_history(io_id):
 def get_ingestor_tasks(io_id):
     """Get tasks from a device's ingestor."""
     try:
-        ingestor = task_manager.get_ingestor(io_id)
+        ingestor = (
+            task_manager.peek_ingestor(io_id)
+            if hasattr(task_manager, 'peek_ingestor')
+            else task_manager.get_ingestor(io_id)
+        )
         tasks = ingestor.get_tasks_list() if ingestor is not None else []
         if not tasks:
-            tasks = task_manager.get_task_objects(io_id)
+            tasks = (
+                task_manager.peek_task_objects(io_id)
+                if hasattr(task_manager, 'peek_task_objects')
+                else task_manager.get_task_objects(io_id)
+            )
         tasks_data = []
         for task in tasks:
             task_dict = {
@@ -2321,6 +2587,9 @@ _BOOLEAN_FALSE_VALUES = {'0', 'false', 'no', 'off'}
 _DEFAULT_SETTINGS = {
     'VIDEOMEMORY_SAVE_NOTE_FRAMES': '1',
     'VIDEOMEMORY_SAVE_NOTE_VIDEOS': '0',
+    'VIDEOMEMORY_VIDEO_CHUNK_SECONDS': '2.0',
+    'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES': '4',
+    'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE': '5',
 }
 
 # All known setting keys (for the settings page)
@@ -2333,6 +2602,9 @@ _KNOWN_SETTINGS = [
     'VIDEOMEMORY_SELF_BASE_URL',
     'VIDEOMEMORY_SAVE_NOTE_FRAMES',
     'VIDEOMEMORY_SAVE_NOTE_VIDEOS',
+    'VIDEOMEMORY_VIDEO_CHUNK_SECONDS',
+    'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES',
+    'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE',
     'LOCAL_MODEL_BASE_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
@@ -2354,6 +2626,12 @@ _MODEL_RUNTIME_KEYS = {
     'ANTHROPIC_API_KEY',
     'VIDEO_INGESTOR_MODEL',
     'LOCAL_MODEL_BASE_URL',
+}
+
+_VIDEO_CHUNK_RUNTIME_KEYS = {
+    'VIDEOMEMORY_VIDEO_CHUNK_SECONDS',
+    'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES',
+    'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE',
 }
 
 
@@ -2539,6 +2817,13 @@ def _apply_runtime_setting_change(changed_key: str) -> None:
             reload_result.get('provider'),
             reload_result.get('updated_ingestors', 0),
         )
+    if changed_key in _VIDEO_CHUNK_RUNTIME_KEYS:
+        reload_result = task_manager.reload_video_chunk_settings()
+        flask_logger.info(
+            "Applied video chunk runtime settings update for %s (ingestors=%d)",
+            changed_key,
+            reload_result.get('updated_ingestors', 0),
+        )
 
 def _mask_value(key: str, value: str) -> str:
     """Mask sensitive values, showing only the last 4 characters."""
@@ -2608,6 +2893,18 @@ def update_setting(key):
         raw_value = data.get('value', '')
         if key in {'VIDEOMEMORY_SAVE_NOTE_FRAMES', 'VIDEOMEMORY_SAVE_NOTE_VIDEOS'}:
             value = '1' if _coerce_boolean_setting(raw_value, default=True) else '0'
+        elif key == 'VIDEOMEMORY_VIDEO_CHUNK_SECONDS':
+            try:
+                seconds = max(0.1, float(raw_value))
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Chunk length must be numeric'}), 400
+            value = str(seconds)
+        elif key in {'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES', 'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE'}:
+            try:
+                count = max(1, int(raw_value))
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Value must be a whole number'}), 400
+            value = str(count)
         elif key == 'VIDEO_INGESTOR_MODEL':
             try:
                 value = validate_model_name(raw_value)
