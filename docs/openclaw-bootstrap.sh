@@ -165,6 +165,8 @@ ensure_repo() {
     /flask_app/ \
     /videomemory/ \
     /docs/update-manifest.json \
+    /docs/openclaw-bootstrap.sh \
+    /docs/relaunch-videomemory.sh \
     /docs/openclaw-skill.md \
     /docs/openclaw-videomemory-task-helper.mjs \
     /scripts/openclaw_send_current_camera_image.sh \
