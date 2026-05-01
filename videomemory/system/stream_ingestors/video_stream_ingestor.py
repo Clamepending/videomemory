@@ -1387,6 +1387,12 @@ class VideoStreamIngestor:
         merged.update(config)
         next_config = coerce_config(merged)
         self._semantic_filter.update_config(next_config)
+        if next_config.enabled and next_config.keywords.strip():
+            preview_frame = self._latest_frame_diff_frame
+            if preview_frame is not None:
+                semantic_result = self._apply_semantic_filter(preview_frame)
+                if not semantic_result.should_keep:
+                    self._record_semantic_skip()
         logger.info(
             "Updated semantic filter [camera=%s]: enabled=%s keywords=%r threshold=%.3f mode=%s reduce=%s smoothing=%.2f ensemble=%s",
             self.camera_index,
