@@ -147,6 +147,10 @@ class VideoStreamIngestor:
             0.1,
             float(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_REFRESH_SECONDS", "0.1")),
         )
+        self._semantic_refresh_during_frame_diff_skips = (
+            os.getenv("VIDEOMEMORY_SEMANTIC_REFRESH_DURING_FRAME_DIFF_SKIPS", "").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
         
         # Frame capture failure tracking (for network stream reconnection)
         self._consecutive_capture_failures: int = 0
@@ -841,7 +845,7 @@ class VideoStreamIngestor:
 
         if self._is_frame_duplicate(frame):
             self._record_duplicate_skip()
-            if self._semantic_preview_needs_refresh():
+            if self._semantic_refresh_during_frame_diff_skips and self._semantic_preview_needs_refresh():
                 semantic_result = self._apply_semantic_filter(frame)
                 if not semantic_result.should_keep:
                     self._record_semantic_skip()
@@ -944,7 +948,10 @@ class VideoStreamIngestor:
             return
         if self._is_frame_duplicate(frame):
             self._record_duplicate_skip()
-            if not self._semantic_preview_needs_refresh():
+            if not (
+                self._semantic_refresh_during_frame_diff_skips
+                and self._semantic_preview_needs_refresh()
+            ):
                 return
             semantic_result = self._apply_semantic_filter(frame)
             if not semantic_result.should_keep:

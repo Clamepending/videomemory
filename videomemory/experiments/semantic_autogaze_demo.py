@@ -256,15 +256,15 @@ def build_heatmap(
     normalized_scores = normalize_scores(patch_scores)
     cutoff = float(np.percentile(normalized_scores, threshold)) if threshold_mode == "percentile" else threshold
     kept_scores = np.where(normalized_scores >= cutoff, normalized_scores, 0.0)
+    display_scores = np.where(normalized_scores >= cutoff, 0.55 + (0.45 * normalized_scores), 0.25 * normalized_scores)
 
     heatmap = np.zeros((height, width), dtype=np.float32)
     weights = np.zeros((height, width), dtype=np.float32)
-    for patch, score in zip(patches, kept_scores):
+    for patch, score in zip(patches, display_scores):
         heatmap[patch.y0 : patch.y1, patch.x0 : patch.x1] += score
         weights[patch.y0 : patch.y1, patch.x0 : patch.x1] += 1.0
 
     heatmap = np.divide(heatmap, weights, out=np.zeros_like(heatmap), where=weights > 0)
-    heatmap = normalize_scores(heatmap)
     return heatmap, kept_scores, cutoff
 
 

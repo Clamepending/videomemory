@@ -303,14 +303,11 @@ def render_semantic_overlay(
     else:
         cutoff = float(np.quantile(raw_grid.flatten(), threshold)) if threshold > 0 else 0.0
         keep_grid = raw_grid >= cutoff
-    display_grid = np.where(keep_grid, display_grid, 0.0)
+    display_grid = np.where(keep_grid, 0.55 + (0.45 * display_grid), 0.25 * display_grid)
 
     heat = cv2.resize(display_grid, (width, height), interpolation=cv2.INTER_NEAREST)
     heat_bgr = cv2.applyColorMap(np.clip(heat * 255, 0, 255).astype(np.uint8), cv2.COLORMAP_TURBO)
     overlay = cv2.addWeighted(frame_bgr, 1.0 - alpha, heat_bgr, alpha, 0)
-    keep_mask = cv2.resize(keep_grid.astype(np.uint8), (width, height), interpolation=cv2.INTER_NEAREST).astype(bool)
-    dim = (frame_bgr * 0.35).astype(np.uint8)
-    overlay = np.where(keep_mask[..., None], overlay, dim)
     cv2.putText(
         overlay,
         f"{MODEL_NAME} semantic filter",

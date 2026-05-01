@@ -198,18 +198,12 @@ def render_overlay(
     else:
         cutoff = float(np.quantile(raw_grid.flatten(), threshold)) if threshold > 0 else 0.0
         keep_grid = raw_grid >= cutoff
-    display_grid = np.where(keep_grid, display_grid, 0.0)
+    display_grid = np.where(keep_grid, 0.55 + (0.45 * display_grid), 0.25 * display_grid)
 
     heat = cv2.resize(display_grid, (width, height), interpolation=cv2.INTER_NEAREST)
-    heat = normalize_scores(heat)
     heat_bgr = cv2.applyColorMap(np.clip(heat * 255, 0, 255).astype(np.uint8), cv2.COLORMAP_TURBO)
     heat_rgb = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB)
     overlay = cv2.addWeighted(frame_rgb, 1.0 - alpha, heat_rgb, alpha, 0)
-
-    if threshold > 0:
-        keep_mask = cv2.resize(keep_grid.astype(np.uint8), (width, height), interpolation=cv2.INTER_NEAREST).astype(bool)
-        dim = (frame_rgb * 0.35).astype(np.uint8)
-        overlay = np.where(keep_mask[..., None], overlay, dim)
 
     if top_k > 0:
         ranked = np.argsort(scores)[::-1][:top_k]
