@@ -1570,8 +1570,10 @@ def ingestor_semantic_preview_status(io_id):
                 'has_frame': False,
                 'has_frame_diff_frame': False,
                 'has_heatmap': False,
+                'has_semantic_pass_frame': False,
                 'frame_age_ms': None,
                 'frame_diff_age_ms': None,
+                'semantic_pass_age_ms': None,
                 'dedup_status': None,
                 'chunk_queue': _default_chunk_queue_status(),
                 'semantic_filter': task_manager.get_ingestor_semantic_filter_config(io_id),
@@ -1581,6 +1583,11 @@ def ingestor_semantic_preview_status(io_id):
         latest_heatmap = (
             ingestor.get_latest_semantic_filter_heatmap()
             if hasattr(ingestor, 'get_latest_semantic_filter_heatmap')
+            else None
+        )
+        latest_semantic_pass = (
+            ingestor.get_latest_semantic_pass_frame()
+            if hasattr(ingestor, 'get_latest_semantic_pass_frame')
             else None
         )
         latest_frame_diff = (
@@ -1598,12 +1605,20 @@ def ingestor_semantic_preview_status(io_id):
             if hasattr(ingestor, 'get_latest_frame_diff_timestamp')
             else None
         )
+        latest_semantic_pass_timestamp = (
+            ingestor.get_latest_semantic_pass_timestamp()
+            if hasattr(ingestor, 'get_latest_semantic_pass_timestamp')
+            else None
+        )
         frame_age_ms = None
         if latest_frame_timestamp is not None:
             frame_age_ms = max(0.0, (time.time() - latest_frame_timestamp) * 1000.0)
         frame_diff_age_ms = None
         if latest_frame_diff_timestamp is not None:
             frame_diff_age_ms = max(0.0, (time.time() - latest_frame_diff_timestamp) * 1000.0)
+        semantic_pass_age_ms = None
+        if latest_semantic_pass_timestamp is not None:
+            semantic_pass_age_ms = max(0.0, (time.time() - latest_semantic_pass_timestamp) * 1000.0)
         semantic_status = (
             ingestor.get_semantic_filter_status()
             if hasattr(ingestor, 'get_semantic_filter_status')
@@ -1621,8 +1636,10 @@ def ingestor_semantic_preview_status(io_id):
             'has_frame': latest_frame is not None and getattr(latest_frame, 'size', 0) > 0,
             'has_frame_diff_frame': latest_frame_diff is not None and getattr(latest_frame_diff, 'size', 0) > 0,
             'has_heatmap': latest_heatmap is not None and getattr(latest_heatmap, 'size', 0) > 0,
+            'has_semantic_pass_frame': latest_semantic_pass is not None and getattr(latest_semantic_pass, 'size', 0) > 0,
             'frame_age_ms': frame_age_ms,
             'frame_diff_age_ms': frame_diff_age_ms,
+            'semantic_pass_age_ms': semantic_pass_age_ms,
             'semantic_result_age_ms': semantic_result_age_ms,
             'dedup_status': ingestor.get_dedup_status() if hasattr(ingestor, 'get_dedup_status') else None,
             'chunk_queue': ingestor.get_chunk_queue_status() if hasattr(ingestor, 'get_chunk_queue_status') else None,
@@ -1715,6 +1732,109 @@ def ingestor_semantic_preview_stream(io_id):
         return (
             _placeholder_frame("Ingestor is running, but no frame is available yet.\nIf this persists, the camera capture path is not returning frames."),
             f"placeholder:no-frame:{bucket}",
+        )
+
+    def generate():
+        last_marker = None
+        try:
+            while True:
+                started_at = time.monotonic()
+                frame, marker = _latest_preview_frame()
+                sent_frame = False
+                if frame is not None and marker != last_marker:
+                    height, width = frame.shape[:2]
+                    if width > max_width:
+                        scale = max_width / float(width)
+                        frame = cv2.resize(
+                            frame,
+                            (max_width, max(1, int(height * scale))),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                    ok, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+                    if ok:
+                        last_marker = marker
+                        sent_frame = True
+                        yield (
+                            b"--" + boundary.encode("ascii") + b"\r\n"
+                            b"Content-Type: image/jpeg\r\n"
+                            b"X-Frame-Marker: " + str(marker).encode("utf-8", errors="replace") + b"\r\n"
+                            b"Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                            b"Pragma: no-cache\r\n"
+                            b"Expires: 0\r\n\r\n" +
+                            buffer.tobytes() + b"\r\n"
+                        )
+                elapsed = time.monotonic() - started_at
+                target_delay = frame_delay_s if sent_frame else idle_delay_s
+                time.sleep(max(0.005, target_delay - elapsed))
+        finally:
+            if local_preview_acquired:
+                _release_local_preview_ingestor(io_id)
+
+    response = Response(
+        generate(),
+        mimetype=f"multipart/x-mixed-replace; boundary={boundary}",
+        direct_passthrough=True,
+    )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+@app.route('/api/device/<io_id>/debug/semantic-pass/stream', methods=['GET'])
+def ingestor_semantic_pass_stream(io_id):
+    """Stream raw frames that passed semantic filtering."""
+    fps = max(1.0, min(60.0, float(os.getenv("VIDEOMEMORY_SEMANTIC_PASS_PREVIEW_FPS", "24"))))
+    frame_delay_s = 1.0 / fps
+    idle_delay_s = min(0.02, frame_delay_s)
+    max_width = max(320, min(1280, int(os.getenv("VIDEOMEMORY_SEMANTIC_PASS_PREVIEW_MAX_WIDTH", "640"))))
+    jpeg_quality = max(35, min(95, int(os.getenv("VIDEOMEMORY_SEMANTIC_PASS_PREVIEW_JPEG_QUALITY", "72"))))
+    boundary = "frame"
+    device_info = io_manager.get_stream_info(io_id)
+    local_preview_acquired = False
+    if device_info is not None and not _is_local_camera_device(device_info):
+        _ensure_network_camera_ingestor(io_id, device_info, wait_timeout_s=0.0)
+    elif device_info is not None and 'camera' in (device_info.get('category', '').lower()):
+        local_preview_acquired = _acquire_local_preview_ingestor(io_id, device_info) is not None
+
+    def _placeholder_frame(message: str) -> Any:
+        frame = np.zeros((480, 854, 3), dtype=np.uint8)
+        cv2.putText(frame, "Semantic Output", (28, 52), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (25, 195, 125), 2, cv2.LINE_AA)
+        y = 112
+        for line in message.split("\n"):
+            cv2.putText(frame, line, (28, y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (220, 220, 220), 1, cv2.LINE_AA)
+            y += 34
+        return frame
+
+    def _latest_preview_frame() -> tuple[Optional[Any], Optional[str]]:
+        ingestor = (
+            task_manager.peek_ingestor(io_id)
+            if hasattr(task_manager, 'peek_ingestor')
+            else task_manager.get_ingestor(io_id)
+        )
+        if ingestor is None:
+            bucket = int(time.monotonic())
+            return (
+                _placeholder_frame("No active preview ingestor is running yet.\nOpen the raw live feed or create a task to start capture."),
+                f"placeholder:no-ingestor:{bucket}",
+            )
+        frame = (
+            ingestor.get_latest_semantic_pass_frame()
+            if hasattr(ingestor, 'get_latest_semantic_pass_frame')
+            else None
+        )
+        timestamp = (
+            ingestor.get_latest_semantic_pass_timestamp()
+            if hasattr(ingestor, 'get_latest_semantic_pass_timestamp')
+            else None
+        )
+        if frame is not None and getattr(frame, 'size', 0) > 0:
+            marker = timestamp if timestamp is not None else time.monotonic()
+            return frame, f"semantic-pass:{marker}"
+        bucket = int(time.monotonic())
+        return (
+            _placeholder_frame("No frames have passed semantic filtering yet.\nUse the heatmap and threshold controls to tune this stage."),
+            f"placeholder:no-semantic-pass:{bucket}",
         )
 
     def generate():

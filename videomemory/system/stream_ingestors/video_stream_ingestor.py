@@ -142,6 +142,8 @@ class VideoStreamIngestor:
         self._semantic_frames_skipped: int = 0
         self._semantic_consecutive_skips: int = 0
         self._latest_semantic_filter_result: Optional[SemanticFilterResult] = None
+        self._latest_semantic_pass_frame: Optional[Any] = None
+        self._latest_semantic_pass_timestamp: Optional[float] = None
         self._semantic_evaluations: int = 0
         self._latest_semantic_filter_timestamp: Optional[float] = None
         self._semantic_filter_fps_ema: float = 0.0
@@ -916,6 +918,9 @@ class VideoStreamIngestor:
             )
         if result.should_keep:
             self._semantic_consecutive_skips = 0
+            if self._semantic_filter.config.enabled and self._semantic_filter.config.keywords.strip():
+                self._latest_semantic_pass_frame = frame.copy()
+                self._latest_semantic_pass_timestamp = now
         return result
 
     def _record_semantic_skip(self) -> None:
@@ -1387,6 +1392,8 @@ class VideoStreamIngestor:
         merged.update(config)
         next_config = coerce_config(merged)
         self._semantic_filter.update_config(next_config)
+        self._latest_semantic_pass_frame = None
+        self._latest_semantic_pass_timestamp = None
         if next_config.enabled and next_config.keywords.strip():
             preview_frame = self._latest_frame_diff_frame
             if preview_frame is not None:
@@ -1413,6 +1420,16 @@ class VideoStreamIngestor:
         if result is None or result.overlay_frame is None:
             return None
         return result.overlay_frame.copy()
+
+    def get_latest_semantic_pass_frame(self) -> Optional[Any]:
+        """Return the latest raw frame that passed semantic filtering."""
+
+        return self._latest_semantic_pass_frame.copy() if self._latest_semantic_pass_frame is not None else None
+
+    def get_latest_semantic_pass_timestamp(self) -> Optional[float]:
+        """Return timestamp for the latest semantic pass output frame."""
+
+        return self._latest_semantic_pass_timestamp
 
     def get_latest_frame_diff_frame(self) -> Optional[Any]:
         """Return the latest frame that passed the frame-diff filter."""

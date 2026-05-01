@@ -92,6 +92,7 @@
         #rawLiveFrame,
         #frameDiffFrame,
         #currentFrame,
+        #semanticPassFrame,
         #semanticLiveFrame {
             max-width: 100%;
             border: 2px solid #404040;
@@ -178,11 +179,25 @@
         }
 
         #rawLiveFrame,
-        #frameDiffFrame {
+        #frameDiffFrame,
+        #semanticPassFrame {
             width: 100%;
             border: none;
             margin: 0;
             object-fit: contain;
+        }
+
+        .semantic-output-pair {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 12px;
+        }
+
+        .semantic-output-title {
+            color: #ececec;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 6px;
         }
 
         .semantic-live-metrics {
@@ -498,6 +513,9 @@
             .pipeline-stage-body {
                 grid-template-columns: 1fr;
             }
+            .semantic-output-pair {
+                grid-template-columns: 1fr;
+            }
             .debug-panel.full-width {
                 grid-column: 1;
             }
@@ -667,14 +685,28 @@
                                 <div class="pipeline-stage-copy">Input is the frame-diff output. Output is the local semantic heatmap for frames that reach this filter.</div>
                                 <div class="pipeline-stage-body">
                                     <div class="pipeline-stage-output">
-                                        <div class="semantic-live-frame-wrap">
-                                            <img id="semanticLiveFrame" alt="Realtime semantic filter heatmap stream" />
-                                        </div>
-                                        <div id="semanticLiveMetrics" class="semantic-live-metrics">
-                                            <span class="semantic-live-metric">Waiting for semantic output…</span>
+                                        <div class="semantic-output-pair">
+                                            <div>
+                                                <div class="semantic-output-title">Heatmap for tuning</div>
+                                                <div class="semantic-live-frame-wrap">
+                                                    <img id="semanticLiveFrame" alt="Realtime semantic filter heatmap stream" />
+                                                </div>
+                                                <div id="semanticLiveMetrics" class="semantic-live-metrics">
+                                                    <span class="semantic-live-metric">Waiting for semantic output…</span>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div class="semantic-output-title">Raw frames that passed</div>
+                                                <div class="semantic-live-frame-wrap">
+                                                    <img id="semanticPassFrame" alt="Raw frames that passed semantic filtering" />
+                                                </div>
+                                                <div id="semanticPassMetrics" class="semantic-live-metrics">
+                                                    <span class="semantic-live-metric">Waiting for passed frames…</span>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div id="semanticLiveNote" class="semantic-live-note">
-                                            The heatmap stays blocky and shows all patches; above-threshold patches are brighter.
+                                            Tune with the heatmap on the left. The right side only updates when a raw frame passes the semantic filter.
                                         </div>
                                     </div>
                                     <div class="pipeline-stage-controls">
@@ -842,6 +874,7 @@
 
         function renderSemanticLiveMetrics(data, options = {}) {
             const metrics = document.getElementById('semanticLiveMetrics');
+            const passMetrics = document.getElementById('semanticPassMetrics');
             const note = document.getElementById('semanticLiveNote');
             if (!metrics) return;
 
@@ -857,6 +890,7 @@
             const diffSkips = Number(firstDefined(dedup.consecutive_skips, 0));
             const semanticSkips = Number(firstDefined(status.consecutive_skips, 0));
             const semanticAgeMs = Number(firstDefined(data.semantic_result_age_ms, 0));
+            const semanticPassAgeMs = Number(firstDefined(data.semantic_pass_age_ms, 0));
             const frameAgeMs = Number(firstDefined(data.frame_age_ms, 0));
 
             const chips = [];
@@ -877,6 +911,17 @@
                 .map(chip => `<span class="semantic-live-metric">${escapeHtml(chip)}</span>`)
                 .join('');
 
+            if (passMetrics) {
+                const passChips = [];
+                passChips.push(data.has_semantic_pass_frame ? 'passing raw output' : 'waiting for pass');
+                if (semanticPassAgeMs > 0) passChips.push(`${formatDurationMs(semanticPassAgeMs)} output age`);
+                if (status.enabled) passChips.push(`kept if score >= ${threshold.toFixed(3)}`);
+                if (semanticSkips > 0) passChips.push(`${semanticSkips} consecutive semantic skips`);
+                passMetrics.innerHTML = passChips
+                    .map(chip => `<span class="semantic-live-metric">${escapeHtml(chip)}</span>`)
+                    .join('');
+            }
+
             if (note) {
                 if (status.last_error) {
                     note.textContent = `Semantic filter error: ${status.last_error}`;
@@ -886,8 +931,10 @@
                     note.textContent = 'Semantic filtering is off. The preview stream shows the latest ingestor frame.';
                 } else if (!data.has_heatmap) {
                     note.textContent = 'Waiting for a frame to pass frame-difference filtering so the local semantic model can generate the first heatmap.';
+                } else if (!data.has_semantic_pass_frame) {
+                    note.textContent = 'Heatmap is live. No raw frame has passed the semantic threshold yet, so the right side is waiting.';
                 } else {
-                    note.textContent = 'Showing the latest local semantic heatmap. VLM outputs below update only when provider calls return.';
+                    note.textContent = 'Heatmap is shown on the left; raw frames that passed semantic filtering update on the right.';
                 }
             }
             if (options.updateQueue !== false) {
@@ -1017,6 +1064,7 @@
         let rawLiveStreamStarted = false;
         let frameDiffLiveStreamStarted = false;
         let semanticLiveStreamStarted = false;
+        let semanticPassStreamStarted = false;
 
         function startRawLiveStream() {
             const img = document.getElementById('rawLiveFrame');
@@ -1037,6 +1085,13 @@
             if (!img || semanticLiveStreamStarted) return;
             semanticLiveStreamStarted = true;
             img.src = `/api/device/${IO_ID}/debug/semantic-preview/stream?fallback_raw=0&t=${Date.now()}`;
+        }
+
+        function startSemanticPassStream() {
+            const img = document.getElementById('semanticPassFrame');
+            if (!img || semanticPassStreamStarted) return;
+            semanticPassStreamStarted = true;
+            img.src = `/api/device/${IO_ID}/debug/semantic-pass/stream?t=${Date.now()}`;
         }
 
         function renderPipelineStageMetrics(data) {
@@ -1368,6 +1423,7 @@
                 rawLiveStreamStarted = false;
                 frameDiffLiveStreamStarted = false;
                 semanticLiveStreamStarted = false;
+                semanticPassStreamStarted = false;
                 renderNoIngestor();
                 return;
             }
@@ -1382,6 +1438,7 @@
                 startRawLiveStream();
                 startFrameDiffLiveStream();
                 startSemanticLiveStream();
+                startSemanticPassStream();
                 panelsRendered = true;
             }
             updateSemanticLiveStatus();
