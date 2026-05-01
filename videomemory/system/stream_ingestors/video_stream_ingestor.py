@@ -132,6 +132,8 @@ class VideoStreamIngestor:
         
         # Frame deduplication: skip VLM calls when the average pixel difference stays below threshold
         self._last_diff_reference_frame: Optional[Any] = None
+        self._latest_frame_diff_frame: Optional[Any] = None
+        self._latest_frame_diff_timestamp: Optional[float] = None
         self._frame_diff_threshold: float = self.DEFAULT_FRAME_DIFF_THRESHOLD  # Mean absolute pixel difference threshold (0-255 scale)
         self._frames_skipped: int = 0  # Total frames skipped (lifetime)
         self._consecutive_skips: int = 0  # Frames skipped since last VLM call (for UI)
@@ -879,6 +881,8 @@ class VideoStreamIngestor:
         """Update the frame-diff reference after a frame passes motion filtering."""
 
         self._last_diff_reference_frame = frame.copy()
+        self._latest_frame_diff_frame = frame.copy()
+        self._latest_frame_diff_timestamp = time.time()
 
     def _record_duplicate_skip(self) -> None:
         """Record a frame-diff skip for UI/debug counters."""
@@ -943,9 +947,6 @@ class VideoStreamIngestor:
     def _update_filter_preview(self, frame: Any) -> None:
         """Update frame-diff and semantic state for debug preview without VLM work."""
 
-        config = self._semantic_filter.config
-        if not config.enabled or not config.keywords.strip():
-            return
         if self._is_frame_duplicate(frame):
             self._record_duplicate_skip()
             if not (
@@ -958,6 +959,9 @@ class VideoStreamIngestor:
                 self._record_semantic_skip()
             return
         self._remember_frame_for_diff(frame)
+        config = self._semantic_filter.config
+        if not config.enabled or not config.keywords.strip():
+            return
         semantic_result = self._apply_semantic_filter(frame)
         if not semantic_result.should_keep:
             self._record_semantic_skip()
@@ -1403,6 +1407,16 @@ class VideoStreamIngestor:
         if result is None or result.overlay_frame is None:
             return None
         return result.overlay_frame.copy()
+
+    def get_latest_frame_diff_frame(self) -> Optional[Any]:
+        """Return the latest frame that passed the frame-diff filter."""
+
+        return self._latest_frame_diff_frame.copy() if self._latest_frame_diff_frame is not None else None
+
+    def get_latest_frame_diff_timestamp(self) -> Optional[float]:
+        """Return timestamp for the latest frame-diff output frame."""
+
+        return self._latest_frame_diff_timestamp
 
     def get_frame_diff_threshold(self) -> float:
         """Return the active average-pixel-difference threshold."""

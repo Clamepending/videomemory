@@ -89,6 +89,8 @@
             border-bottom: 1px solid #404040;
         }
 
+        #rawLiveFrame,
+        #frameDiffFrame,
         #currentFrame,
         #semanticLiveFrame {
             max-width: 100%;
@@ -96,6 +98,65 @@
             border-radius: 8px;
             display: block;
             margin: 10px 0;
+        }
+
+        .pipeline-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .pipeline-stage {
+            background: #242424;
+            border: 1px solid #3a3a3a;
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .pipeline-stage h3 {
+            color: #ececec;
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .pipeline-stage-copy {
+            color: #888;
+            font-size: 12px;
+            line-height: 1.45;
+            margin-bottom: 12px;
+        }
+
+        .pipeline-stage-body {
+            display: grid;
+            grid-template-columns: minmax(320px, 1.35fr) minmax(280px, 0.9fr);
+            gap: 16px;
+            align-items: start;
+        }
+
+        .pipeline-stage-body.output-only {
+            grid-template-columns: 1fr;
+        }
+
+        .pipeline-stage-output {
+            min-width: 0;
+        }
+
+        .pipeline-stage-controls {
+            min-width: 0;
+        }
+
+        .stage-flow-label {
+            display: inline-flex;
+            margin-bottom: 8px;
+            color: #b8f7d8;
+            background: rgba(25, 195, 125, 0.12);
+            border: 1px solid rgba(25, 195, 125, 0.3);
+            border-radius: 999px;
+            font-size: 11px;
+            padding: 3px 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
         }
 
         .semantic-live-frame-wrap {
@@ -110,6 +171,14 @@
         }
 
         #semanticLiveFrame {
+            width: 100%;
+            border: none;
+            margin: 0;
+            object-fit: contain;
+        }
+
+        #rawLiveFrame,
+        #frameDiffFrame {
             width: 100%;
             border: none;
             margin: 0;
@@ -426,6 +495,9 @@
             .debug-grid {
                 grid-template-columns: 1fr;
             }
+            .pipeline-stage-body {
+                grid-template-columns: 1fr;
+            }
             .debug-panel.full-width {
                 grid-column: 1;
             }
@@ -534,115 +606,166 @@
             document.getElementById('debugContent').innerHTML = `
                 <div class="debug-grid">
                     <div class="debug-panel full-width">
-                        <h2>Realtime Semantic Filter Preview</h2>
-                        <div class="semantic-live-frame-wrap">
-                            <img id="semanticLiveFrame" alt="Realtime semantic filter heatmap stream" />
-                        </div>
-                        <div id="semanticLiveMetrics" class="semantic-live-metrics">
-                            <span class="semantic-live-metric">Waiting for frames…</span>
-                        </div>
-                        <div id="semanticLiveNote" class="semantic-live-note">
-                            This stream shows the latest frame that passed frame-difference filtering, with the local semantic heatmap overlay when semantic filtering is enabled.
-                        </div>
-                        <div class="frame-controls">
-                            <div class="frame-controls-header">
-                                <div class="frame-controls-title">Frame skip threshold</div>
-                                <div class="frame-controls-help">Measured as average pixel difference on a 0-255 scale. For example, <code>25</code> means the average pixel changed by about <code>25</code>.</div>
-                            </div>
-                            <input
-                                id="frameSkipThresholdSlider"
-                                class="frame-skip-slider"
-                                type="range"
-                                min="0"
-                                max="255"
-                                step="0.5"
-                                value="5.0"
-                            />
-                            <div class="frame-skip-meta">
-                                <span class="frame-skip-value" id="frameSkipThresholdValue">5.0 avg pixel diff</span>
-                                <span class="frame-skip-status" id="frameSkipThresholdStatus">Loading threshold…</span>
-                            </div>
-                        </div>
-                        <div class="frame-controls">
-                            <div class="frame-controls-header">
-                                <div class="frame-controls-title">Semantic filter</div>
-                                <div class="frame-controls-help">Runs after frame-diff filtering. When enabled, frames below the semantic threshold are skipped before VLM analysis.</div>
-                            </div>
-                            <label class="semantic-toggle-row">
-                                <input id="semanticEnabled" type="checkbox" style="width:auto;" />
-                                Enable semantic filtering
-                            </label>
-                            <div class="semantic-controls-grid">
-                                <div>
-                                    <label for="semanticKeywords">Keywords</label>
-                                    <input id="semanticKeywords" type="text" placeholder="person, face, hand" />
-                                </div>
-                                <div>
-                                    <label for="semanticReduce">Combine keywords</label>
-                                    <select id="semanticReduce">
-                                        <option value="max">max</option>
-                                        <option value="mean">mean</option>
-                                        <option value="min">min</option>
-                                        <option value="sum">sum</option>
-                                        <option value="softmax">softmax</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label for="semanticEnsemble">Ensemble</label>
-                                    <label class="semantic-toggle-row" style="margin-top: 8px;">
-                                        <input id="semanticEnsemble" type="checkbox" style="width:auto;" />
-                                        Horizontal flip ensemble
-                                    </label>
-                                </div>
-                                <div>
-                                    <label for="semanticThresholdMode">Threshold mode</label>
-                                    <select id="semanticThresholdMode">
-                                        <option value="absolute">absolute score</option>
-                                        <option value="percentile">percentile</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label for="semanticThreshold">Threshold</label>
-                                    <div class="semantic-threshold-row">
-                                        <input id="semanticThreshold" type="range" min="0" max="1" step="0.01" value="0.50" />
-                                        <span id="semanticThresholdValue" class="semantic-threshold-value">0.50</span>
+                        <h2>Live Ingestor Pipeline</h2>
+                        <div class="pipeline-stack">
+                            <section class="pipeline-stage">
+                                <span class="stage-flow-label">Input feed</span>
+                                <h3>0. Raw Live Feed</h3>
+                                <div class="pipeline-stage-copy">This is the live camera feed before any ingestor filtering. Every filter below receives output from the previous stage.</div>
+                                <div class="pipeline-stage-body output-only">
+                                    <div class="pipeline-stage-output">
+                                        <div class="semantic-live-frame-wrap">
+                                            <img id="rawLiveFrame" alt="Raw live camera stream" />
+                                        </div>
+                                        <div id="rawLiveMetrics" class="semantic-live-metrics">
+                                            <span class="semantic-live-metric">Waiting for live input…</span>
+                                        </div>
                                     </div>
                                 </div>
-                                <div>
-                                    <label for="semanticSmoothing">Temporal smoothing</label>
-                                    <div class="semantic-threshold-row">
-                                        <input id="semanticSmoothing" type="range" min="0" max="0.95" step="0.05" value="0.00" />
-                                        <span id="semanticSmoothingValue" class="semantic-threshold-value">0.00</span>
+                            </section>
+
+                            <section class="pipeline-stage">
+                                <span class="stage-flow-label">Filter 1 output</span>
+                                <h3>1. Frame-Difference Filter</h3>
+                                <div class="pipeline-stage-copy">Input is the raw feed above. Output is the latest frame that passed the average-pixel-difference threshold.</div>
+                                <div class="pipeline-stage-body">
+                                    <div class="pipeline-stage-output">
+                                        <div class="semantic-live-frame-wrap">
+                                            <img id="frameDiffFrame" alt="Frame-difference filter output stream" />
+                                        </div>
+                                        <div id="frameDiffMetrics" class="semantic-live-metrics">
+                                            <span class="semantic-live-metric">Waiting for frame-diff output…</span>
+                                        </div>
+                                    </div>
+                                    <div class="pipeline-stage-controls">
+                                        <div class="frame-controls" style="margin-top: 0;">
+                                            <div class="frame-controls-header">
+                                                <div class="frame-controls-title">Frame skip threshold</div>
+                                                <div class="frame-controls-help">Measured as average pixel difference on a 0-255 scale. For example, <code>25</code> means the average pixel changed by about <code>25</code>.</div>
+                                            </div>
+                                            <input
+                                                id="frameSkipThresholdSlider"
+                                                class="frame-skip-slider"
+                                                type="range"
+                                                min="0"
+                                                max="255"
+                                                step="0.5"
+                                                value="5.0"
+                                            />
+                                            <div class="frame-skip-meta">
+                                                <span class="frame-skip-value" id="frameSkipThresholdValue">5.0 avg pixel diff</span>
+                                                <span class="frame-skip-status" id="frameSkipThresholdStatus">Loading threshold…</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="semantic-status" id="semanticFilterStatus">Loading semantic filter…</div>
-                        </div>
-                        <div class="frame-controls">
-                            <div class="frame-controls-header">
-                                <div class="frame-controls-title">VLM chunk queue</div>
-                                <div class="frame-controls-help">After frame-diff and semantic filtering, accepted chunks wait here for model-provider calls.</div>
-                            </div>
-                            <div id="chunkQueueMetrics" class="semantic-live-metrics">
-                                <span class="semantic-live-metric">Loading queue…</span>
-                            </div>
-                            <div class="chunk-queue-bar" aria-label="VLM chunk queue usage">
-                                <div id="chunkQueueFill" class="chunk-queue-fill"></div>
-                            </div>
-                            <div class="semantic-controls-grid">
-                                <div>
-                                    <label for="chunkMaxFrames">Max frames per chunk sent to VLM</label>
-                                    <div class="semantic-threshold-row">
-                                        <input id="chunkMaxFrames" type="range" min="1" max="60" step="1" value="4" />
-                                        <span id="chunkMaxFramesValue" class="semantic-threshold-value">4</span>
+                            </section>
+
+                            <section class="pipeline-stage">
+                                <span class="stage-flow-label">Filter 2 output</span>
+                                <h3>2. Semantic Filter</h3>
+                                <div class="pipeline-stage-copy">Input is the frame-diff output. Output is the local semantic heatmap for frames that reach this filter.</div>
+                                <div class="pipeline-stage-body">
+                                    <div class="pipeline-stage-output">
+                                        <div class="semantic-live-frame-wrap">
+                                            <img id="semanticLiveFrame" alt="Realtime semantic filter heatmap stream" />
+                                        </div>
+                                        <div id="semanticLiveMetrics" class="semantic-live-metrics">
+                                            <span class="semantic-live-metric">Waiting for semantic output…</span>
+                                        </div>
+                                        <div id="semanticLiveNote" class="semantic-live-note">
+                                            The heatmap stays blocky and shows all patches; above-threshold patches are brighter.
+                                        </div>
+                                    </div>
+                                    <div class="pipeline-stage-controls">
+                                        <div class="frame-controls" style="margin-top: 0;">
+                                            <div class="frame-controls-header">
+                                                <div class="frame-controls-title">Semantic filter controls</div>
+                                                <div class="frame-controls-help">Runs after frame-diff filtering. Frames below the semantic threshold are skipped before VLM analysis.</div>
+                                            </div>
+                                            <label class="semantic-toggle-row">
+                                                <input id="semanticEnabled" type="checkbox" style="width:auto;" />
+                                                Enable semantic filtering
+                                            </label>
+                                            <div class="semantic-controls-grid">
+                                                <div>
+                                                    <label for="semanticKeywords">Keywords</label>
+                                                    <input id="semanticKeywords" type="text" placeholder="person, face, hand" />
+                                                </div>
+                                                <div>
+                                                    <label for="semanticReduce">Combine keywords</label>
+                                                    <select id="semanticReduce">
+                                                        <option value="max">max</option>
+                                                        <option value="mean">mean</option>
+                                                        <option value="min">min</option>
+                                                        <option value="sum">sum</option>
+                                                        <option value="softmax">softmax</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label for="semanticEnsemble">Ensemble</label>
+                                                    <label class="semantic-toggle-row" style="margin-top: 8px;">
+                                                        <input id="semanticEnsemble" type="checkbox" style="width:auto;" />
+                                                        Horizontal flip ensemble
+                                                    </label>
+                                                </div>
+                                                <div>
+                                                    <label for="semanticThresholdMode">Threshold mode</label>
+                                                    <select id="semanticThresholdMode">
+                                                        <option value="absolute">absolute score</option>
+                                                        <option value="percentile">percentile</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label for="semanticThreshold">Threshold</label>
+                                                    <div class="semantic-threshold-row">
+                                                        <input id="semanticThreshold" type="range" min="0" max="1" step="0.01" value="0.50" />
+                                                        <span id="semanticThresholdValue" class="semantic-threshold-value">0.50</span>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label for="semanticSmoothing">Temporal smoothing</label>
+                                                    <div class="semantic-threshold-row">
+                                                        <input id="semanticSmoothing" type="range" min="0" max="0.95" step="0.05" value="0.00" />
+                                                        <span id="semanticSmoothingValue" class="semantic-threshold-value">0.00</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="semantic-status" id="semanticFilterStatus">Loading semantic filter…</div>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="semantic-status" id="chunkSettingsStatus">Loading chunk settings…</div>
+                            </section>
+
+                            <section class="pipeline-stage">
+                                <span class="stage-flow-label">Queue stage</span>
+                                <h3>3. VLM Chunk Queue</h3>
+                                <div class="pipeline-stage-copy">Input is semantic-filter output. Accepted frames are grouped into chunks/contact sheets before provider calls.</div>
+                                <div class="frame-controls" style="margin-top: 0;">
+                                    <div id="chunkQueueMetrics" class="semantic-live-metrics">
+                                        <span class="semantic-live-metric">Loading queue…</span>
+                                    </div>
+                                    <div class="chunk-queue-bar" aria-label="VLM chunk queue usage">
+                                        <div id="chunkQueueFill" class="chunk-queue-fill"></div>
+                                    </div>
+                                    <div class="semantic-controls-grid">
+                                        <div>
+                                            <label for="chunkMaxFrames">Max frames per chunk sent to VLM</label>
+                                            <div class="semantic-threshold-row">
+                                                <input id="chunkMaxFrames" type="range" min="1" max="60" step="1" value="4" />
+                                                <span id="chunkMaxFramesValue" class="semantic-threshold-value">4</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="semantic-status" id="chunkSettingsStatus">Loading chunk settings…</div>
+                                </div>
+                            </section>
                         </div>
                     </div>
+
                     <div class="debug-panel full-width">
-                        <h2>Model Provider Input</h2>
+                        <h2>4. Model Provider Input</h2>
+                        <div class="pipeline-stage-copy">Final exact image/contact sheet sent to the VLM. This only updates when a provider call is actually made.</div>
                         <img id="currentFrame" alt="Exact image sent to the model provider" />
                         <div class="frame-timestamp" id="frameTimestamp"></div>
                         <div id="frameErrorBadge" class="frame-error-badge" style="display: none;"></div>
@@ -891,13 +1014,55 @@
             });
         }
 
+        let rawLiveStreamStarted = false;
+        let frameDiffLiveStreamStarted = false;
         let semanticLiveStreamStarted = false;
+
+        function startRawLiveStream() {
+            const img = document.getElementById('rawLiveFrame');
+            if (!img || rawLiveStreamStarted) return;
+            rawLiveStreamStarted = true;
+            img.src = `/api/device/${IO_ID}/preview/stream?t=${Date.now()}`;
+        }
+
+        function startFrameDiffLiveStream() {
+            const img = document.getElementById('frameDiffFrame');
+            if (!img || frameDiffLiveStreamStarted) return;
+            frameDiffLiveStreamStarted = true;
+            img.src = `/api/device/${IO_ID}/debug/frame-diff/stream?t=${Date.now()}`;
+        }
 
         function startSemanticLiveStream() {
             const img = document.getElementById('semanticLiveFrame');
             if (!img || semanticLiveStreamStarted) return;
             semanticLiveStreamStarted = true;
-            img.src = `/api/device/${IO_ID}/debug/semantic-preview/stream?t=${Date.now()}`;
+            img.src = `/api/device/${IO_ID}/debug/semantic-preview/stream?fallback_raw=0&t=${Date.now()}`;
+        }
+
+        function renderPipelineStageMetrics(data) {
+            const rawMetrics = document.getElementById('rawLiveMetrics');
+            const frameDiffMetrics = document.getElementById('frameDiffMetrics');
+            const dedup = data.dedup_status || {};
+            if (rawMetrics) {
+                const chips = [];
+                chips.push(data.has_frame ? 'raw live' : 'waiting for raw frame');
+                if (data.frame_age_ms != null) chips.push(`${formatDurationMs(data.frame_age_ms)} frame age`);
+                rawMetrics.innerHTML = chips
+                    .map(chip => `<span class="semantic-live-metric">${escapeHtml(chip)}</span>`)
+                    .join('');
+            }
+            if (frameDiffMetrics) {
+                const chips = [];
+                chips.push(data.has_frame_diff_frame ? 'passed frame-diff' : 'waiting for frame-diff pass');
+                if (data.frame_diff_age_ms != null) chips.push(`${formatDurationMs(data.frame_diff_age_ms)} output age`);
+                if (dedup.consecutive_skips != null) chips.push(`${Number(dedup.consecutive_skips || 0)} consecutive skips`);
+                if (dedup.frame_diff_threshold != null || dedup.average_pixel_diff_threshold != null) {
+                    chips.push(`threshold ${Number(firstDefined(dedup.average_pixel_diff_threshold, dedup.frame_diff_threshold, 0)).toFixed(1)}`);
+                }
+                frameDiffMetrics.innerHTML = chips
+                    .map(chip => `<span class="semantic-live-metric">${escapeHtml(chip)}</span>`)
+                    .join('');
+            }
         }
 
         async function updateSemanticLiveStatus() {
@@ -908,6 +1073,7 @@
                     renderSemanticLiveMetrics({ has_frame: false, has_heatmap: false, semantic_filter: { last_error: data.error || 'Failed to load semantic preview' } });
                     return;
                 }
+                renderPipelineStageMetrics(data);
                 renderSemanticLiveMetrics(data);
             } catch (e) {
                 console.error('Error fetching semantic live status:', e);
@@ -1199,6 +1365,8 @@
             const hasIngestor = await checkStatus();
             if (!hasIngestor) {
                 if (panelsRendered) { panelsRendered = false; }
+                rawLiveStreamStarted = false;
+                frameDiffLiveStreamStarted = false;
                 semanticLiveStreamStarted = false;
                 renderNoIngestor();
                 return;
@@ -1211,6 +1379,8 @@
                 loadChunkSettings();
                 loadFrameSkipThreshold();
                 loadSemanticFilter();
+                startRawLiveStream();
+                startFrameDiffLiveStream();
                 startSemanticLiveStream();
                 panelsRendered = true;
             }
