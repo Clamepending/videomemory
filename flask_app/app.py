@@ -2132,8 +2132,12 @@ def get_ingestor_history(io_id):
             return jsonify({'history': [], 'count': 0, 'total_count': 0}), 200
         
         history = ingestor.get_output_history()
-        # Remove frames and prompts for JSON serialization
-        history_clean = [{k: v for k, v in item.items() if k not in ('frame', 'prompt')} for item in history]
+        # Remove image arrays and prompts; the exact model input is served by
+        # /debug/frame-and-prompt when needed.
+        history_clean = [
+            {k: v for k, v in item.items() if k not in ('frame', 'evidence_frame', 'prompt')}
+            for item in history
+        ]
         total_count = ingestor.get_total_output_count()
         return jsonify({
             'history': history_clean,
