@@ -1668,7 +1668,7 @@ def ingestor_semantic_preview_status(io_id):
 @app.route('/api/device/<io_id>/debug/semantic-preview/stream', methods=['GET'])
 def ingestor_semantic_preview_stream(io_id):
     """Stream the latest semantic-filter overlay for fast local tuning."""
-    fps = max(1.0, min(60.0, float(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_FPS", "24"))))
+    fps = max(1.0, min(60.0, float(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_FPS", "6"))))
     frame_delay_s = 1.0 / fps
     idle_delay_s = min(0.02, frame_delay_s)
     max_width = max(320, min(1280, int(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_MAX_WIDTH", "640"))))
@@ -1799,7 +1799,7 @@ def ingestor_semantic_preview_stream(io_id):
 @app.route('/api/device/<io_id>/debug/semantic-pass/stream', methods=['GET'])
 def ingestor_semantic_pass_stream(io_id):
     """Stream raw frames that passed semantic filtering."""
-    fps = max(1.0, min(60.0, float(os.getenv("VIDEOMEMORY_SEMANTIC_PASS_PREVIEW_FPS", "24"))))
+    fps = max(1.0, min(60.0, float(os.getenv("VIDEOMEMORY_SEMANTIC_PASS_PREVIEW_FPS", "6"))))
     frame_delay_s = 1.0 / fps
     idle_delay_s = min(0.02, frame_delay_s)
     max_width = max(320, min(1280, int(os.getenv("VIDEOMEMORY_SEMANTIC_PASS_PREVIEW_MAX_WIDTH", "640"))))
@@ -1902,7 +1902,7 @@ def ingestor_semantic_pass_stream(io_id):
 @app.route('/api/device/<io_id>/debug/frame-diff/stream', methods=['GET'])
 def ingestor_frame_diff_stream(io_id):
     """Stream the latest frame that passed frame-difference filtering."""
-    fps = max(1.0, min(60.0, float(os.getenv("VIDEOMEMORY_FRAME_DIFF_PREVIEW_FPS", "24"))))
+    fps = max(1.0, min(60.0, float(os.getenv("VIDEOMEMORY_FRAME_DIFF_PREVIEW_FPS", "6"))))
     frame_delay_s = 1.0 / fps
     idle_delay_s = min(0.02, frame_delay_s)
     max_width = max(320, min(1280, int(os.getenv("VIDEOMEMORY_FRAME_DIFF_PREVIEW_MAX_WIDTH", "640"))))

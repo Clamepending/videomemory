@@ -1217,11 +1217,23 @@
             img.src = `/api/device/${IO_ID}/debug/semantic-preview/stream?fallback_raw=0&t=${Date.now()}`;
         }
 
+        function stopSemanticLiveStream() {
+            const img = document.getElementById('semanticLiveFrame');
+            if (img) img.removeAttribute('src');
+            semanticLiveStreamStarted = false;
+        }
+
         function startSemanticPassStream() {
             const img = document.getElementById('semanticPassFrame');
             if (!img || semanticPassStreamStarted) return;
             semanticPassStreamStarted = true;
             img.src = `/api/device/${IO_ID}/debug/semantic-pass/stream?t=${Date.now()}`;
+        }
+
+        function stopSemanticPassStream() {
+            const img = document.getElementById('semanticPassFrame');
+            if (img) img.removeAttribute('src');
+            semanticPassStreamStarted = false;
         }
 
         function renderPipelineStageMetrics(data) {
@@ -1259,6 +1271,14 @@
                     return;
                 }
                 renderPipelineStageMetrics(data);
+                const semanticEnabled = Boolean(data.semantic_filter && data.semantic_filter.enabled);
+                if (semanticEnabled) {
+                    startSemanticLiveStream();
+                    startSemanticPassStream();
+                } else {
+                    stopSemanticLiveStream();
+                    stopSemanticPassStream();
+                }
                 renderSemanticLiveMetrics(data);
             } catch (e) {
                 console.error('Error fetching semantic live status:', e);
@@ -1569,8 +1589,6 @@
                 loadSemanticFilter();
                 startRawLiveStream();
                 startFrameDiffLiveStream();
-                startSemanticLiveStream();
-                startSemanticPassStream();
                 panelsRendered = true;
             }
             updateSemanticLiveStatus();
