@@ -484,12 +484,25 @@
                     <label>Max Frames Per Model Contact Sheet</label>
                     <span class="badge" id="badge-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES"></span>
                 </div>
-                <div class="setting-hint">Uses all valid frames when the chunk has this many or fewer; otherwise evenly samples down to this max before building the contact sheet. Default: 4.</div>
+                <div class="setting-hint">Uses all valid frames when the chunk has this many or fewer; otherwise evenly samples down to this max before building the contact sheet. Default: 9.</div>
                 <div class="setting-input-row">
-                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES" placeholder="4" min="1" step="1">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES" placeholder="9" min="1" step="1">
                     <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES')">Save</button>
                 </div>
                 <div class="setting-status" id="status-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES"></div>
+            </div>
+
+            <div class="setting-row" data-key="VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE">
+                <div class="setting-label">
+                    <label>Max Queued Semantic Frames</label>
+                    <span class="badge" id="badge-VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE"></span>
+                </div>
+                <div class="setting-hint">Backpressure limit for frames waiting on the local semantic filter. If full, the oldest queued frame is dropped to keep the preview current. Default: 3.</div>
+                <div class="setting-input-row">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE" placeholder="3" min="1" step="1">
+                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE')">Save</button>
+                </div>
+                <div class="setting-status" id="status-VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE"></div>
             </div>
 
             <div class="setting-row" data-key="VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE">

@@ -1541,9 +1541,9 @@ def ingestor_semantic_preview_status(io_id):
             except (TypeError, ValueError):
                 chunk_seconds = 2.0
             try:
-                max_frames = int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES", "4"))
+                max_frames = int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES", "9"))
             except (TypeError, ValueError):
-                max_frames = 4
+                max_frames = 9
             try:
                 max_queue = int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE", "10"))
             except (TypeError, ValueError):
@@ -1556,6 +1556,19 @@ def ingestor_semantic_preview_status(io_id):
                 'oldest_queued_chunk_age_ms': None,
                 'newest_queued_chunk_age_ms': None,
                 'queued_chunk_frame_counts': [],
+            }
+
+        def _default_semantic_frame_queue_status() -> Dict[str, Any]:
+            try:
+                semantic_queue = int(os.getenv("VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE", "3"))
+            except (TypeError, ValueError):
+                semantic_queue = 3
+            return {
+                'semantic_frame_queue_maxsize': max(1, semantic_queue),
+                'queued_semantic_frames': 0,
+                'oldest_queued_semantic_frame_age_ms': None,
+                'newest_queued_semantic_frame_age_ms': None,
+                'dropped_semantic_frames': 0,
             }
 
         ingestor = (
@@ -1576,6 +1589,7 @@ def ingestor_semantic_preview_status(io_id):
                 'semantic_pass_age_ms': None,
                 'dedup_status': None,
                 'chunk_queue': _default_chunk_queue_status(),
+                'semantic_frame_queue': _default_semantic_frame_queue_status(),
                 'semantic_filter': task_manager.get_ingestor_semantic_filter_config(io_id),
             }), 200
 
@@ -1643,6 +1657,7 @@ def ingestor_semantic_preview_status(io_id):
             'semantic_result_age_ms': semantic_result_age_ms,
             'dedup_status': ingestor.get_dedup_status() if hasattr(ingestor, 'get_dedup_status') else None,
             'chunk_queue': ingestor.get_chunk_queue_status() if hasattr(ingestor, 'get_chunk_queue_status') else None,
+            'semantic_frame_queue': ingestor.get_semantic_frame_queue_status() if hasattr(ingestor, 'get_semantic_frame_queue_status') else None,
             'semantic_filter': semantic_status,
         })
     except Exception as e:
@@ -2862,8 +2877,9 @@ _DEFAULT_SETTINGS = {
     'VIDEOMEMORY_SAVE_NOTE_FRAMES': '1',
     'VIDEOMEMORY_SAVE_NOTE_VIDEOS': '0',
     'VIDEOMEMORY_VIDEO_CHUNK_SECONDS': '2.0',
-    'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES': '4',
+    'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES': '9',
     'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE': '10',
+    'VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE': '3',
 }
 
 # All known setting keys (for the settings page)
@@ -2879,6 +2895,7 @@ _KNOWN_SETTINGS = [
     'VIDEOMEMORY_VIDEO_CHUNK_SECONDS',
     'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES',
     'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE',
+    'VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE',
     'LOCAL_MODEL_BASE_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
@@ -2906,6 +2923,7 @@ _VIDEO_CHUNK_RUNTIME_KEYS = {
     'VIDEOMEMORY_VIDEO_CHUNK_SECONDS',
     'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES',
     'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE',
+    'VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE',
 }
 
 
@@ -3247,7 +3265,7 @@ def update_setting(key):
             except (TypeError, ValueError):
                 return jsonify({'error': 'Chunk length must be numeric'}), 400
             value = str(seconds)
-        elif key in {'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES', 'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE'}:
+        elif key in {'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES', 'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE', 'VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE'}:
             try:
                 count = max(1, int(raw_value))
             except (TypeError, ValueError):

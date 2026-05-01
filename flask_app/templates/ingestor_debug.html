@@ -764,6 +764,24 @@
                                                 </div>
                                             </div>
                                             <div class="semantic-status" id="semanticFilterStatus">Loading semantic filter…</div>
+                                            <div style="margin-top: 14px;">
+                                                <div class="frame-controls-title" style="font-size: 13px;">Semantic frame queue</div>
+                                                <div class="frame-controls-help">Frames that pass frame-diff wait here for the local semantic model. If full, the oldest frame is dropped to keep tuning live.</div>
+                                                <div id="semanticFrameQueueMetrics" class="semantic-live-metrics">
+                                                    <span class="semantic-live-metric">Loading semantic queue…</span>
+                                                </div>
+                                                <div class="chunk-queue-bar" aria-label="Semantic frame queue usage">
+                                                    <div id="semanticFrameQueueFill" class="chunk-queue-fill"></div>
+                                                </div>
+                                                <div>
+                                                    <label for="semanticFrameQueueMax">Max queued semantic frames</label>
+                                                    <div class="semantic-threshold-row">
+                                                        <input id="semanticFrameQueueMax" type="range" min="1" max="30" step="1" value="3" />
+                                                        <span id="semanticFrameQueueMaxValue" class="semantic-threshold-value">3</span>
+                                                    </div>
+                                                    <div class="semantic-status" id="semanticFrameQueueStatus">Loading semantic queue settings…</div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -784,8 +802,8 @@
                                         <div>
                                             <label for="chunkMaxFrames">Max frames per chunk sent to VLM</label>
                                             <div class="semantic-threshold-row">
-                                                <input id="chunkMaxFrames" type="range" min="1" max="60" step="1" value="4" />
-                                                <span id="chunkMaxFramesValue" class="semantic-threshold-value">4</span>
+                                                <input id="chunkMaxFrames" type="range" min="1" max="60" step="1" value="9" />
+                                                <span id="chunkMaxFramesValue" class="semantic-threshold-value">9</span>
                                             </div>
                                         </div>
                                     </div>
@@ -939,6 +957,7 @@
             }
             if (options.updateQueue !== false) {
                 renderChunkQueueMetrics(data.chunk_queue);
+                renderSemanticFrameQueueMetrics(data.semantic_frame_queue);
             }
         }
 
@@ -991,6 +1010,47 @@
             }
         }
 
+        function renderSemanticFrameQueueMetrics(queue) {
+            const metrics = document.getElementById('semanticFrameQueueMetrics');
+            const fill = document.getElementById('semanticFrameQueueFill');
+            if (!metrics) return;
+            if (!queue) {
+                metrics.innerHTML = '<span class="semantic-live-metric">waiting for semantic queue…</span>';
+                if (fill) {
+                    fill.style.width = '0%';
+                    fill.className = 'chunk-queue-fill';
+                }
+                return;
+            }
+            const queued = Number(firstDefined(queue.queued_semantic_frames, 0));
+            const max = Number(firstDefined(queue.semantic_frame_queue_maxsize, 0));
+            const ratio = max > 0 ? Math.min(1, queued / max) : 0;
+            const dropped = Number(firstDefined(queue.dropped_semantic_frames, 0));
+            const chips = [
+                `${queued}/${max || '?'} frames queued`,
+                `${Math.round(ratio * 100)}% full`,
+            ];
+            if (queue.oldest_queued_semantic_frame_age_ms != null) {
+                chips.push(`oldest ${formatDurationMs(queue.oldest_queued_semantic_frame_age_ms)}`);
+            }
+            if (dropped > 0) {
+                chips.push(`${dropped} dropped`);
+            }
+            metrics.innerHTML = chips
+                .map(chip => `<span class="semantic-live-metric">${escapeHtml(chip)}</span>`)
+                .join('');
+            if (fill) {
+                let levelClass = '';
+                if (ratio >= 0.8) {
+                    levelClass = ' danger';
+                } else if (ratio >= 0.6) {
+                    levelClass = ' warn';
+                }
+                fill.style.width = `${Math.round(ratio * 100)}%`;
+                fill.className = `chunk-queue-fill${levelClass}`;
+            }
+        }
+
         function setChunkMaxFramesUi(value, statusText = '') {
             const slider = document.getElementById('chunkMaxFrames');
             const valueLabel = document.getElementById('chunkMaxFramesValue');
@@ -1009,10 +1069,10 @@
                 const data = await resp.json();
                 const settings = data.settings || {};
                 const setting = settings.VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES;
-                setChunkMaxFramesUi(setting ? setting.value : 4, 'Applied live: chunks above this cap are evenly subsampled before the VLM call.');
+                setChunkMaxFramesUi(setting ? setting.value : 9, 'Applied live: chunks above this cap are evenly subsampled before the VLM call.');
             } catch (e) {
                 console.error('Error loading chunk settings:', e);
-                setChunkMaxFramesUi(4, 'Failed to load chunk settings');
+                setChunkMaxFramesUi(9, 'Failed to load chunk settings');
             }
         }
 
@@ -1058,6 +1118,76 @@
                     chunkMaxFramesSaveTimer = null;
                 }
                 saveChunkMaxFrames(slider.value);
+            });
+        }
+
+        function setSemanticFrameQueueMaxUi(value, statusText = '') {
+            const slider = document.getElementById('semanticFrameQueueMax');
+            const valueLabel = document.getElementById('semanticFrameQueueMaxValue');
+            const status = document.getElementById('semanticFrameQueueStatus');
+            const numericValue = Math.max(1, Math.round(Number(value || 1)));
+            if (slider && document.activeElement !== slider) {
+                slider.value = String(numericValue);
+            }
+            if (valueLabel) valueLabel.textContent = String(numericValue);
+            if (status && statusText) status.textContent = statusText;
+        }
+
+        async function loadSemanticFrameQueueSettings() {
+            try {
+                const resp = await fetchNoStore('/api/settings');
+                const data = await resp.json();
+                const settings = data.settings || {};
+                const setting = settings.VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE;
+                setSemanticFrameQueueMaxUi(setting ? setting.value : 3, 'Applied live: controls how much semantic backlog is allowed.');
+            } catch (e) {
+                console.error('Error loading semantic queue settings:', e);
+                setSemanticFrameQueueMaxUi(3, 'Failed to load semantic queue settings');
+            }
+        }
+
+        let semanticFrameQueueSaveTimer = null;
+        let semanticFrameQueueSaveInFlight = false;
+
+        async function saveSemanticFrameQueueMax(value) {
+            if (semanticFrameQueueSaveInFlight) return;
+            semanticFrameQueueSaveInFlight = true;
+            const count = Math.max(1, Math.round(Number(value || 1)));
+            try {
+                const resp = await fetchNoStore('/api/settings/VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: String(count) }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    setSemanticFrameQueueMaxUi(count, data.error || 'Failed to save semantic queue');
+                    return;
+                }
+                setSemanticFrameQueueMaxUi(count, 'Applied live to active ingestors');
+            } catch (e) {
+                console.error('Error saving semantic queue max:', e);
+                setSemanticFrameQueueMaxUi(count, 'Failed to save semantic queue');
+            } finally {
+                semanticFrameQueueSaveInFlight = false;
+            }
+        }
+
+        function bindSemanticFrameQueueControls() {
+            const slider = document.getElementById('semanticFrameQueueMax');
+            if (!slider || slider.dataset.bound === 'true') return;
+            slider.dataset.bound = 'true';
+            slider.addEventListener('input', () => {
+                setSemanticFrameQueueMaxUi(slider.value, 'Saving…');
+                if (semanticFrameQueueSaveTimer) clearTimeout(semanticFrameQueueSaveTimer);
+                semanticFrameQueueSaveTimer = setTimeout(() => saveSemanticFrameQueueMax(slider.value), 180);
+            });
+            slider.addEventListener('change', () => {
+                if (semanticFrameQueueSaveTimer) {
+                    clearTimeout(semanticFrameQueueSaveTimer);
+                    semanticFrameQueueSaveTimer = null;
+                }
+                saveSemanticFrameQueueMax(slider.value);
             });
         }
 
@@ -1430,9 +1560,11 @@
             if (!panelsRendered) {
                 renderDebugPanels();
                 bindChunkControls();
+                bindSemanticFrameQueueControls();
                 bindFrameSkipControls();
                 bindSemanticFilterControls();
                 loadChunkSettings();
+                loadSemanticFrameQueueSettings();
                 loadFrameSkipThreshold();
                 loadSemanticFilter();
                 startRawLiveStream();

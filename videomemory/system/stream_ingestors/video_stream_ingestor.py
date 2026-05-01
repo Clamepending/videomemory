@@ -73,8 +73,9 @@ class VideoStreamIngestor:
     DEFAULT_EVIDENCE_CLIP_PREROLL_SECONDS = 4.0
     DEFAULT_EVIDENCE_CLIP_END_HOLD_SECONDS = 1.0
     DEFAULT_VIDEO_CHUNK_SECONDS = 2.0
-    DEFAULT_VIDEO_CHUNK_SUBSAMPLE_FRAMES = 4
+    DEFAULT_VIDEO_CHUNK_SUBSAMPLE_FRAMES = 9
     DEFAULT_VIDEO_CHUNK_QUEUE_MAXSIZE = 10
+    DEFAULT_SEMANTIC_FRAME_QUEUE_MAXSIZE = 3
     
     def __init__(self, camera_source, model_provider: BaseModelProvider, target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None, on_detection_event=None):
         """Initialize the video stream ingestor.
@@ -98,6 +99,8 @@ class VideoStreamIngestor:
         self._loop: Optional[asyncio.Task] = None
         self._chunk_processor_task: Optional[asyncio.Task] = None
         self._chunk_queue: Optional[asyncio.Queue] = None
+        self._semantic_processor_task: Optional[asyncio.Task] = None
+        self._semantic_frame_queue: Optional[asyncio.Queue] = None
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
         self._snapshot_client: Optional[httpx.Client] = None
         self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
@@ -113,6 +116,8 @@ class VideoStreamIngestor:
         self._latest_model_input: Optional[Dict[str, Any]] = None
         self._queued_chunk_created_at: deque = deque()
         self._queued_chunk_frame_counts: deque = deque()
+        self._queued_semantic_frame_created_at: deque = deque()
+        self._semantic_queue_frames_dropped: int = 0
 
         evidence_clip_fps = float(os.getenv("VIDEOMEMORY_NOTE_VIDEO_FPS", self.DEFAULT_EVIDENCE_CLIP_FPS))
         evidence_clip_preroll_seconds = float(
@@ -147,6 +152,10 @@ class VideoStreamIngestor:
         self._semantic_evaluations: int = 0
         self._latest_semantic_filter_timestamp: Optional[float] = None
         self._semantic_filter_fps_ema: float = 0.0
+        self._semantic_frame_queue_maxsize = max(
+            1,
+            int(os.getenv("VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE", self.DEFAULT_SEMANTIC_FRAME_QUEUE_MAXSIZE)),
+        )
         self._semantic_preview_refresh_seconds = max(
             0.1,
             float(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_REFRESH_SECONDS", "0.1")),
@@ -229,6 +238,10 @@ class VideoStreamIngestor:
             1,
             int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE", self.DEFAULT_VIDEO_CHUNK_QUEUE_MAXSIZE)),
         )
+        self._semantic_frame_queue_maxsize = max(
+            1,
+            int(os.getenv("VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE", self.DEFAULT_SEMANTIC_FRAME_QUEUE_MAXSIZE)),
+        )
 
     def reload_video_chunk_settings(self) -> Dict[str, Any]:
         """Reload chunking settings for active ingestors."""
@@ -236,10 +249,14 @@ class VideoStreamIngestor:
         self._load_video_chunk_settings_from_env()
         if self._chunk_queue is not None and hasattr(self._chunk_queue, "_maxsize"):
             self._chunk_queue._maxsize = self._video_chunk_queue_maxsize
+        if self._semantic_frame_queue is not None and hasattr(self._semantic_frame_queue, "_maxsize"):
+            self._semantic_frame_queue._maxsize = self._semantic_frame_queue_maxsize
         while len(self._queued_chunk_created_at) > self._video_chunk_queue_maxsize:
             self._queued_chunk_created_at.popleft()
         while len(self._queued_chunk_frame_counts) > self._video_chunk_queue_maxsize:
             self._queued_chunk_frame_counts.popleft()
+        while len(self._queued_semantic_frame_created_at) > self._semantic_frame_queue_maxsize:
+            self._queued_semantic_frame_created_at.popleft()
         return self.get_video_chunk_settings()
 
     def get_video_chunk_settings(self) -> Dict[str, Any]:
@@ -249,6 +266,7 @@ class VideoStreamIngestor:
             "video_chunk_seconds": float(self._video_chunk_seconds),
             "video_chunk_subsample_frames": int(self._video_chunk_subsample_frames),
             "video_chunk_queue_maxsize": int(self._video_chunk_queue_maxsize),
+            "semantic_frame_queue_maxsize": int(self._semantic_frame_queue_maxsize),
         }
 
     def get_chunk_queue_status(self) -> Dict[str, Any]:
@@ -267,6 +285,24 @@ class VideoStreamIngestor:
             "oldest_queued_chunk_age_ms": oldest_age_ms,
             "newest_queued_chunk_age_ms": newest_age_ms,
             "queued_chunk_frame_counts": list(self._queued_chunk_frame_counts),
+        }
+
+    def get_semantic_frame_queue_status(self) -> Dict[str, Any]:
+        """Return current semantic frame queue backlog stats for debug UI."""
+
+        queue_size = self._semantic_frame_queue.qsize() if self._semantic_frame_queue is not None else 0
+        oldest_age_ms = None
+        newest_age_ms = None
+        now = time.time()
+        if self._queued_semantic_frame_created_at:
+            oldest_age_ms = max(0.0, (now - float(self._queued_semantic_frame_created_at[0])) * 1000.0)
+            newest_age_ms = max(0.0, (now - float(self._queued_semantic_frame_created_at[-1])) * 1000.0)
+        return {
+            "semantic_frame_queue_maxsize": int(self._semantic_frame_queue_maxsize),
+            "queued_semantic_frames": int(queue_size),
+            "oldest_queued_semantic_frame_age_ms": oldest_age_ms,
+            "newest_queued_semantic_frame_age_ms": newest_age_ms,
+            "dropped_semantic_frames": int(self._semantic_queue_frames_dropped),
         }
 
     def _build_inference_error_info(self, error: Exception) -> Dict[str, Any]:
@@ -328,6 +364,11 @@ class VideoStreamIngestor:
         self._chunk_processor_task = asyncio.create_task(
             self._chunk_processing_loop(),
             name=f"chunk_processor_{self.camera_index}",
+        )
+        self._semantic_frame_queue = asyncio.Queue(maxsize=self._semantic_frame_queue_maxsize)
+        self._semantic_processor_task = asyncio.create_task(
+            self._semantic_frame_processing_loop(),
+            name=f"semantic_processor_{self.camera_index}",
         )
         self._loop = asyncio.create_task(self._capture_loop(), name=f"capture_{self.camera_index}")
         
@@ -717,6 +758,109 @@ class VideoStreamIngestor:
             finally:
                 queue.task_done()
 
+    async def _semantic_frame_processing_loop(self) -> None:
+        """Score frame-diff outputs without blocking capture."""
+
+        chunk_frames: List[Any] = []
+        chunk_has_motion = False
+        chunk_start_monotonic = time.monotonic()
+
+        while self._running:
+            queue = self._semantic_frame_queue
+            if queue is None:
+                await asyncio.sleep(0.05)
+                continue
+            try:
+                frame, frame_monotonic = await asyncio.wait_for(queue.get(), timeout=0.2)
+                if self._queued_semantic_frame_created_at:
+                    self._queued_semantic_frame_created_at.popleft()
+            except asyncio.TimeoutError:
+                if chunk_frames and chunk_has_motion and is_chunk_complete(
+                    chunk_start_monotonic,
+                    time.monotonic(),
+                    self._video_chunk_seconds,
+                ):
+                    self._enqueue_frame_chunk(chunk_frames)
+                    chunk_frames = []
+                    chunk_has_motion = False
+                    chunk_start_monotonic = time.monotonic()
+                continue
+            try:
+                semantic_result = self._apply_semantic_filter(frame)
+                if not semantic_result.should_keep:
+                    self._record_semantic_skip()
+                    continue
+
+                if self._tasks_list:
+                    if not chunk_frames:
+                        chunk_start_monotonic = frame_monotonic
+                    chunk_frames.append(frame.copy())
+                    chunk_has_motion = True
+                    if is_chunk_complete(chunk_start_monotonic, frame_monotonic, self._video_chunk_seconds):
+                        self._enqueue_frame_chunk(chunk_frames)
+                        chunk_frames = []
+                        chunk_has_motion = False
+                        chunk_start_monotonic = frame_monotonic
+                else:
+                    chunk_frames = []
+                    chunk_has_motion = False
+                    chunk_start_monotonic = frame_monotonic
+            except Exception:
+                logger.error(
+                    "Error in semantic frame processing loop [camera=%s]",
+                    self.camera_index,
+                    exc_info=True,
+                )
+            finally:
+                queue.task_done()
+
+        if chunk_frames and chunk_has_motion:
+            self._enqueue_frame_chunk(chunk_frames)
+
+    def _semantic_filter_is_active(self) -> bool:
+        """Return whether frames need the local semantic scorer before chunking."""
+
+        config = self._semantic_filter.config
+        return bool(config.enabled and config.keywords.strip())
+
+    def _enqueue_semantic_frame(self, frame: Any, frame_monotonic: Optional[float] = None) -> None:
+        """Queue one frame-diff output for semantic scoring, dropping stale backlog."""
+
+        queue = self._semantic_frame_queue
+        if queue is None:
+            return
+
+        item = (frame.copy(), frame_monotonic if frame_monotonic is not None else time.monotonic())
+        try:
+            queue.put_nowait(item)
+            self._queued_semantic_frame_created_at.append(time.time())
+        except asyncio.QueueFull:
+            try:
+                queue.get_nowait()
+                queue.task_done()
+                if self._queued_semantic_frame_created_at:
+                    self._queued_semantic_frame_created_at.popleft()
+            except asyncio.QueueEmpty:
+                pass
+            queue.put_nowait(item)
+            self._queued_semantic_frame_created_at.append(time.time())
+            self._semantic_queue_frames_dropped += 1
+
+    def _clear_semantic_frame_queue(self) -> None:
+        """Drop queued semantic work when filter settings change."""
+
+        queue = self._semantic_frame_queue
+        if queue is None:
+            self._queued_semantic_frame_created_at.clear()
+            return
+        while True:
+            try:
+                queue.get_nowait()
+                queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+        self._queued_semantic_frame_created_at.clear()
+
     def _enqueue_frame_chunk(self, frames: List[Any]) -> None:
         """Queue a completed motion-triggered chunk without blocking capture."""
 
@@ -806,7 +950,7 @@ class VideoStreamIngestor:
                         await asyncio.sleep(0.05)
                         continue
 
-                    chunk_has_motion = self._add_frame_to_chunk(chunk_frames, frame) or chunk_has_motion
+                    chunk_has_motion = self._add_frame_to_chunk(chunk_frames, frame, now_monotonic) or chunk_has_motion
 
                     if is_chunk_complete(chunk_start_monotonic, now_monotonic, self._video_chunk_seconds):
                         if chunk_has_motion:
@@ -844,7 +988,7 @@ class VideoStreamIngestor:
                 self._consecutive_capture_failures = 0
         await asyncio.sleep(0.05)
 
-    def _add_frame_to_chunk(self, chunk_frames: List[Any], frame: Any) -> bool:
+    def _add_frame_to_chunk(self, chunk_frames: List[Any], frame: Any, frame_monotonic: Optional[float] = None) -> bool:
         """Append a frame and return whether it crossed the motion threshold."""
 
         if self._is_frame_duplicate(frame):
@@ -857,6 +1001,10 @@ class VideoStreamIngestor:
             return False
 
         self._remember_frame_for_diff(frame)
+        if self._semantic_filter_is_active():
+            self._enqueue_semantic_frame(frame, frame_monotonic)
+            return False
+
         semantic_result = self._apply_semantic_filter(frame)
         if not semantic_result.should_keep:
             self._record_semantic_skip()
@@ -959,17 +1107,12 @@ class VideoStreamIngestor:
                 and self._semantic_preview_needs_refresh()
             ):
                 return
-            semantic_result = self._apply_semantic_filter(frame)
-            if not semantic_result.should_keep:
-                self._record_semantic_skip()
+            if self._semantic_filter_is_active():
+                self._enqueue_semantic_frame(frame)
             return
         self._remember_frame_for_diff(frame)
-        config = self._semantic_filter.config
-        if not config.enabled or not config.keywords.strip():
-            return
-        semantic_result = self._apply_semantic_filter(frame)
-        if not semantic_result.should_keep:
-            self._record_semantic_skip()
+        if self._semantic_filter_is_active():
+            self._enqueue_semantic_frame(frame)
 
     def _frame_to_base64(self, frame: Any) -> str:
         """Convert OpenCV frame to base64 encoded image."""
@@ -1228,6 +1371,16 @@ class VideoStreamIngestor:
         self._chunk_processor_task = None
         self._chunk_queue = None
 
+        if self._semantic_processor_task and not self._semantic_processor_task.done():
+            self._semantic_processor_task.cancel()
+            try:
+                await asyncio.wait_for(self._semantic_processor_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+        self._semantic_processor_task = None
+        self._semantic_frame_queue = None
+        self._queued_semantic_frame_created_at.clear()
+
         self._release_camera()
         
         logger.info(f"Stopped ingestor for camera index={self.camera_index}")
@@ -1392,6 +1545,7 @@ class VideoStreamIngestor:
         merged.update(config)
         next_config = coerce_config(merged)
         self._semantic_filter.update_config(next_config)
+        self._clear_semantic_frame_queue()
         self._latest_semantic_pass_frame = None
         self._latest_semantic_pass_timestamp = None
         if next_config.enabled and next_config.keywords.strip():
