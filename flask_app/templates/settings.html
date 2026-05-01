@@ -497,9 +497,9 @@
                     <label>Max Queued Chunks</label>
                     <span class="badge" id="badge-VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE"></span>
                 </div>
-                <div class="setting-hint">Backpressure limit when model calls are slower than capture. If full, the oldest queued chunk is dropped. Default: 5.</div>
+                <div class="setting-hint">Backpressure limit when model calls are slower than capture. If full, the oldest queued chunk is dropped. Default: 10.</div>
                 <div class="setting-input-row">
-                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE" placeholder="5" min="1" step="1">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE" placeholder="10" min="1" step="1">
                     <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE')">Save</button>
                 </div>
                 <div class="setting-status" id="status-VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE"></div>

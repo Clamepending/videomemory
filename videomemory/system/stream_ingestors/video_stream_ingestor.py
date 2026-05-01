@@ -74,7 +74,7 @@ class VideoStreamIngestor:
     DEFAULT_EVIDENCE_CLIP_END_HOLD_SECONDS = 1.0
     DEFAULT_VIDEO_CHUNK_SECONDS = 2.0
     DEFAULT_VIDEO_CHUNK_SUBSAMPLE_FRAMES = 4
-    DEFAULT_VIDEO_CHUNK_QUEUE_MAXSIZE = 5
+    DEFAULT_VIDEO_CHUNK_QUEUE_MAXSIZE = 10
     
     def __init__(self, camera_source, model_provider: BaseModelProvider, target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None, on_detection_event=None):
         """Initialize the video stream ingestor.
