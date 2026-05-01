@@ -144,11 +144,13 @@ POST /api/tasks
 {
   "io_id": "0",
   "task_description": "Count the number of people entering the room",
-  "bot_id": "optional-bot-identifier"
+  "bot_id": "optional-bot-identifier",
+  "semantic_filter_keywords": "optional keywords that must be visible before VLM calls"
 }
 ```
 
 - `bot_id` (optional): Identifier of the bot that created this task; stored for multi-bot / debug and shown in the UI.
+- `semantic_filter_keywords` (optional): Enables the device-level semantic filter with these keywords before frames are queued for VLM calls. This is useful for OpenClaw trigger tasks on slower devices. Aliases: `required_keywords`, `semantic_keywords`.
 
 1. First call `GET /api/devices` to find the `io_id` of the camera you want.
 2. Then create a task with a natural-language description of what to monitor.

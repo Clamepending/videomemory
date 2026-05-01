@@ -23,7 +23,7 @@ const sessionStorePath =
 function usage() {
   return [
     "Usage:",
-    "  node openclaw-videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--include-video true|false] [--session-key <current-session-key>] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
+    "  node openclaw-videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--semantic-keywords 'backpack, person'] [--semantic-threshold 0.5] [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--include-video true|false] [--session-key <current-session-key>] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
     "  node openclaw-videomemory-task-helper.mjs update --task-id 0 --trigger 'Watch for backpacks...' [--action 'Tell one short backpack joke...'] [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--include-video true|false] [--session-key <current-session-key>] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request '...'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
     "  node openclaw-videomemory-task-helper.mjs stop --task-id 0 [--base-url http://videomemory:5050]",
     "  node openclaw-videomemory-task-helper.mjs delete --task-id 0 [--base-url http://videomemory:5050]",
@@ -98,6 +98,18 @@ function parseBooleanOption(rawValue, fallback = false) {
     return false;
   }
   throw new Error(`Unsupported boolean value: ${rawValue}. Use true or false.`);
+}
+
+function parseNumberOption(rawValue, optionName, fallback) {
+  const value = cleanText(rawValue);
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Unsupported numeric value for --${optionName}: ${rawValue}`);
+  }
+  return parsed;
 }
 
 function resolveCommandSource(options, previousEntry) {
@@ -410,12 +422,21 @@ async function createTask(options) {
   const includeVideo = resolveIncludeVideo(options, null);
   const saveNoteFramesOverride = getExplicitIncludeOverride(options, "include-frame");
   const saveNoteVideosOverride = getExplicitIncludeOverride(options, "include-video");
+  const semanticKeywords = cleanText(options["semantic-keywords"] || options["required-keywords"]);
 
   const createPayload = {
     io_id: ioId,
     task_description: trigger,
     bot_id: botId,
   };
+  if (semanticKeywords) {
+    createPayload.semantic_filter_keywords = semanticKeywords;
+    createPayload.semantic_filter_threshold = parseNumberOption(options["semantic-threshold"], "semantic-threshold", 0.5);
+    createPayload.semantic_filter_threshold_mode = cleanText(options["semantic-threshold-mode"]) || "absolute";
+    createPayload.semantic_filter_reduce = cleanText(options["semantic-reduce"]) || "max";
+    createPayload.semantic_filter_smoothing = parseNumberOption(options["semantic-smoothing"], "semantic-smoothing", 0.0);
+    createPayload.semantic_filter_ensemble = cleanText(options["semantic-ensemble"]) || "off";
+  }
   if (saveNoteFramesOverride !== undefined) {
     createPayload.save_note_frames = saveNoteFramesOverride;
   }
@@ -445,6 +466,8 @@ async function createTask(options) {
     delivery_session_key: delivery.sessionKey,
     include_note_frame: includeFrame,
     include_note_video: includeVideo,
+    semantic_filter_keywords: semanticKeywords,
+    semantic_filter: created.semantic_filter || null,
     original_request: originalRequest || trigger,
     created_at: now,
     updated_at: now,

@@ -336,6 +336,43 @@ class IngestorDebugApiTests(unittest.TestCase):
         self.assertEqual(api_resp.headers.get("Pragma"), "no-cache")
         self.assertEqual(api_resp.headers.get("Expires"), "0")
 
+    def test_create_task_accepts_semantic_filter_keywords(self):
+        captured = {}
+
+        def fake_add_task(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return {
+                "status": "success",
+                "task_id": "1",
+                "io_id": args[0],
+                "task_description": args[1],
+                "semantic_filter": kwargs["semantic_filter_config"],
+            }
+
+        with (
+            patch.object(app_module, "_build_task_creation_model_error", return_value=None),
+            patch.object(app_module.videomemory.tools.tasks, "add_task", side_effect=fake_add_task),
+        ):
+            resp = self.client.post(
+                "/api/tasks",
+                json={
+                    "io_id": "0",
+                    "task_description": "Watch for a red marker.",
+                    "bot_id": "openclaw",
+                    "required_keywords": ["red marker", "hand"],
+                    "semantic_filter_threshold": 0.42,
+                    "semantic_filter_ensemble": "hflip",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 201)
+        config = captured["kwargs"]["semantic_filter_config"]
+        self.assertEqual(config["keywords"], "red marker, hand")
+        self.assertTrue(config["enabled"])
+        self.assertEqual(config["threshold"], 0.42)
+        self.assertEqual(config["ensemble"], "hflip")
+
     def test_debug_page_inline_scripts_are_valid_javascript(self):
         if shutil.which("node") is None:
             self.skipTest("node is required for JS syntax validation")

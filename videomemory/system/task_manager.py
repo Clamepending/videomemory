@@ -464,6 +464,7 @@ class TaskManager:
         bot_id: Optional[str] = None,
         save_note_frames: Optional[bool] = None,
         save_note_videos: Optional[bool] = None,
+        semantic_filter_config: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """Add a new task for a specific IO stream.
         
@@ -473,6 +474,7 @@ class TaskManager:
             bot_id: Optional identifier of the bot that created this task (for multi-bot / debug)
             save_note_frames: Optional per-task override for saving note frames
             save_note_videos: Optional per-task override for saving note videos
+            semantic_filter_config: Optional device-level semantic filter settings to apply before starting the task
         
         Returns:
             Dictionary containing the task information and status
@@ -536,6 +538,23 @@ class TaskManager:
                 self._db.save_task(task)
             except Exception as e:
                 logger.error(f"Failed to persist new task {task_id}: {e}")
+
+        applied_semantic_filter = None
+        if semantic_filter_config is not None:
+            try:
+                applied_semantic_filter = self.set_ingestor_semantic_filter_config(io_id, semantic_filter_config)
+            except Exception as e:
+                logger.error(
+                    "Failed to apply semantic filter config while creating task %s for io_id=%s: %s",
+                    task_id,
+                    io_id,
+                    e,
+                    exc_info=True,
+                )
+                return {
+                    "status": "error",
+                    "message": f"Failed to apply semantic filter config: {e}",
+                }
         
         # Add task to the ingestor, passing the Task object (shared by reference)
         # This will automatically start the ingestor if not already running
@@ -559,6 +578,8 @@ class TaskManager:
             result["bot_id"] = bot_id
         result["save_note_frames"] = save_note_frames
         result["save_note_videos"] = save_note_videos
+        if applied_semantic_filter is not None:
+            result["semantic_filter"] = applied_semantic_filter
         return result
 
     def _emit_detection_event(self, task: Task, new_note: Optional[NoteEntry] = None):

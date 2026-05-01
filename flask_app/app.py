@@ -576,11 +576,14 @@ def create_task():
         bot_id = data.get('bot_id', '').strip() or None
         save_note_frames = _coerce_optional_boolean_request_value(data.get('save_note_frames'))
         save_note_videos = _coerce_optional_boolean_request_value(data.get('save_note_videos'))
+        semantic_filter_config, semantic_filter_error = _parse_task_semantic_filter_config(data)
         
         if not io_id:
             return jsonify({'status': 'error', 'error': 'io_id is required'}), 400
         if not task_description:
             return jsonify({'status': 'error', 'error': 'task_description is required'}), 400
+        if semantic_filter_error:
+            return jsonify({'status': 'error', 'error': semantic_filter_error}), 400
 
         provider_error = _build_task_creation_model_error()
         if provider_error is not None:
@@ -593,6 +596,7 @@ def create_task():
             bot_id=bot_id,
             save_note_frames=save_note_frames,
             save_note_videos=save_note_videos,
+            semantic_filter_config=semantic_filter_config,
         )
         
         if result.get('status') == 'error':
@@ -2411,6 +2415,15 @@ def openapi_spec():
                                 "bot_id": {"type": "string", "description": "Optional identifier of the bot that created this task (multi-bot / debug)."},
                                 "save_note_frames": {"type": "boolean", "description": "Optional per-task override for saving a frame with each task note."},
                                 "save_note_videos": {"type": "boolean", "description": "Optional per-task override for saving an evidence clip with each task note."},
+                                "semantic_filter_keywords": {
+                                    "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                                    "description": "Optional keywords required by the device-level semantic filter before frames are sent to the VLM. Alias: required_keywords.",
+                                },
+                                "semantic_filter_threshold": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+                                "semantic_filter_threshold_mode": {"type": "string", "enum": ["absolute", "percentile"], "default": "absolute"},
+                                "semantic_filter_reduce": {"type": "string", "enum": ["max", "mean", "min", "sum", "softmax"], "default": "max"},
+                                "semantic_filter_smoothing": {"type": "number", "minimum": 0, "maximum": 0.95, "default": 0.0},
+                                "semantic_filter_ensemble": {"type": "string", "enum": ["off", "hflip", "hvflip"], "default": "off"},
                             },
                         }}},
                     },
@@ -2788,6 +2801,72 @@ def _coerce_optional_boolean_request_value(value) -> Optional[bool]:
     if normalized in _BOOLEAN_FALSE_VALUES:
         return False
     return None
+
+
+def _coerce_semantic_keywords(value) -> str:
+    """Normalize semantic keyword input from task creation helpers."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(str(item).strip() for item in value if str(item).strip())
+    return str(value).strip()
+
+
+def _parse_task_semantic_filter_config(data: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Build optional semantic-filter settings supplied during task creation."""
+
+    nested = data.get("semantic_filter")
+    if nested is not None and not isinstance(nested, dict):
+        return None, "semantic_filter must be an object when provided"
+    nested_config = nested if isinstance(nested, dict) else {}
+
+    keywords = _coerce_semantic_keywords(
+        data.get(
+            "semantic_filter_keywords",
+            data.get("required_keywords", data.get("semantic_keywords", nested_config.get("keywords"))),
+        )
+    )
+    if not keywords:
+        return None, None
+
+    threshold_mode = str(
+        data.get("semantic_filter_threshold_mode", nested_config.get("threshold_mode", "absolute"))
+    ).strip().lower()
+    if threshold_mode not in {'absolute', 'percentile'}:
+        return None, "semantic_filter_threshold_mode must be absolute or percentile"
+
+    reduce = str(data.get("semantic_filter_reduce", nested_config.get("reduce", "max"))).strip().lower()
+    if reduce not in {'max', 'mean', 'min', 'sum', 'softmax'}:
+        return None, "semantic_filter_reduce must be max, mean, min, sum, or softmax"
+
+    ensemble = str(data.get("semantic_filter_ensemble", nested_config.get("ensemble", "off"))).strip().lower()
+    if ensemble not in {'off', 'hflip', 'hvflip'}:
+        return None, "semantic_filter_ensemble must be off, hflip, or hvflip"
+
+    try:
+        threshold = float(data.get("semantic_filter_threshold", nested_config.get("threshold", 0.5)))
+    except (TypeError, ValueError):
+        return None, "semantic_filter_threshold must be numeric"
+    max_threshold = 1.0 if threshold_mode == 'absolute' else 0.99
+    if threshold < 0 or threshold > max_threshold:
+        return None, f"semantic_filter_threshold must be between 0 and {max_threshold}"
+
+    try:
+        smoothing = float(data.get("semantic_filter_smoothing", nested_config.get("smoothing", 0.0)))
+    except (TypeError, ValueError):
+        return None, "semantic_filter_smoothing must be numeric"
+    if smoothing < 0 or smoothing > 0.95:
+        return None, "semantic_filter_smoothing must be between 0 and 0.95"
+
+    return {
+        "enabled": True,
+        "keywords": keywords,
+        "threshold": threshold,
+        "threshold_mode": threshold_mode,
+        "reduce": reduce,
+        "smoothing": smoothing,
+        "ensemble": ensemble,
+    }, None
 
 
 def _get_effective_setting_value_and_source(key: str) -> tuple[str, str]:

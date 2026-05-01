@@ -25,7 +25,7 @@ Use these stable endpoints from your external agent:
 - `POST /api/devices/network`
 - `DELETE /api/devices/network/{io_id}`
 - `GET /api/tasks`
-- `POST /api/tasks` (body may include optional `bot_id` for multi-bot / debug)
+- `POST /api/tasks` (body may include optional `bot_id` for multi-bot / debug and `semantic_filter_keywords` / `required_keywords` to gate VLM calls with the local semantic filter)
 - `GET /api/task/{task_id}`
 - `PUT /api/task/{task_id}`
 - `POST /api/task/{task_id}/stop`

@@ -228,8 +228,10 @@ Create a plain record-only task:
 ```bash
 curl -fsSL -X POST http://videomemory:5050/api/tasks \
   -H 'Content-Type: application/json' \
-  -d '{"io_id":"net0","task_description":"Watch for a red marker and record it, but do not notify anyone.","bot_id":"openclaw"}'
+  -d '{"io_id":"net0","task_description":"Watch for a red marker and record it, but do not notify anyone.","bot_id":"openclaw","semantic_filter_keywords":"red marker"}'
 ```
+
+Use `semantic_filter_keywords` when the user provides the visual object/region that should gate expensive VLM calls. This applies the device-level semantic filter before frames enter the VLM chunk queue. It is especially useful on the Raspberry Pi. Aliases accepted by `POST /api/tasks`: `required_keywords` and `semantic_keywords`.
 
 Create a split trigger-plus-action task:
 
@@ -237,6 +239,7 @@ Create a split trigger-plus-action task:
 node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs create \
   --io-id net0 \
   --trigger 'Watch for a backpack in the frame. Add a note only when a backpack appears, disappears, or the visible backpack count changes.' \
+  --semantic-keywords 'backpack, person' \
   --action 'Tell one short backpack joke when a backpack is newly visible.' \
   --include-frame false \
   --delivery telegram \
@@ -250,6 +253,7 @@ Create a split trigger-plus-action task that replies back into the current OpenC
 node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs create \
   --io-id net0 \
   --trigger 'Watch for a card in the frame. Add a note only when a card appears, disappears, or the visible card count changes.' \
+  --semantic-keywords 'card' \
   --action 'Tell me one concise sentence when a card is visible.' \
   --include-frame false \
   --delivery webchat \
