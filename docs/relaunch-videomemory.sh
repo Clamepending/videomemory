@@ -131,6 +131,7 @@ ensure_repo() {
     /docs/update-manifest.json \
     /docs/openclaw-skill.md \
     /docs/openclaw-videomemory-task-helper.mjs \
+    /scripts/openclaw_send_current_camera_image.sh \
     /deploy/openclaw-real-home/hooks/transforms/videomemory-alert.mjs >/dev/null
   "$GIT_BIN" -C "$REPO_DIR" checkout --detach FETCH_HEAD >/dev/null
 
