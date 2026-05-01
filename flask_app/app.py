@@ -1623,6 +1623,10 @@ def ingestor_semantic_preview_stream(io_id):
     idle_delay_s = min(0.02, frame_delay_s)
     max_width = max(320, min(1280, int(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_MAX_WIDTH", "640"))))
     jpeg_quality = max(35, min(95, int(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_JPEG_QUALITY", "68"))))
+    heatmap_stale_after_s = max(
+        0.5,
+        float(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_HEATMAP_STALE_AFTER_S", "2.0")),
+    )
     boundary = "frame"
     device_info = io_manager.get_stream_info(io_id)
     local_preview_acquired = False
@@ -1652,6 +1656,12 @@ def ingestor_semantic_preview_stream(io_id):
                 _placeholder_frame("No active ingestor is running.\nCreate/start a task to see the live semantic heatmap."),
                 f"placeholder:no-ingestor:{bucket}",
             )
+        frame = ingestor.get_latest_frame() if hasattr(ingestor, 'get_latest_frame') else None
+        frame_timestamp = (
+            ingestor.get_latest_frame_timestamp()
+            if hasattr(ingestor, 'get_latest_frame_timestamp')
+            else None
+        )
         heatmap = (
             ingestor.get_latest_semantic_filter_heatmap()
             if hasattr(ingestor, 'get_latest_semantic_filter_heatmap')
@@ -1663,15 +1673,18 @@ def ingestor_semantic_preview_stream(io_id):
                 if hasattr(ingestor, 'get_semantic_filter_status')
                 else {}
             )
-            marker = status.get('latest_evaluation_timestamp') or status.get('evaluations')
-            return heatmap, f"heatmap:{marker}"
-        frame = ingestor.get_latest_frame() if hasattr(ingestor, 'get_latest_frame') else None
-        if frame is not None and getattr(frame, 'size', 0) > 0:
-            marker = (
-                ingestor.get_latest_frame_timestamp()
-                if hasattr(ingestor, 'get_latest_frame_timestamp')
-                else time.monotonic()
+            semantic_timestamp = status.get('latest_evaluation_timestamp')
+            heatmap_is_stale = (
+                frame is not None
+                and frame_timestamp is not None
+                and semantic_timestamp is not None
+                and (float(frame_timestamp) - float(semantic_timestamp)) > heatmap_stale_after_s
             )
+            if not heatmap_is_stale:
+                marker = semantic_timestamp or status.get('evaluations')
+                return heatmap, f"heatmap:{marker}"
+        if frame is not None and getattr(frame, 'size', 0) > 0:
+            marker = frame_timestamp if frame_timestamp is not None else time.monotonic()
             return frame, f"frame:{marker}"
         bucket = int(time.monotonic())
         return (
