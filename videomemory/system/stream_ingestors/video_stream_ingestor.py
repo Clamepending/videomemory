@@ -145,7 +145,7 @@ class VideoStreamIngestor:
         self._semantic_filter_fps_ema: float = 0.0
         self._semantic_preview_refresh_seconds = max(
             0.1,
-            float(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_REFRESH_SECONDS", "1.0")),
+            float(os.getenv("VIDEOMEMORY_SEMANTIC_PREVIEW_REFRESH_SECONDS", "0.1")),
         )
         
         # Frame capture failure tracking (for network stream reconnection)
