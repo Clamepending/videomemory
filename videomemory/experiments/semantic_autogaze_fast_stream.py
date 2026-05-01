@@ -73,8 +73,6 @@ INDEX_HTML = """<!doctype html>
     <input id="threshold" type="range" min="0" max="1" step="0.01" value="0.50">
     <label>Overlay alpha: <span id="alphaValue">0.45</span></label>
     <input id="alpha" type="range" min="0" max="1" step="0.05" value="0.45">
-    <label>Blur px: <span id="blurValue">15</span></label>
-    <input id="blur" type="range" min="0" max="81" step="2" value="15">
     <label>Top boxes: <span id="topKValue">10</span></label>
     <input id="topK" type="range" min="0" max="50" value="10">
     <button onclick="applyControls()">Apply</button>
@@ -101,7 +99,7 @@ function bindValue(id, suffix = "") {
   el.addEventListener("input", update);
   update();
 }
-["threshold", "alpha", "blur", "topK"].forEach(id => bindValue(id));
+["threshold", "alpha", "topK"].forEach(id => bindValue(id));
 
 function updateThresholdMode() {
   const mode = document.getElementById("thresholdMode").value;
@@ -131,7 +129,6 @@ async function applyControls() {
     threshold_mode: thresholdMode,
     threshold: thresholdMode === "percentile" ? Number(document.getElementById("threshold").value) / 100 : Number(document.getElementById("threshold").value),
     alpha: Number(document.getElementById("alpha").value),
-    blur_px: Number(document.getElementById("blur").value),
     top_k: Number(document.getElementById("topK").value)
   };
   await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
@@ -167,7 +164,6 @@ class StreamState:
     threshold_mode: str = "absolute"
     threshold: float = 0.50
     alpha: float = 0.45
-    blur_px: int = 15
     top_k: int = 10
     text_embs: Any = None
     last_jpeg: bytes | None = None
@@ -191,7 +187,6 @@ def render_overlay(
     threshold: float,
     threshold_mode: str,
     alpha: float,
-    blur_px: int,
     top_k: int,
 ) -> np.ndarray:
     height, width = frame_rgb.shape[:2]
@@ -205,10 +200,7 @@ def render_overlay(
         keep_grid = raw_grid >= cutoff
     display_grid = np.where(keep_grid, display_grid, 0.0)
 
-    heat = cv2.resize(display_grid, (width, height), interpolation=cv2.INTER_LINEAR)
-    if blur_px > 0:
-        kernel = blur_px + 1 if blur_px % 2 == 0 else blur_px
-        heat = cv2.GaussianBlur(heat, (kernel, kernel), 0)
+    heat = cv2.resize(display_grid, (width, height), interpolation=cv2.INTER_NEAREST)
     heat = normalize_scores(heat)
     heat_bgr = cv2.applyColorMap(np.clip(heat * 255, 0, 255).astype(np.uint8), cv2.COLORMAP_TURBO)
     heat_rgb = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB)
@@ -282,7 +274,6 @@ def create_app(args: argparse.Namespace, state: StreamState) -> Flask:
                 "threshold_mode": state.threshold_mode,
                 "threshold": state.threshold,
                 "alpha": state.alpha,
-                "blur_px": state.blur_px,
                 "top_k": state.top_k,
                 "fps": state.fps,
                 "infer_ms": state.infer_ms,
@@ -312,8 +303,6 @@ def create_app(args: argparse.Namespace, state: StreamState) -> Flask:
                     state.threshold = max(0.0, min(0.99, float(payload["threshold"])))
             if "alpha" in payload:
                 state.alpha = max(0.0, min(1.0, float(payload["alpha"])))
-            if "blur_px" in payload:
-                state.blur_px = max(0, min(81, int(payload["blur_px"])))
             if "top_k" in payload:
                 state.top_k = max(0, min(50, int(payload["top_k"])))
             keywords = list(state.keywords)
@@ -380,7 +369,6 @@ def main() -> None:
                 threshold_mode = state.threshold_mode
                 threshold = state.threshold
                 alpha = state.alpha
-                blur_px = state.blur_px
                 top_k = state.top_k
                 keywords = list(state.keywords)
 
@@ -395,7 +383,6 @@ def main() -> None:
                 threshold=threshold,
                 threshold_mode=threshold_mode,
                 alpha=alpha,
-                blur_px=blur_px,
                 top_k=top_k,
             )
             now = time.perf_counter()

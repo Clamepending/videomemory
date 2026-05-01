@@ -44,7 +44,7 @@ One local setup option:
 uv pip install torch transformers pillow
 ```
 
-If CLIP cannot load, the app falls back to a visual heuristic that is useful for exercising patch size, stride, threshold, blur, and overlay controls, but it is not a semantic model.
+If CLIP cannot load, the app falls back to a visual heuristic that is useful for exercising patch size, stride, threshold, and overlay controls, but it is not a semantic model.
 
 ## Webcam Realtime Testing
 

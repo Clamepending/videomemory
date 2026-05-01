@@ -251,7 +251,6 @@ def build_heatmap(
     *,
     threshold: float,
     threshold_mode: Literal["absolute", "percentile"],
-    blur_px: int,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     height, width = shape
     normalized_scores = normalize_scores(patch_scores)
@@ -265,9 +264,6 @@ def build_heatmap(
         weights[patch.y0 : patch.y1, patch.x0 : patch.x1] += 1.0
 
     heatmap = np.divide(heatmap, weights, out=np.zeros_like(heatmap), where=weights > 0)
-    if blur_px > 0:
-        kernel = blur_px + 1 if blur_px % 2 == 0 else blur_px
-        heatmap = cv2.GaussianBlur(heatmap, (kernel, kernel), 0)
     heatmap = normalize_scores(heatmap)
     return heatmap, kept_scores, cutoff
 
@@ -420,7 +416,6 @@ def main() -> None:
         else:
             threshold = st.slider("Absolute score cutoff", min_value=0.0, max_value=1.0, value=0.55, step=0.01)
         alpha = st.slider("Overlay alpha", min_value=0.0, max_value=1.0, value=0.45, step=0.05)
-        blur_px = st.slider("Heatmap blur px", min_value=0, max_value=81, value=25, step=2)
         top_k = st.slider("Top patch boxes", min_value=0, max_value=50, value=10)
 
     try:
@@ -485,7 +480,6 @@ def main() -> None:
         combined_scores,
         threshold=float(threshold),
         threshold_mode=threshold_mode,  # type: ignore[arg-type]
-        blur_px=blur_px,
     )
     overlay = overlay_heatmap(image_rgb, heatmap, alpha)
     annotated_overlay = draw_top_patches(overlay, patches, kept_scores, top_k=top_k, cutoff=cutoff)
