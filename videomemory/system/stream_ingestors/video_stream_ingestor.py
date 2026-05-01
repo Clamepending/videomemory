@@ -1005,12 +1005,6 @@ class VideoStreamIngestor:
             self._enqueue_semantic_frame(frame, frame_monotonic)
             return False
 
-        semantic_result = self._apply_semantic_filter(frame)
-        if not semantic_result.should_keep:
-            self._record_semantic_skip()
-            chunk_frames.append(frame.copy())
-            return False
-
         chunk_frames.append(frame.copy())
         return True
 
