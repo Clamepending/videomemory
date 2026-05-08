@@ -6,7 +6,7 @@ import numpy as np
 
 from videomemory.system.stream_ingestors.frame_utils import subsample_frames
 from videomemory.system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
-from videomemory.system.stream_ingestors.prompting import VideoIngestorOutput
+from videomemory.system.stream_ingestors.prompting import TaskUpdate, VideoIngestorOutput
 from videomemory.system.task_types import Task
 
 
@@ -117,6 +117,47 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
         self.assertTrue(np.array_equal(video_frames[-1], trigger_frame))
         self.assertEqual(len(updates), 1)
         self.assertIs(updates[0][1], note)
+
+    def test_vlm_processing_uses_queued_evidence_snapshot_for_note_video(self):
+        provider = Mock()
+        provider._sync_generate_content.return_value = VideoIngestorOutput(
+            task_updates=[
+                TaskUpdate(
+                    task_number=0,
+                    task_note="Red marker detected in frame.",
+                    task_done=False,
+                )
+            ]
+        )
+        ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=provider)
+        task = self._task()
+        ingestor._tasks_list = [task]
+        ingestor._evidence_clip_fps = 4.0
+        ingestor._evidence_clip_end_hold_seconds = 0.0
+        prior_frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        prior_frame[:, :] = (0, 0, 255)
+        trigger_frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        trigger_frame[:, :] = (0, 255, 0)
+        future_frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        future_frame[:, :] = (255, 0, 0)
+        ingestor._evidence_frame_buffer.append((99.0, future_frame.copy()))
+
+        result = ingestor._VLM_processing(
+            [prior_frame.copy(), trigger_frame.copy()],
+            evidence_buffer_snapshot=[
+                (1.0, prior_frame.copy()),
+                (2.0, trigger_frame.copy()),
+            ],
+        )
+
+        self.assertIsNotNone(result)
+        note = task.task_note[0]
+        video_frames, video_fps = note.consume_video_payload()
+        self.assertIsNotNone(video_frames)
+        self.assertEqual(video_fps, 4.0)
+        self.assertTrue(any(np.array_equal(frame, prior_frame) for frame in video_frames))
+        self.assertTrue(np.array_equal(video_frames[-1], trigger_frame))
+        self.assertFalse(any(np.array_equal(frame, future_frame) for frame in video_frames))
 
     def test_process_ml_results_prunes_only_completed_tasks_and_renumbers_active_ones(self):
         updates = []

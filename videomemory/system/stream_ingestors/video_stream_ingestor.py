@@ -25,7 +25,13 @@ from .prompting import (
     build_video_ingestor_prompt,
 )
 from . import background_loop as _background_loop
-from .evidence import build_evidence_clip_frames, sample_evidence_frame
+from .evidence import (
+    EvidenceFrameRecord,
+    build_evidence_clip_frames,
+    build_evidence_clip_from_frames,
+    sample_evidence_frame,
+    snapshot_evidence_buffer,
+)
 from .frame_utils import (
     build_chunk_metadata,
     build_frame_contact_sheet,
@@ -579,6 +585,7 @@ class VideoStreamIngestor:
     def _VLM_processing(
         self,
         frames,
+        evidence_buffer_snapshot: Optional[List[EvidenceFrameRecord]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Run VLM processing on a motion-triggered frame chunk.
 
@@ -626,6 +633,7 @@ class VideoStreamIngestor:
                 raw_frame_count=len(frames),
                 prompt=prompt,
                 started_at=t0,
+                evidence_buffer_snapshot=evidence_buffer_snapshot,
             )
 
         return results
@@ -716,6 +724,7 @@ class VideoStreamIngestor:
         raw_frame_count: int,
         prompt: str,
         started_at: float,
+        evidence_buffer_snapshot: Optional[List[EvidenceFrameRecord]],
     ) -> None:
         """Attach debug metadata, store history, and apply task updates."""
 
@@ -723,6 +732,10 @@ class VideoStreamIngestor:
         results["timestamp"] = time.time()
         results["frame"] = model_frame.copy()
         results["evidence_frame"] = sampled_frames[-1].copy()
+        results["evidence_clip_frames"] = self._build_evidence_clip_payload(
+            sampled_frames,
+            evidence_buffer_snapshot=evidence_buffer_snapshot,
+        )
         results["prompt"] = prompt
         results["chunk"] = build_chunk_metadata(
             duration_seconds=self._video_chunk_seconds,
@@ -731,7 +744,10 @@ class VideoStreamIngestor:
         )
         self._output_history.append(results)
         self._total_output_count += 1
-        self._process_ml_results(results)
+        try:
+            self._process_ml_results(results)
+        finally:
+            results.pop("evidence_clip_frames", None)
 
     async def _chunk_processing_loop(self) -> None:
         """Process completed chunks sequentially while capture continues."""
@@ -742,7 +758,7 @@ class VideoStreamIngestor:
                 await asyncio.sleep(0.1)
                 continue
             try:
-                chunk = await asyncio.wait_for(queue.get(), timeout=0.2)
+                chunk_item = await asyncio.wait_for(queue.get(), timeout=0.2)
                 if self._queued_chunk_created_at:
                     self._queued_chunk_created_at.popleft()
                 if self._queued_chunk_frame_counts:
@@ -750,9 +766,16 @@ class VideoStreamIngestor:
             except asyncio.TimeoutError:
                 continue
             try:
+                if isinstance(chunk_item, dict):
+                    chunk = chunk_item.get("frames") or []
+                    evidence_buffer_snapshot = chunk_item.get("evidence_buffer")
+                else:
+                    chunk = chunk_item
+                    evidence_buffer_snapshot = None
                 await asyncio.to_thread(
                     self._VLM_processing,
                     chunk,
+                    evidence_buffer_snapshot,
                 )
             except Exception as e:
                 logger.error(
@@ -878,8 +901,12 @@ class VideoStreamIngestor:
             return
 
         chunk = [frame.copy() for frame in frames]
+        chunk_payload = {
+            "frames": chunk,
+            "evidence_buffer": snapshot_evidence_buffer(self._evidence_frame_buffer),
+        }
         try:
-            queue.put_nowait(chunk)
+            queue.put_nowait(chunk_payload)
             self._queued_chunk_created_at.append(time.time())
             self._queued_chunk_frame_counts.append(len(chunk))
         except asyncio.QueueFull:
@@ -892,7 +919,7 @@ class VideoStreamIngestor:
                     self._queued_chunk_frame_counts.popleft()
             except asyncio.QueueEmpty:
                 pass
-            queue.put_nowait(chunk)
+            queue.put_nowait(chunk_payload)
             self._queued_chunk_created_at.append(time.time())
             self._queued_chunk_frame_counts.append(len(chunk))
             logger.warning(
@@ -1143,6 +1170,27 @@ class VideoStreamIngestor:
             fps=self._evidence_clip_fps,
             end_hold_seconds=self._evidence_clip_end_hold_seconds,
         )
+
+    def _build_evidence_clip_payload(
+        self,
+        sampled_frames: List[Any],
+        *,
+        evidence_buffer_snapshot: Optional[List[EvidenceFrameRecord]],
+    ) -> List[Any]:
+        """Build note-video frames from the queued chunk's evidence context."""
+
+        if evidence_buffer_snapshot:
+            return build_evidence_clip_frames(
+                evidence_buffer_snapshot,
+                sampled_frames[-1],
+                fps=self._evidence_clip_fps,
+                end_hold_seconds=self._evidence_clip_end_hold_seconds,
+            )
+        return build_evidence_clip_from_frames(
+            sampled_frames,
+            fps=self._evidence_clip_fps,
+            end_hold_seconds=self._evidence_clip_end_hold_seconds,
+        )
     
     def _build_prompt(
         self,
@@ -1211,7 +1259,9 @@ class VideoStreamIngestor:
         if evidence_frame is None:
             evidence_frame = note_frame
         note_frame_bytes = self._frame_to_jpeg_bytes(note_frame)
-        note_video_frames = self._build_evidence_clip_frames(evidence_frame)
+        note_video_frames = ml_results.get("evidence_clip_frames")
+        if note_video_frames is None:
+            note_video_frames = self._build_evidence_clip_frames(evidence_frame)
         available_task_numbers = [t.task_number for t in self._tasks_list]
         completed_task_seen = False
 
