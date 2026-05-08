@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}Browser Camera Bridge - VideoMemory{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .bridge-shell {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 24px auto;
+        display: grid;
+        grid-template-columns: minmax(300px, 1fr) minmax(280px, 360px);
+        gap: 18px;
+    }
+
+    .bridge-feed {
+        min-width: 0;
+    }
+
+    .bridge-feed video {
+        width: 100%;
+        max-height: calc(100vh - 190px);
+        object-fit: contain;
+        background: #050505;
+        border: 1px solid #333;
+        border-radius: 8px;
+    }
+
+    .bridge-panel {
+        background: #242424;
+        border: 1px solid #333;
+        border-radius: 8px;
+        padding: 16px;
+        color: #ececec;
+    }
+
+    .bridge-panel h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+    }
+
+    .bridge-panel label {
+        display: block;
+        margin: 12px 0 6px;
+        color: #aaa;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    .bridge-panel select,
+    .bridge-panel button,
+    .bridge-panel a {
+        width: 100%;
+        border-radius: 6px;
+        font: inherit;
+    }
+
+    .bridge-panel select {
+        background: #1f1f1f;
+        border: 1px solid #444;
+        color: #ececec;
+        padding: 8px;
+    }
+
+    .bridge-panel button,
+    .bridge-panel a {
+        display: block;
+        border: 0;
+        margin-top: 10px;
+        padding: 10px;
+        background: #19c37d;
+        color: #06150f;
+        text-align: center;
+        text-decoration: none;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .bridge-panel a {
+        background: #333;
+        color: #ececec;
+    }
+
+    .bridge-status {
+        margin-top: 12px;
+        color: #aaa;
+        font-size: 13px;
+        line-height: 1.45;
+    }
+
+    .bridge-metrics {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 14px;
+    }
+
+    .bridge-metric {
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 8px;
+        padding: 10px;
+    }
+
+    .bridge-metric span {
+        display: block;
+        color: #888;
+        font-size: 11px;
+        text-transform: uppercase;
+    }
+
+    .bridge-metric strong {
+        display: block;
+        margin-top: 3px;
+        color: #ececec;
+        font-size: 18px;
+    }
+
+    @media (max-width: 860px) {
+        .bridge-shell {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bridge-shell">
+    <div class="bridge-feed">
+        <video id="cameraVideo" autoplay muted playsinline></video>
+        <canvas id="cameraCanvas" width="640" height="480" hidden></canvas>
+    </div>
+    <aside class="bridge-panel">
+        <h2>Browser FaceTime Source</h2>
+        <label for="cameraSelect">Camera</label>
+        <select id="cameraSelect"></select>
+        <button id="startButton" type="button">Start Camera Source</button>
+        <a id="debugLink" href="/device/{{ io_id }}/debug" target="_blank">Open VideoMemory Pipeline</a>
+        <div id="bridgeStatus" class="bridge-status">Waiting to start.</div>
+        <div class="bridge-metrics">
+            <div class="bridge-metric">
+                <span>Frames sent</span>
+                <strong id="frameCount">0</strong>
+            </div>
+            <div class="bridge-metric">
+                <span>Last post</span>
+                <strong id="lastPost">-</strong>
+            </div>
+            <div class="bridge-metric">
+                <span>Resolution</span>
+                <strong id="resolution">-</strong>
+            </div>
+            <div class="bridge-metric">
+                <span>Source ID</span>
+                <strong>{{ io_id }}</strong>
+            </div>
+        </div>
+    </aside>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const CAMERA_ID = {{ camera_id|tojson }};
+    const IO_ID = {{ io_id|tojson }};
+    const video = document.getElementById('cameraVideo');
+    const canvas = document.getElementById('cameraCanvas');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const startButton = document.getElementById('startButton');
+    const statusEl = document.getElementById('bridgeStatus');
+    const frameCountEl = document.getElementById('frameCount');
+    const lastPostEl = document.getElementById('lastPost');
+    const resolutionEl = document.getElementById('resolution');
+    let stream = null;
+    let frameCount = 0;
+    let postTimer = null;
+    const autostart = new URLSearchParams(window.location.search).get('autostart') === '1';
+    let consecutiveRejectedFrames = 0;
+
+    function setStatus(text) {
+        statusEl.textContent = text;
+    }
+
+    function cameraErrorMessage(error) {
+        if (error && (error.name === 'NotAllowedError' || /permission/i.test(error.message || ''))) {
+            return 'Camera permission denied. Allow camera access for this browser, then reload this page.';
+        }
+        if (error && (error.name === 'NotReadableError' || /could not start|in use|read/i.test(error.message || ''))) {
+            return 'Camera is not readable. Close other camera apps, then start again.';
+        }
+        return error && error.message ? error.message : 'Camera failed to start.';
+    }
+
+    function isMissingDeviceError(error) {
+        return error && (
+            error.name === 'NotFoundError' ||
+            error.name === 'OverconstrainedError' ||
+            /device not found|requested device not found|constraint/i.test(error.message || '')
+        );
+    }
+
+    async function openCameraStream(selectedDevice) {
+        const videoPrefs = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15, max: 30 } };
+        if (!selectedDevice) {
+            return navigator.mediaDevices.getUserMedia({ audio: false, video: videoPrefs });
+        }
+
+        try {
+            return await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { deviceId: { exact: selectedDevice }, ...videoPrefs },
+            });
+        } catch (error) {
+            if (!isMissingDeviceError(error)) {
+                throw error;
+            }
+            cameraSelect.value = '';
+            setStatus('Selected camera disappeared; retrying with the default browser camera.');
+            return navigator.mediaDevices.getUserMedia({ audio: false, video: videoPrefs });
+        }
+    }
+
+    async function listCameras() {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter(device => device.kind === 'videoinput');
+        cameraSelect.innerHTML = '';
+        cameras.forEach((device, index) => {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            option.textContent = device.label || `Camera ${index + 1}`;
+            if ((device.label || '').toLowerCase().includes('facetime')) {
+                option.selected = true;
+            }
+            cameraSelect.appendChild(option);
+        });
+    }
+
+    async function registerSource() {
+        const resp = await fetch(`/api/browser-camera/${CAMERA_ID}/register`, { method: 'POST' });
+        const data = await resp.json();
+        if (!resp.ok) {
+            throw new Error(data.error || 'Could not register browser camera source');
+        }
+        document.getElementById('debugLink').href = data.debug_url || `/device/${IO_ID}/debug`;
+        return data;
+    }
+
+    async function postFrame() {
+        if (!stream || video.readyState < 2) return;
+        const width = video.videoWidth || 640;
+        const height = video.videoHeight || 480;
+        if (width < 64 || height < 64) {
+            consecutiveRejectedFrames += 1;
+            setStatus(`Camera stream is not delivering real frames yet (${width}x${height}).`);
+            return;
+        }
+        if (canvas.width !== width) canvas.width = width;
+        if (canvas.height !== height) canvas.height = height;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        ctx.drawImage(video, 0, 0, width, height);
+        const sample = ctx.getImageData(0, 0, Math.min(64, width), Math.min(64, height)).data;
+        let sum = 0;
+        let sumSquares = 0;
+        for (let index = 0; index < sample.length; index += 4) {
+            const value = (sample[index] + sample[index + 1] + sample[index + 2]) / 3;
+            sum += value;
+            sumSquares += value * value;
+        }
+        const sampleCount = sample.length / 4;
+        const mean = sum / Math.max(1, sampleCount);
+        const variance = (sumSquares / Math.max(1, sampleCount)) - (mean * mean);
+        const std = Math.sqrt(Math.max(0, variance));
+        if (mean < 1 && std < 1) {
+            consecutiveRejectedFrames += 1;
+            setStatus(`Camera stream is black (${width}x${height}). Close other camera apps or reset the macOS camera daemon, then start again.`);
+            return;
+        }
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.78));
+        if (!blob) return;
+        const resp = await fetch(`/api/browser-camera/${CAMERA_ID}/frame`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'image/jpeg' },
+            body: blob,
+        });
+        if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            throw new Error(data.error || 'Frame post failed');
+        }
+        frameCount += 1;
+        consecutiveRejectedFrames = 0;
+        frameCountEl.textContent = String(frameCount);
+        lastPostEl.textContent = `${new Date().toLocaleTimeString()}`;
+        resolutionEl.textContent = `${width}x${height}`;
+    }
+
+    async function startCamera() {
+        if (postTimer) {
+            clearInterval(postTimer);
+            postTimer = null;
+        }
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+
+        const selectedDevice = cameraSelect.value;
+        stream = await openCameraStream(selectedDevice);
+        video.srcObject = stream;
+        await video.play();
+        await listCameras();
+        await registerSource();
+        setStatus('Publishing real browser camera frames into the VideoMemory ingestor snapshot source.');
+        await postFrame();
+        postTimer = setInterval(() => {
+            postFrame().catch(error => setStatus(error.message));
+        }, 125);
+    }
+
+    startButton.addEventListener('click', () => {
+        startCamera().catch(error => setStatus(cameraErrorMessage(error)));
+    });
+
+    listCameras()
+        .then(() => {
+            if (autostart) {
+                startCamera().catch(error => setStatus(cameraErrorMessage(error)));
+            }
+        })
+        .catch(error => setStatus(cameraErrorMessage(error)));
+</script>
+{% endblock %}

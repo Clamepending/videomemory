@@ -7,6 +7,7 @@ import csv
 import hashlib
 import io
 import os
+import re
 import sys
 import threading
 import time
@@ -24,6 +25,11 @@ import videomemory.tools
 from videomemory.system.logging_config import setup_logging
 from videomemory.system.model_providers import get_VLM_provider
 from videomemory.system.stream_ingestors.video_stream_ingestor import build_video_ingestor_prompt
+from videomemory.system.stream_ingestors.semantic_filter import (
+    DEFAULT_SEMANTIC_FILTER_BACKEND,
+    DEFAULT_SEMANTIC_FILTER_THRESHOLD,
+    SEMANTIC_FILTER_MODELS,
+)
 from videomemory.system.model_providers.factory import (
     choose_default_model_for_available_keys,
     get_required_api_key_env,
@@ -60,6 +66,13 @@ _version_cache: Dict[str, Any] = {
     "expires_at": 0.0,
     "payload": None,
 }
+_browser_camera_lock = threading.Lock()
+_browser_camera_frames: Dict[str, Dict[str, Any]] = {}
+_BROWSER_CAMERA_MAX_FRAME_BYTES = 6 * 1024 * 1024
+_BROWSER_CAMERA_STALE_SECONDS = 5.0
+_BROWSER_CAMERA_MIN_DIMENSION = 64
+_BROWSER_CAMERA_MIN_MEAN = 1.0
+_BROWSER_CAMERA_MIN_STD = 1.0
 
 
 def _apply_no_store_headers(response: Response) -> Response:
@@ -72,6 +85,11 @@ def _apply_no_store_headers(response: Response) -> Response:
 
 def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _safe_browser_camera_id(camera_id: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9_-]+", "-", str(camera_id or "facetime").strip()).strip("-")
+    return value[:48] or "facetime"
 
 
 def _float_env(name: str, default: float) -> float:
@@ -847,6 +865,138 @@ def get_devices():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/browser-camera/<camera_id>', methods=['GET'])
+def browser_camera_bridge(camera_id):
+    """Browser getUserMedia bridge that publishes frames as a VideoMemory snapshot source."""
+    safe_id = _safe_browser_camera_id(camera_id)
+    return render_template(
+        'browser_camera_bridge.html',
+        camera_id=safe_id,
+        io_id=f"browser_{safe_id}",
+    )
+
+
+@app.route('/api/browser-camera/<camera_id>/frame', methods=['POST'])
+def browser_camera_frame(camera_id):
+    """Accept a JPEG frame from the browser-camera bridge."""
+    safe_id = _safe_browser_camera_id(camera_id)
+    frame_bytes = request.get_data(cache=False)
+    if not frame_bytes:
+        return jsonify({'status': 'error', 'error': 'JPEG frame body is required'}), 400
+    if len(frame_bytes) > _BROWSER_CAMERA_MAX_FRAME_BYTES:
+        return jsonify({'status': 'error', 'error': 'JPEG frame body is too large'}), 413
+
+    array = np.frombuffer(frame_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
+    if frame is None or frame.size == 0:
+        return jsonify({'status': 'error', 'error': 'Body must be a valid JPEG frame'}), 400
+    height, width = frame.shape[:2]
+    frame_mean = float(frame.mean())
+    frame_std = float(frame.std())
+    if width < _BROWSER_CAMERA_MIN_DIMENSION or height < _BROWSER_CAMERA_MIN_DIMENSION:
+        return jsonify({
+            'status': 'error',
+            'error': f'Ignoring non-camera frame: {width}x{height} is too small',
+            'width': width,
+            'height': height,
+        }), 422
+    if frame_mean < _BROWSER_CAMERA_MIN_MEAN and frame_std < _BROWSER_CAMERA_MIN_STD:
+        return jsonify({
+            'status': 'error',
+            'error': 'Ignoring black camera frame',
+            'mean': frame_mean,
+            'std': frame_std,
+        }), 422
+
+    timestamp = time.time()
+    with _browser_camera_lock:
+        _browser_camera_frames[safe_id] = {
+            'bytes': bytes(frame_bytes),
+            'timestamp': timestamp,
+            'width': int(width),
+            'height': int(height),
+            'mean': frame_mean,
+            'std': frame_std,
+        }
+    return jsonify({
+        'status': 'ok',
+        'camera_id': safe_id,
+        'timestamp': timestamp,
+        'width': int(width),
+        'height': int(height),
+    })
+
+
+@app.route('/api/browser-camera/<camera_id>/latest.jpg', methods=['GET'])
+def browser_camera_latest(camera_id):
+    """Return the latest browser-camera JPEG frame for snapshot ingestors."""
+    safe_id = _safe_browser_camera_id(camera_id)
+    with _browser_camera_lock:
+        payload = dict(_browser_camera_frames.get(safe_id) or {})
+
+    timestamp = payload.get('timestamp')
+    if not payload or timestamp is None or (time.time() - float(timestamp)) > _BROWSER_CAMERA_STALE_SECONDS:
+        return Response(response=b'', status=503, mimetype='image/jpeg')
+
+    return Response(
+        response=payload['bytes'],
+        mimetype='image/jpeg',
+        headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'X-Browser-Camera-Timestamp': str(timestamp),
+        },
+    )
+
+
+@app.route('/api/browser-camera/<camera_id>/status', methods=['GET'])
+def browser_camera_status(camera_id):
+    safe_id = _safe_browser_camera_id(camera_id)
+    with _browser_camera_lock:
+        payload = dict(_browser_camera_frames.get(safe_id) or {})
+    timestamp = payload.get('timestamp')
+    age_ms = None if timestamp is None else max(0.0, (time.time() - float(timestamp)) * 1000.0)
+    return jsonify({
+        'camera_id': safe_id,
+        'io_id': f"browser_{safe_id}",
+        'has_frame': bool(payload),
+        'frame_age_ms': age_ms,
+        'width': payload.get('width'),
+        'height': payload.get('height'),
+        'mean': payload.get('mean'),
+        'std': payload.get('std'),
+        'snapshot_url': url_for('browser_camera_latest', camera_id=safe_id, _external=True),
+    })
+
+
+@app.route('/api/browser-camera/<camera_id>/register', methods=['POST'])
+def browser_camera_register(camera_id):
+    """Register the browser-camera bridge as a stable VideoMemory snapshot camera."""
+    safe_id = _safe_browser_camera_id(camera_id)
+    io_id = f"browser_{safe_id}"
+    snapshot_url = url_for('browser_camera_latest', camera_id=safe_id, _external=True)
+    try:
+        camera_info = io_manager.get_stream_info(io_id)
+        if camera_info is None:
+            camera_info = io_manager.add_network_camera(snapshot_url, f"Browser FaceTime Camera ({safe_id})", io_id=io_id)
+        try:
+            task_manager.ensure_device_ingestor(camera_info["io_id"])
+        except Exception as warm_exc:
+            flask_logger.warning(
+                "Browser camera %s was registered, but its preview ingestor did not start yet: %s",
+                camera_info.get("io_id"),
+                warm_exc,
+                exc_info=True,
+            )
+        return jsonify({
+            'status': 'success',
+            'device': camera_info,
+            'debug_url': url_for('device_debug', io_id=camera_info["io_id"]),
+            'snapshot_url': snapshot_url,
+        })
+    except Exception as e:
+        flask_logger.error("Error registering browser camera %s: %s", safe_id, e, exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 
 @app.route('/api/devices/network', methods=['POST'])
 def add_network_camera():
@@ -1493,6 +1643,9 @@ def ingestor_semantic_filter(io_id):
             return jsonify(task_manager.get_ingestor_semantic_filter_config(io_id))
 
         data = request.get_json(silent=True) or {}
+        backend = str(data.get('backend', DEFAULT_SEMANTIC_FILTER_BACKEND)).strip().lower()
+        if backend not in SEMANTIC_FILTER_MODELS:
+            return jsonify({'error': 'backend must be dino_clip_adapter or semantic_autogaze'}), 400
         threshold_mode = str(data.get('threshold_mode', 'absolute')).strip().lower()
         if threshold_mode not in {'absolute', 'percentile'}:
             return jsonify({'error': 'threshold_mode must be absolute or percentile'}), 400
@@ -1503,7 +1656,7 @@ def ingestor_semantic_filter(io_id):
         if ensemble not in {'off', 'hflip', 'hvflip'}:
             return jsonify({'error': 'ensemble must be off, hflip, or hvflip'}), 400
         try:
-            threshold = float(data.get('threshold', 0.5))
+            threshold = float(data.get('threshold', DEFAULT_SEMANTIC_FILTER_THRESHOLD))
         except (TypeError, ValueError):
             return jsonify({'error': 'threshold must be numeric'}), 400
         max_threshold = 1.0 if threshold_mode == 'absolute' else 0.99
@@ -1519,6 +1672,7 @@ def ingestor_semantic_filter(io_id):
         result = task_manager.set_ingestor_semantic_filter_config(io_id, {
             'enabled': bool(data.get('enabled', False)),
             'keywords': str(data.get('keywords', '') or ''),
+            'backend': backend,
             'threshold': threshold,
             'threshold_mode': threshold_mode,
             'reduce': reduce,
@@ -2699,7 +2853,12 @@ def openapi_spec():
                                     "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
                                     "description": "Optional keywords required by the device-level semantic filter before frames are sent to the VLM. Alias: required_keywords.",
                                 },
-                                "semantic_filter_threshold": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+                                "semantic_filter_backend": {
+                                    "type": "string",
+                                    "enum": ["dino_clip_adapter", "semantic_autogaze"],
+                                    "default": "dino_clip_adapter",
+                                },
+                                "semantic_filter_threshold": {"type": "number", "minimum": 0, "maximum": 1, "default": DEFAULT_SEMANTIC_FILTER_THRESHOLD},
                                 "semantic_filter_threshold_mode": {"type": "string", "enum": ["absolute", "percentile"], "default": "absolute"},
                                 "semantic_filter_reduce": {"type": "string", "enum": ["max", "mean", "min", "sum", "softmax"], "default": "max"},
                                 "semantic_filter_smoothing": {"type": "number", "minimum": 0, "maximum": 0.95, "default": 0.0},
@@ -3113,12 +3272,19 @@ def _parse_task_semantic_filter_config(data: Dict[str, Any]) -> tuple[Optional[D
         return {
             "enabled": False,
             "keywords": "",
-            "threshold": 0.5,
+            "backend": DEFAULT_SEMANTIC_FILTER_BACKEND,
+            "threshold": DEFAULT_SEMANTIC_FILTER_THRESHOLD,
             "threshold_mode": "absolute",
             "reduce": "max",
             "smoothing": 0.0,
             "ensemble": "off",
         }, None
+
+    backend = str(
+        data.get("semantic_filter_backend", nested_config.get("backend", DEFAULT_SEMANTIC_FILTER_BACKEND))
+    ).strip().lower()
+    if backend not in SEMANTIC_FILTER_MODELS:
+        return None, "semantic_filter_backend must be dino_clip_adapter or semantic_autogaze"
 
     threshold_mode = str(
         data.get("semantic_filter_threshold_mode", nested_config.get("threshold_mode", "absolute"))
@@ -3135,7 +3301,12 @@ def _parse_task_semantic_filter_config(data: Dict[str, Any]) -> tuple[Optional[D
         return None, "semantic_filter_ensemble must be off, hflip, or hvflip"
 
     try:
-        threshold = float(data.get("semantic_filter_threshold", nested_config.get("threshold", 0.5)))
+        threshold = float(
+            data.get(
+                "semantic_filter_threshold",
+                nested_config.get("threshold", DEFAULT_SEMANTIC_FILTER_THRESHOLD),
+            )
+        )
     except (TypeError, ValueError):
         return None, "semantic_filter_threshold must be numeric"
     max_threshold = 1.0 if threshold_mode == 'absolute' else 0.99
@@ -3152,6 +3323,7 @@ def _parse_task_semantic_filter_config(data: Dict[str, Any]) -> tuple[Optional[D
     return {
         "enabled": True,
         "keywords": keywords,
+        "backend": backend,
         "threshold": threshold,
         "threshold_mode": threshold_mode,
         "reduce": reduce,

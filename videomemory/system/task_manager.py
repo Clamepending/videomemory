@@ -6,7 +6,11 @@ import os
 import sys
 from typing import Dict, List, Optional, Any, Callable
 from .stream_ingestors.video_stream_ingestor import VideoStreamIngestor
-from .stream_ingestors.semantic_autogaze_runtime import MODEL_NAME as SEMANTIC_AUTOGAZE_MODEL_NAME
+from .stream_ingestors.semantic_filter import (
+    DEFAULT_SEMANTIC_FILTER_BACKEND,
+    DEFAULT_SEMANTIC_FILTER_MODEL,
+    DEFAULT_SEMANTIC_FILTER_THRESHOLD,
+)
 from .io_manager import IOmanager
 from .task_types import NoteEntry, Task, STATUS_ACTIVE, STATUS_DONE, STATUS_TERMINATED
 from .database import TaskDatabase
@@ -967,11 +971,12 @@ class TaskManager:
             saved_config = {
                 "enabled": False,
                 "keywords": "",
-                "threshold": 0.5,
+                "threshold": DEFAULT_SEMANTIC_FILTER_THRESHOLD,
                 "threshold_mode": "absolute",
                 "reduce": "max",
                 "smoothing": 0.0,
                 "ensemble": "off",
+                "backend": DEFAULT_SEMANTIC_FILTER_BACKEND,
             }
             source = "default"
         else:
@@ -981,7 +986,7 @@ class TaskManager:
             "io_id": io_id,
             "source": source,
             "has_ingestor": False,
-            "model": SEMANTIC_AUTOGAZE_MODEL_NAME,
+            "model": DEFAULT_SEMANTIC_FILTER_MODEL,
             **saved_config,
         }
 
@@ -996,11 +1001,12 @@ class TaskManager:
             config_to_save = {
                 "enabled": bool(config.get("enabled", False)),
                 "keywords": str(config.get("keywords", "") or ""),
-                "threshold": float(config.get("threshold", 0.5)),
+                "threshold": float(config.get("threshold", DEFAULT_SEMANTIC_FILTER_THRESHOLD)),
                 "threshold_mode": str(config.get("threshold_mode", "absolute") or "absolute"),
                 "reduce": str(config.get("reduce", "max") or "max"),
                 "smoothing": float(config.get("smoothing", 0.0)),
                 "ensemble": str(config.get("ensemble", "off") or "off"),
+                "backend": str(config.get("backend", DEFAULT_SEMANTIC_FILTER_BACKEND) or DEFAULT_SEMANTIC_FILTER_BACKEND),
             }
             source = "database"
 
@@ -1011,7 +1017,7 @@ class TaskManager:
             "io_id": io_id,
             "source": source,
             "has_ingestor": ingestor is not None,
-            "model": SEMANTIC_AUTOGAZE_MODEL_NAME,
+            "model": config_to_save.get("model", DEFAULT_SEMANTIC_FILTER_MODEL),
             **{
                 k: config_to_save[k]
                 for k in (
@@ -1022,6 +1028,7 @@ class TaskManager:
                     "reduce",
                     "smoothing",
                     "ensemble",
+                    "backend",
                 )
                 if k in config_to_save
             },

@@ -10,7 +10,11 @@ from typing import Any, Dict, List, Literal, Optional
 import cv2
 import numpy as np
 
-from .semantic_autogaze_runtime import GRID, MODEL_NAME, load_runtime
+from .dino_clip_adapter_runtime import GRID as DINO_GRID
+from .dino_clip_adapter_runtime import MODEL_NAME as DINO_CLIP_ADAPTER_MODEL_NAME
+from .dino_clip_adapter_runtime import load_runtime as load_dino_clip_adapter_runtime
+from .semantic_autogaze_runtime import MODEL_NAME as SEMANTIC_AUTOGAZE_MODEL_NAME
+from .semantic_autogaze_runtime import load_runtime as load_semantic_autogaze_runtime
 
 
 logger = logging.getLogger("VideoStreamIngestor")
@@ -18,13 +22,24 @@ logger = logging.getLogger("VideoStreamIngestor")
 ThresholdMode = Literal["absolute", "percentile"]
 ReduceMode = Literal["max", "mean", "min", "sum", "softmax"]
 EnsembleMode = Literal["off", "hflip", "hvflip"]
+BackendMode = Literal["dino_clip_adapter", "semantic_autogaze"]
+
+DEFAULT_SEMANTIC_FILTER_BACKEND: BackendMode = "dino_clip_adapter"
+DEFAULT_SEMANTIC_FILTER_MODEL = DINO_CLIP_ADAPTER_MODEL_NAME
+DEFAULT_SEMANTIC_FILTER_THRESHOLD = 0.3
+SEMANTIC_FILTER_MODELS = {
+    "dino_clip_adapter": DINO_CLIP_ADAPTER_MODEL_NAME,
+    "semantic_autogaze": SEMANTIC_AUTOGAZE_MODEL_NAME,
+}
+GRID = DINO_GRID
 
 
 @dataclass(frozen=True)
 class SemanticFilterConfig:
     enabled: bool = False
     keywords: str = ""
-    threshold: float = 0.5
+    backend: BackendMode = DEFAULT_SEMANTIC_FILTER_BACKEND
+    threshold: float = DEFAULT_SEMANTIC_FILTER_THRESHOLD
     threshold_mode: ThresholdMode = "absolute"
     reduce: ReduceMode = "max"
     smoothing: float = 0.0
@@ -40,6 +55,8 @@ class SemanticFilterResult:
     reduce: ReduceMode
     smoothing: float
     ensemble: EnsembleMode
+    backend: BackendMode
+    model: str
     keywords: List[str]
     inference_ms: float
     overlay_frame: Optional[Any]
@@ -92,12 +109,13 @@ def unflip_patch_scores(scores: np.ndarray, *, horizontal: bool = False, vertica
     if scores.size == 0:
         return scores
     query_count = scores.shape[1]
-    grid = scores.reshape(GRID, GRID, query_count)
+    grid_size = infer_square_grid(scores.shape[0])
+    grid = scores.reshape(grid_size, grid_size, query_count)
     if horizontal:
         grid = np.flip(grid, axis=1)
     if vertical:
         grid = np.flip(grid, axis=0)
-    return grid.reshape(GRID * GRID, query_count)
+    return grid.reshape(grid_size * grid_size, query_count)
 
 
 def ensemble_per_keyword_scores(runtime, frame_rgb: Any, text_embeddings, ensemble: str) -> np.ndarray:
@@ -155,6 +173,10 @@ def score_frame(runtime, frame: Any, text_embeddings, config: SemanticFilterConf
 
 
 def coerce_config(config: Dict[str, Any]) -> SemanticFilterConfig:
+    backend = str(config.get("backend", DEFAULT_SEMANTIC_FILTER_BACKEND)).strip().lower()
+    if backend not in SEMANTIC_FILTER_MODELS:
+        backend = DEFAULT_SEMANTIC_FILTER_BACKEND
+
     threshold_mode = str(config.get("threshold_mode", "absolute")).strip().lower()
     if threshold_mode not in {"absolute", "percentile"}:
         threshold_mode = "absolute"
@@ -168,9 +190,9 @@ def coerce_config(config: Dict[str, Any]) -> SemanticFilterConfig:
         ensemble = "off"
 
     try:
-        threshold = float(config.get("threshold", 0.5))
+        threshold = float(config.get("threshold", DEFAULT_SEMANTIC_FILTER_THRESHOLD))
     except (TypeError, ValueError):
-        threshold = 0.5
+        threshold = DEFAULT_SEMANTIC_FILTER_THRESHOLD
     threshold = max(0.0, min(1.0 if threshold_mode == "absolute" else 0.99, threshold))
 
     try:
@@ -182,6 +204,7 @@ def coerce_config(config: Dict[str, Any]) -> SemanticFilterConfig:
     return SemanticFilterConfig(
         enabled=bool(config.get("enabled", False)),
         keywords=str(config.get("keywords", "") or ""),
+        backend=backend,  # type: ignore[arg-type]
         threshold=threshold,
         threshold_mode=threshold_mode,  # type: ignore[arg-type]
         reduce=reduce,  # type: ignore[arg-type]
@@ -191,13 +214,14 @@ def coerce_config(config: Dict[str, Any]) -> SemanticFilterConfig:
 
 
 class SemanticFrameFilter:
-    """Lazy wrapper around the released semantic-autogaze scorer."""
+    """Lazy wrapper around the configured patch scorer."""
 
     def __init__(self, config: Optional[SemanticFilterConfig] = None):
         self._config = config or SemanticFilterConfig()
-        self._runtime = None
+        self._runtimes: Dict[str, Any] = {}
         self._text_embeddings = None
         self._encoded_keywords: List[str] = []
+        self._encoded_backend: str = self._config.backend
         self._smoothed_scores: Optional[np.ndarray] = None
 
     @property
@@ -206,9 +230,10 @@ class SemanticFrameFilter:
 
     def update_config(self, config: SemanticFilterConfig) -> None:
         current = self._config
-        if parse_keywords(config.keywords) != self._encoded_keywords:
+        if config.backend != current.backend or parse_keywords(config.keywords) != self._encoded_keywords:
             self._text_embeddings = None
             self._encoded_keywords = []
+            self._encoded_backend = config.backend
             self._smoothed_scores = None
         elif config.reduce != current.reduce or config.smoothing <= 0:
             self._smoothed_scores = None
@@ -227,6 +252,8 @@ class SemanticFrameFilter:
                 reduce=config.reduce,
                 smoothing=config.smoothing,
                 ensemble=config.ensemble,
+                backend=config.backend,
+                model=self._model_name_for_backend(config.backend),
                 keywords=keywords,
                 inference_ms=0.0,
                 overlay_frame=None,
@@ -245,6 +272,7 @@ class SemanticFrameFilter:
                 combined_scores,
                 threshold=config.threshold,
                 threshold_mode=config.threshold_mode,
+                model=self._model_name_for_backend(config.backend),
             )
             return SemanticFilterResult(
                 should_keep=should_keep,
@@ -254,6 +282,8 @@ class SemanticFrameFilter:
                 reduce=config.reduce,
                 smoothing=config.smoothing,
                 ensemble=config.ensemble,
+                backend=config.backend,
+                model=self._model_name_for_backend(config.backend),
                 keywords=keywords,
                 inference_ms=(time.time() - started_at) * 1000.0,
                 overlay_frame=overlay,
@@ -269,6 +299,8 @@ class SemanticFrameFilter:
                 reduce=config.reduce,
                 smoothing=config.smoothing,
                 ensemble=config.ensemble,
+                backend=config.backend,
+                model=self._model_name_for_backend(config.backend),
                 keywords=keywords,
                 inference_ms=(time.time() - started_at) * 1000.0,
                 overlay_frame=None,
@@ -276,15 +308,29 @@ class SemanticFrameFilter:
             )
 
     def _get_runtime(self):
-        if self._runtime is None:
-            self._runtime = load_runtime(device_name="auto")
-        return self._runtime
+        backend = self._config.backend
+        runtime = self._runtimes.get(backend)
+        if runtime is None:
+            if backend == "semantic_autogaze":
+                runtime = load_semantic_autogaze_runtime(device_name="auto")
+            else:
+                runtime = load_dino_clip_adapter_runtime(device_name="auto")
+            self._runtimes[backend] = runtime
+        return runtime
 
     def _get_text_embeddings(self, runtime, keywords: List[str]):
-        if self._text_embeddings is None or keywords != self._encoded_keywords:
+        if (
+            self._text_embeddings is None
+            or keywords != self._encoded_keywords
+            or self._config.backend != self._encoded_backend
+        ):
             self._text_embeddings = runtime.encode_texts(keywords)
             self._encoded_keywords = list(keywords)
+            self._encoded_backend = self._config.backend
         return self._text_embeddings
+
+    def _model_name_for_backend(self, backend: str) -> str:
+        return SEMANTIC_FILTER_MODELS.get(backend, DEFAULT_SEMANTIC_FILTER_MODEL)
 
 
 def render_semantic_overlay(
@@ -293,10 +339,12 @@ def render_semantic_overlay(
     *,
     threshold: float,
     threshold_mode: str,
+    model: str = DEFAULT_SEMANTIC_FILTER_MODEL,
     alpha: float = 0.45,
 ) -> Any:
     height, width = frame_bgr.shape[:2]
-    raw_grid = scores.reshape(GRID, GRID).astype(np.float32)
+    grid_size = infer_square_grid(int(scores.size))
+    raw_grid = scores.reshape(grid_size, grid_size).astype(np.float32)
     display_grid = normalize_scores(raw_grid)
     if threshold_mode == "absolute":
         keep_grid = raw_grid >= float(threshold)
@@ -308,15 +356,15 @@ def render_semantic_overlay(
     heat = cv2.resize(display_grid, (width, height), interpolation=cv2.INTER_NEAREST)
     heat_bgr = cv2.applyColorMap(np.clip(heat * 255, 0, 255).astype(np.uint8), cv2.COLORMAP_TURBO)
     overlay = cv2.addWeighted(frame_bgr, 1.0 - alpha, heat_bgr, alpha, 0)
-    for col in range(1, GRID):
-        x = round(col * width / GRID)
+    for col in range(1, grid_size):
+        x = round(col * width / grid_size)
         cv2.line(overlay, (x, 0), (x, height), (255, 255, 255), 1, cv2.LINE_AA)
-    for row in range(1, GRID):
-        y = round(row * height / GRID)
+    for row in range(1, grid_size):
+        y = round(row * height / grid_size)
         cv2.line(overlay, (0, y), (width, y), (255, 255, 255), 1, cv2.LINE_AA)
     cv2.putText(
         overlay,
-        f"{MODEL_NAME} semantic filter",
+        f"{model} semantic filter",
         (10, 24),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
@@ -325,3 +373,10 @@ def render_semantic_overlay(
         cv2.LINE_AA,
     )
     return overlay
+
+
+def infer_square_grid(patch_count: int) -> int:
+    grid_size = int(round(float(patch_count) ** 0.5))
+    if grid_size * grid_size != patch_count:
+        raise ValueError(f"Cannot reshape {patch_count} patch scores into a square semantic grid")
+    return grid_size

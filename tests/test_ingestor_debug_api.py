@@ -361,6 +361,7 @@ class IngestorDebugApiTests(unittest.TestCase):
                     "task_description": "Watch for a red marker.",
                     "bot_id": "openclaw",
                     "required_keywords": ["red marker", "hand"],
+                    "semantic_filter_backend": "dino_clip_adapter",
                     "semantic_filter_threshold": 0.42,
                     "semantic_filter_ensemble": "hflip",
                 },
@@ -370,6 +371,7 @@ class IngestorDebugApiTests(unittest.TestCase):
         config = captured["kwargs"]["semantic_filter_config"]
         self.assertEqual(config["keywords"], "red marker, hand")
         self.assertTrue(config["enabled"])
+        self.assertEqual(config["backend"], "dino_clip_adapter")
         self.assertEqual(config["threshold"], 0.42)
         self.assertEqual(config["ensemble"], "hflip")
 
@@ -403,6 +405,7 @@ class IngestorDebugApiTests(unittest.TestCase):
         config = captured["kwargs"]["semantic_filter_config"]
         self.assertFalse(config["enabled"])
         self.assertEqual(config["keywords"], "")
+        self.assertEqual(config["backend"], "dino_clip_adapter")
 
     def test_debug_page_inline_scripts_are_valid_javascript(self):
         if shutil.which("node") is None:

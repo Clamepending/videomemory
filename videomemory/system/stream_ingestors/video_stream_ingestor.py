@@ -36,8 +36,7 @@ from .frame_utils import (
     normalize_frames,
     subsample_frames,
 )
-from .semantic_autogaze_runtime import MODEL_NAME as SEMANTIC_AUTOGAZE_MODEL_NAME
-from .semantic_filter import SemanticFilterResult, SemanticFrameFilter, coerce_config
+from .semantic_filter import DEFAULT_SEMANTIC_FILTER_MODEL, SemanticFilterResult, SemanticFrameFilter, coerce_config
 
 # Load environment variables
 load_dotenv()
@@ -512,14 +511,21 @@ class VideoStreamIngestor:
             client = self._snapshot_client
             if client is None:
                 return False, None
-            response = client.get(
-                str(self.camera_source),
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Pragma": "no-cache",
-                },
-            )
-            response.raise_for_status()
+            try:
+                response = client.get(
+                    str(self.camera_source),
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                    },
+                )
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in {404, 408, 425, 429, 503, 504}:
+                    return False, None
+                raise
+            except httpx.RequestError:
+                return False, None
             array = np.frombuffer(response.content, dtype=np.uint8)
             frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
             if frame is None or frame.size == 0:
@@ -981,6 +987,10 @@ class VideoStreamIngestor:
 
     async def _handle_missing_frame(self) -> None:
         """Handle capture failures and reconnect network streams when needed."""
+
+        if self.is_snapshot_source:
+            await asyncio.sleep(0.1)
+            return
 
         if self.is_network_stream and self._consecutive_capture_failures >= self._max_capture_failures:
             reopened = await self._reconnect_network_stream()
@@ -1497,12 +1507,13 @@ class VideoStreamIngestor:
             "reduce": config.reduce,
             "smoothing": float(config.smoothing),
             "ensemble": config.ensemble,
+            "backend": config.backend,
             "frames_skipped": self._semantic_frames_skipped,
             "consecutive_skips": self._semantic_consecutive_skips,
             "evaluations": self._semantic_evaluations,
             "latest_evaluation_timestamp": self._latest_semantic_filter_timestamp,
             "evaluation_fps": float(self._semantic_filter_fps_ema),
-            "model": SEMANTIC_AUTOGAZE_MODEL_NAME,
+            "model": result.model if result is not None else DEFAULT_SEMANTIC_FILTER_MODEL,
         }
         if result is not None:
             payload.update(
@@ -1513,6 +1524,8 @@ class VideoStreamIngestor:
                     "last_keywords": result.keywords,
                     "last_inference_ms": float(result.inference_ms),
                     "last_error": result.error,
+                    "last_backend": result.backend,
+                    "last_model": result.model,
                     "has_heatmap": result.overlay_frame is not None,
                 }
             )
@@ -1535,6 +1548,7 @@ class VideoStreamIngestor:
             "reduce": current.reduce,
             "smoothing": current.smoothing,
             "ensemble": current.ensemble,
+            "backend": current.backend,
         }
         merged.update(config)
         next_config = coerce_config(merged)
@@ -1549,9 +1563,10 @@ class VideoStreamIngestor:
                 if not semantic_result.should_keep:
                     self._record_semantic_skip()
         logger.info(
-            "Updated semantic filter [camera=%s]: enabled=%s keywords=%r threshold=%.3f mode=%s reduce=%s smoothing=%.2f ensemble=%s",
+            "Updated semantic filter [camera=%s]: enabled=%s backend=%s keywords=%r threshold=%.3f mode=%s reduce=%s smoothing=%.2f ensemble=%s",
             self.camera_index,
             next_config.enabled,
+            next_config.backend,
             next_config.keywords,
             next_config.threshold,
             next_config.threshold_mode,

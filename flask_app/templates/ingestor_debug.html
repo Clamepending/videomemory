@@ -373,6 +373,75 @@
             padding: 7px 8px;
         }
 
+        .semantic-keyword-control {
+            grid-column: 1 / -1;
+        }
+
+        .semantic-keyword-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-height: 36px;
+            padding: 8px;
+            background: #171717;
+            border: 1px solid #333;
+            border-radius: 8px;
+        }
+
+        .semantic-keyword-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            max-width: 100%;
+            padding: 5px 7px 5px 10px;
+            background: #24362e;
+            border: 1px solid #2e6d50;
+            border-radius: 999px;
+            color: #eafff4;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .semantic-keyword-tag span {
+            overflow-wrap: anywhere;
+        }
+
+        .semantic-keyword-remove {
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 0;
+            border-radius: 999px;
+            background: #111;
+            color: #eafff4;
+            cursor: pointer;
+        }
+
+        .semantic-keyword-remove:hover {
+            background: #2e6d50;
+        }
+
+        .semantic-keyword-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .semantic-controls-grid .semantic-keyword-add {
+            width: auto;
+            min-width: 72px;
+            border: 0;
+            border-radius: 6px;
+            background: #19c37d;
+            color: #06150f;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
         .semantic-threshold-row {
             display: flex;
             align-items: center;
@@ -538,6 +607,7 @@
 {% block extra_scripts %}
     <script>
         const IO_ID = '{{ io_id }}';
+        const DEFAULT_SEMANTIC_THRESHOLD = 0.3;
         let deviceName = IO_ID;
 
         function fetchNoStore(url, options) {
@@ -713,7 +783,7 @@
                                         <div class="frame-controls" style="margin-top: 0;">
                                             <div class="frame-controls-header">
                                                 <div class="frame-controls-title">Semantic filter controls</div>
-                                                <div class="frame-controls-help">Runs after frame-diff filtering. Frames below the semantic threshold are skipped before VLM analysis.</div>
+                                                <div class="frame-controls-help">Runs after frame-diff filtering. DINO/CLIP patch scores gate frames before VLM analysis when no patch reaches the threshold.</div>
                                             </div>
                                             <label class="semantic-toggle-row">
                                                 <input id="semanticEnabled" type="checkbox" style="width:auto;" />
@@ -721,8 +791,20 @@
                                             </label>
                                             <div class="semantic-controls-grid">
                                                 <div>
-                                                    <label for="semanticKeywords">Keywords</label>
-                                                    <input id="semanticKeywords" type="text" placeholder="person, face, hand" />
+                                                    <label for="semanticBackend">Semantic model</label>
+                                                    <select id="semanticBackend">
+                                                        <option value="dino_clip_adapter">DINOv2 small CLIP adapter ONNX</option>
+                                                        <option value="semantic_autogaze">Legacy semantic-autogaze</option>
+                                                    </select>
+                                                </div>
+                                                <div class="semantic-keyword-control">
+                                                    <label for="semanticKeywordInput">Keywords</label>
+                                                    <div id="semanticKeywordTags" class="semantic-keyword-tags"></div>
+                                                    <div class="semantic-keyword-row">
+                                                        <input id="semanticKeywordInput" type="text" placeholder="Add keyword" autocomplete="off" />
+                                                        <button id="semanticKeywordAdd" class="semantic-keyword-add" type="button">Add</button>
+                                                    </div>
+                                                    <input id="semanticKeywords" type="hidden" />
                                                 </div>
                                                 <div>
                                                     <label for="semanticReduce">Combine keywords</label>
@@ -751,8 +833,8 @@
                                                 <div>
                                                     <label for="semanticThreshold">Threshold</label>
                                                     <div class="semantic-threshold-row">
-                                                        <input id="semanticThreshold" type="range" min="0" max="1" step="0.01" value="0.50" />
-                                                        <span id="semanticThresholdValue" class="semantic-threshold-value">0.50</span>
+                                                        <input id="semanticThreshold" type="range" min="0" max="1" step="0.01" value="0.30" />
+                                                        <span id="semanticThresholdValue" class="semantic-threshold-value">0.30</span>
                                                     </div>
                                                 </div>
                                                 <div>
@@ -1370,9 +1452,89 @@
             });
         }
 
+        let semanticKeywordValues = [];
+
+        function normalizeSemanticKeyword(value) {
+            return String(value || '').trim().replace(/\s+/g, ' ');
+        }
+
+        function parseSemanticKeywordString(value) {
+            return String(value || '')
+                .replace(/\n/g, ',')
+                .split(',')
+                .map(normalizeSemanticKeyword)
+                .filter(Boolean);
+        }
+
+        function semanticKeywordsString() {
+            return semanticKeywordValues.join(', ');
+        }
+
+        function syncSemanticKeywordsHidden() {
+            const hidden = document.getElementById('semanticKeywords');
+            if (hidden) hidden.value = semanticKeywordsString();
+        }
+
+        function renderSemanticKeywordTags() {
+            const container = document.getElementById('semanticKeywordTags');
+            if (!container) return;
+            if (semanticKeywordValues.length === 0) {
+                container.innerHTML = '<span class="no-data">No keywords. Add one to filter semantically.</span>';
+                syncSemanticKeywordsHidden();
+                return;
+            }
+            container.innerHTML = semanticKeywordValues.map((keyword, index) => (
+                `<span class="semantic-keyword-tag"><span>${escapeHtml(keyword)}</span><button class="semantic-keyword-remove" type="button" data-index="${index}" aria-label="Remove ${escapeHtml(keyword)}">×</button></span>`
+            )).join('');
+            container.querySelectorAll('.semantic-keyword-remove').forEach(button => {
+                button.addEventListener('click', () => {
+                    const index = Number(button.getAttribute('data-index'));
+                    if (Number.isInteger(index)) {
+                        semanticKeywordValues.splice(index, 1);
+                        renderSemanticKeywordTags();
+                        scheduleSemanticFilterSave();
+                    }
+                });
+            });
+            syncSemanticKeywordsHidden();
+        }
+
+        function setSemanticKeywordsFromString(value) {
+            const seen = new Set();
+            semanticKeywordValues = parseSemanticKeywordString(value).filter(keyword => {
+                const key = keyword.toLowerCase();
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+            renderSemanticKeywordTags();
+        }
+
+        function addSemanticKeywordFromInput() {
+            const input = document.getElementById('semanticKeywordInput');
+            if (!input) return;
+            const existing = new Set(semanticKeywordValues.map(keyword => keyword.toLowerCase()));
+            let changed = false;
+            parseSemanticKeywordString(input.value).forEach(keyword => {
+                const key = keyword.toLowerCase();
+                if (!existing.has(key)) {
+                    semanticKeywordValues.push(keyword);
+                    existing.add(key);
+                    changed = true;
+                }
+            });
+            input.value = '';
+            if (changed) {
+                renderSemanticKeywordTags();
+                scheduleSemanticFilterSave();
+            }
+        }
+
         function setSemanticFilterUi(data, statusText = '') {
             const enabled = document.getElementById('semanticEnabled');
             const keywords = document.getElementById('semanticKeywords');
+            const keywordInput = document.getElementById('semanticKeywordInput');
+            const backend = document.getElementById('semanticBackend');
             const reduce = document.getElementById('semanticReduce');
             const ensemble = document.getElementById('semanticEnsemble');
             const mode = document.getElementById('semanticThresholdMode');
@@ -1382,10 +1544,11 @@
             const smoothingValue = document.getElementById('semanticSmoothingValue');
             const status = document.getElementById('semanticFilterStatus');
             if (!enabled) return;
-            const numericThreshold = Number(firstDefined(data.threshold, 0.5));
+            const numericThreshold = Number(firstDefined(data.threshold, DEFAULT_SEMANTIC_THRESHOLD));
             const numericSmoothing = Number(firstDefined(data.smoothing, 0.0));
             if (document.activeElement !== enabled) enabled.checked = Boolean(data.enabled);
-            if (keywords && document.activeElement !== keywords) keywords.value = data.keywords || '';
+            if (backend && document.activeElement !== backend) backend.value = data.backend || 'dino_clip_adapter';
+            if (keywords && document.activeElement !== keywordInput) setSemanticKeywordsFromString(data.keywords || '');
             if (reduce && document.activeElement !== reduce) reduce.value = data.reduce || 'max';
             if (ensemble && document.activeElement !== ensemble) ensemble.checked = data.ensemble === 'hflip';
             if (mode && document.activeElement !== mode) mode.value = data.threshold_mode || 'absolute';
@@ -1396,6 +1559,7 @@
             if (status) {
                 const pieces = [];
                 pieces.push(statusText || (data.source === 'active_ingestor' ? 'Applied to the running ingestor' : 'Saved for next ingestor start'));
+                if (data.model) pieces.push(data.model);
                 if (data.last_inference_ms != null) pieces.push(`last inference ${Number(data.last_inference_ms).toFixed(1)} ms`);
                 if (data.last_error) pieces.push(`error: ${data.last_error}`);
                 status.textContent = pieces.join(' · ');
@@ -1407,13 +1571,13 @@
                 const resp = await fetchNoStore(`/api/device/${IO_ID}/debug/semantic-filter`);
                 const data = await resp.json();
                 if (!resp.ok) {
-                    setSemanticFilterUi({ enabled: false, keywords: '', threshold: 0.5, threshold_mode: 'absolute', reduce: 'max', smoothing: 0.0, ensemble: 'off' }, data.error || 'Failed to load semantic filter');
+                    setSemanticFilterUi({ enabled: false, keywords: '', backend: 'dino_clip_adapter', threshold: DEFAULT_SEMANTIC_THRESHOLD, threshold_mode: 'absolute', reduce: 'max', smoothing: 0.0, ensemble: 'off' }, data.error || 'Failed to load semantic filter');
                     return;
                 }
                 setSemanticFilterUi(data);
             } catch (e) {
                 console.error('Error loading semantic filter:', e);
-                setSemanticFilterUi({ enabled: false, keywords: '', threshold: 0.5, threshold_mode: 'absolute', reduce: 'max', smoothing: 0.0, ensemble: 'off' }, 'Failed to load semantic filter');
+                setSemanticFilterUi({ enabled: false, keywords: '', backend: 'dino_clip_adapter', threshold: DEFAULT_SEMANTIC_THRESHOLD, threshold_mode: 'absolute', reduce: 'max', smoothing: 0.0, ensemble: 'off' }, 'Failed to load semantic filter');
             }
         }
 
@@ -1424,7 +1588,7 @@
             if (semanticSaveInFlight) return;
             semanticSaveInFlight = true;
             const enabled = document.getElementById('semanticEnabled');
-            const keywords = document.getElementById('semanticKeywords');
+            const backend = document.getElementById('semanticBackend');
             const reduce = document.getElementById('semanticReduce');
             const ensemble = document.getElementById('semanticEnsemble');
             const mode = document.getElementById('semanticThresholdMode');
@@ -1436,11 +1600,12 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         enabled: Boolean(enabled && enabled.checked),
-                        keywords: keywords ? keywords.value : '',
+                        keywords: semanticKeywordsString(),
+                        backend: backend ? backend.value : 'dino_clip_adapter',
                         reduce: reduce ? reduce.value : 'max',
                         ensemble: ensemble && ensemble.checked ? 'hflip' : 'off',
                         threshold_mode: mode ? mode.value : 'absolute',
-                        threshold: threshold ? Number(threshold.value) : 0.5,
+                        threshold: threshold ? Number(threshold.value) : DEFAULT_SEMANTIC_THRESHOLD,
                         smoothing: smoothing ? Number(smoothing.value) : 0.0,
                     }),
                 });
@@ -1477,13 +1642,39 @@
         }
 
         function bindSemanticFilterControls() {
-            ['semanticEnabled', 'semanticKeywords', 'semanticReduce', 'semanticEnsemble', 'semanticThresholdMode', 'semanticThreshold', 'semanticSmoothing'].forEach(id => {
+            ['semanticEnabled', 'semanticBackend', 'semanticReduce', 'semanticEnsemble', 'semanticThresholdMode', 'semanticThreshold', 'semanticSmoothing'].forEach(id => {
                 const element = document.getElementById(id);
                 if (!element || element.dataset.bound === 'true') return;
                 element.dataset.bound = 'true';
                 element.addEventListener('input', scheduleSemanticFilterSave);
                 element.addEventListener('change', scheduleSemanticFilterSave);
             });
+            const keywordInput = document.getElementById('semanticKeywordInput');
+            if (keywordInput && keywordInput.dataset.bound !== 'true') {
+                keywordInput.dataset.bound = 'true';
+                keywordInput.addEventListener('keydown', event => {
+                    if (event.key === 'Enter' || event.key === ',') {
+                        event.preventDefault();
+                        addSemanticKeywordFromInput();
+                    } else if (event.key === 'Backspace' && keywordInput.value === '' && semanticKeywordValues.length > 0) {
+                        semanticKeywordValues.pop();
+                        renderSemanticKeywordTags();
+                        scheduleSemanticFilterSave();
+                    }
+                });
+                keywordInput.addEventListener('paste', () => {
+                    setTimeout(() => {
+                        if (keywordInput.value.includes(',') || keywordInput.value.includes('\n')) {
+                            addSemanticKeywordFromInput();
+                        }
+                    }, 0);
+                });
+            }
+            const keywordAdd = document.getElementById('semanticKeywordAdd');
+            if (keywordAdd && keywordAdd.dataset.bound !== 'true') {
+                keywordAdd.dataset.bound = 'true';
+                keywordAdd.addEventListener('click', addSemanticKeywordFromInput);
+            }
         }
 
         async function updateTasks() {

@@ -104,7 +104,8 @@ class TaskDatabase:
                     frame_diff_threshold REAL NOT NULL,
                     semantic_filter_enabled INTEGER NOT NULL DEFAULT 0,
                     semantic_filter_keywords TEXT NOT NULL DEFAULT '',
-                    semantic_filter_threshold REAL NOT NULL DEFAULT 0.5,
+                    semantic_filter_backend TEXT NOT NULL DEFAULT 'dino_clip_adapter',
+                    semantic_filter_threshold REAL NOT NULL DEFAULT 0.3,
                     semantic_filter_threshold_mode TEXT NOT NULL DEFAULT 'absolute',
                     semantic_filter_reduce TEXT NOT NULL DEFAULT 'max',
                     semantic_filter_smoothing REAL NOT NULL DEFAULT 0.0,
@@ -175,7 +176,8 @@ class TaskDatabase:
             preference_migrations = {
                 "semantic_filter_enabled": "INTEGER NOT NULL DEFAULT 0",
                 "semantic_filter_keywords": "TEXT NOT NULL DEFAULT ''",
-                "semantic_filter_threshold": "REAL NOT NULL DEFAULT 0.5",
+                "semantic_filter_backend": "TEXT NOT NULL DEFAULT 'dino_clip_adapter'",
+                "semantic_filter_threshold": "REAL NOT NULL DEFAULT 0.3",
                 "semantic_filter_threshold_mode": "TEXT NOT NULL DEFAULT 'absolute'",
                 "semantic_filter_reduce": "TEXT NOT NULL DEFAULT 'max'",
                 "semantic_filter_smoothing": "REAL NOT NULL DEFAULT 0.0",
@@ -861,6 +863,7 @@ class TaskDatabase:
         with self._get_conn() as conn:
             row = conn.execute(
                 """SELECT semantic_filter_enabled, semantic_filter_keywords,
+                          semantic_filter_backend,
                           semantic_filter_threshold, semantic_filter_threshold_mode,
                           semantic_filter_reduce, semantic_filter_smoothing,
                           semantic_filter_ensemble
@@ -872,6 +875,7 @@ class TaskDatabase:
         return {
             "enabled": bool(row["semantic_filter_enabled"]),
             "keywords": row["semantic_filter_keywords"] or "",
+            "backend": row["semantic_filter_backend"] or "dino_clip_adapter",
             "threshold": float(row["semantic_filter_threshold"]),
             "threshold_mode": row["semantic_filter_threshold_mode"] or "absolute",
             "reduce": row["semantic_filter_reduce"] or "max",
@@ -892,13 +896,14 @@ class TaskDatabase:
             conn.execute(
                 """INSERT INTO ingestor_preferences
                    (io_id, frame_diff_threshold, semantic_filter_enabled,
-                    semantic_filter_keywords, semantic_filter_threshold,
+                    semantic_filter_keywords, semantic_filter_backend, semantic_filter_threshold,
                     semantic_filter_threshold_mode, semantic_filter_reduce,
                     semantic_filter_smoothing, semantic_filter_ensemble, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(io_id) DO UPDATE SET
                        semantic_filter_enabled = excluded.semantic_filter_enabled,
                        semantic_filter_keywords = excluded.semantic_filter_keywords,
+                       semantic_filter_backend = excluded.semantic_filter_backend,
                        semantic_filter_threshold = excluded.semantic_filter_threshold,
                        semantic_filter_threshold_mode = excluded.semantic_filter_threshold_mode,
                        semantic_filter_reduce = excluded.semantic_filter_reduce,
@@ -910,7 +915,8 @@ class TaskDatabase:
                     float(current_threshold),
                     1 if config.get("enabled") else 0,
                     str(config.get("keywords", "") or ""),
-                    float(config.get("threshold", 0.5)),
+                    str(config.get("backend", "dino_clip_adapter") or "dino_clip_adapter"),
+                    float(config.get("threshold", 0.3)),
                     str(config.get("threshold_mode", "absolute") or "absolute"),
                     str(config.get("reduce", "max") or "max"),
                     float(config.get("smoothing", 0.0)),
