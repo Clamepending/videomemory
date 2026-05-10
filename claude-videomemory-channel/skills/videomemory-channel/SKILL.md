@@ -22,3 +22,14 @@ The channel server listens on localhost only by default:
 - replies/SSE: `GET http://127.0.0.1:8791/events`
 
 Use `VIDEOMEMORY_CLAUDE_CHANNEL_TOKEN` if the endpoint needs a bearer token.
+
+When the user asks Claude to watch for something on camera:
+
+1. Use `mcp__videomemory__list_devices` to choose the target `io_id`.
+2. Use `mcp__videomemory__create_monitor` with only the visual condition in
+   `task_description`.
+3. Keep any user-facing follow-up action in your own response plan.
+4. Report the created task id and stop; VideoMemory owns the long-running watch.
+
+If events are not arriving, call `mcp__videomemory__configure_channel_webhook`
+and then retry a synthetic event from the host with `videomemory claude test-event`.

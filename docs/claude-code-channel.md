@@ -20,6 +20,21 @@ running Claude session unless a channel or webhook receiver is active.
 
 ## One-Time Install
 
+Preferred released CLI:
+
+```bash
+npm i -g @clamepending/videomemory@0.1.9
+videomemory claude install
+videomemory claude doctor
+videomemory claude launch
+```
+
+`videomemory claude install` downloads the VideoMemory repo channel package,
+runs `npm install`, checks syntax, and points a running VideoMemory server at
+`http://127.0.0.1:8791/videomemory-event` when the server is reachable.
+
+Manual repo install:
+
 ```bash
 cd claude-videomemory-channel
 npm install
@@ -97,6 +112,27 @@ Optional: watch replies from Claude's `mcp__videomemory__reply` tool:
 ```bash
 curl -N http://127.0.0.1:8791/events
 ```
+
+The released CLI can send the same synthetic event:
+
+```bash
+videomemory claude test-event
+```
+
+## Claude Tools
+
+The channel exposes these MCP tools to Claude:
+
+- `mcp__videomemory__list_devices`
+- `mcp__videomemory__create_monitor`
+- `mcp__videomemory__inspect_task`
+- `mcp__videomemory__list_monitors`
+- `mcp__videomemory__configure_channel_webhook`
+- `mcp__videomemory__reply`
+
+For "watch for X" requests, Claude should create a monitor and stop. VideoMemory
+owns the long-running watch and pushes the next task event back through the
+channel.
 
 ## Expected Test Result
 

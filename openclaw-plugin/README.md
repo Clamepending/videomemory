@@ -7,7 +7,7 @@ What the package does:
 - exposes OpenClaw tools: `videomemory_onboard`, `videomemory_relaunch`, and `videomemory_status`
 - exposes OpenClaw commands: `/videomemory-onboard`, `/videomemory-relaunch`, and `/videomemory-status`
 - ships a hook pack entry for `openclaw hooks install @clamepending/videomemory`
-- exposes the `videomemory-openclaw` host CLI
+- exposes the `videomemory` host CLI plus the backward-compatible `videomemory-openclaw` alias
 - runs the maintained VideoMemory onboarding and relaunch scripts bundled inside this npm package version
 
 Preferred install:
@@ -42,6 +42,15 @@ Fallback CLI flow:
 1. `videomemory-openclaw onboard --safe --explain`
 2. `videomemory-openclaw onboard --safe`
 3. The CLI bootstraps VideoMemory without Docker and returns the UI link
+
+Claude Code channel flow:
+1. `videomemory claude install`
+2. `videomemory claude doctor`
+3. `videomemory claude launch`
+
+The Claude flow installs the repo channel package, configures VideoMemory's
+webhook when the server is reachable, hides the development-channel launch
+flags, and exposes MCP tools so Claude can create monitor tasks itself.
 
 Safe mode:
 - disables automatic Tailscale setup

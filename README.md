@@ -110,7 +110,7 @@ The maintained OpenClaw package is the easiest current end-to-end path for
 agent wakeups:
 
 ```bash
-openclaw plugins install @clamepending/videomemory@0.1.8
+openclaw plugins install @clamepending/videomemory@0.1.9
 ```
 
 Restart the OpenClaw gateway, then run:
@@ -122,8 +122,8 @@ Restart the OpenClaw gateway, then run:
 Fallback CLI:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.8 onboard --safe --repo-ref v0.1.4 --explain
-npx -y @clamepending/videomemory@0.1.8 onboard --safe --repo-ref v0.1.4
+npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.5 --explain
+npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.5
 ```
 
 Bundled local OpenClaw + VideoMemory stack:
@@ -139,15 +139,25 @@ The launcher prints both the VideoMemory UI and the OpenClaw dashboard URL.
 ## Claude Code
 
 Claude Code wakeups use the experimental channel package in
-`claude-videomemory-channel/`.
+`claude-videomemory-channel/`. The published CLI hides the setup and launch
+flags:
 
 ```bash
-cd claude-videomemory-channel
-npm install
-npm run check
+npm i -g @clamepending/videomemory@0.1.9
+videomemory claude install
+videomemory claude doctor
+videomemory claude launch
 ```
 
-From the repo root:
+Inside Claude, ask it to create a monitor, for example:
+
+```text
+Watch the camera and tell me when a phone is visibly held up.
+```
+
+The channel exposes MCP tools for device discovery, monitor creation, task
+inspection, and webhook configuration. If you are developing from the repo, the
+equivalent manual launch is:
 
 ```bash
 CLAUDE_PLUGIN_ROOT=$PWD/claude-videomemory-channel \
@@ -208,9 +218,9 @@ More integration detail:
 
 Current release line:
 
-- Core app: `0.1.4`
-- OpenClaw package: `@clamepending/videomemory@0.1.8`
-- App tag expected by installers: `v0.1.4`
+- Core app: `0.1.5`
+- OpenClaw package: `@clamepending/videomemory@0.1.9`
+- App tag expected by installers: `v0.1.5`
 
 Release checklist:
 

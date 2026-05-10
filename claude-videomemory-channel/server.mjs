@@ -186,6 +186,7 @@ const mcp = new Server(
       'They are camera monitor task updates, not ordinary user prompts.',
       'Use the observation and task fields to decide whether the requested visual trigger happened.',
       'If the event asks for a user-visible alert during testing, call mcp__videomemory__reply with a concise message.',
+      'When the user asks to start watching for a visual condition, call mcp__videomemory__create_monitor.',
       'Do not create polling loops after a monitor event.',
     ].join(' '),
   },
@@ -235,6 +236,33 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
       },
     },
+    {
+      name: 'create_monitor',
+      description: 'Create a VideoMemory camera monitor task for a visual condition.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          task_description: { type: 'string', description: 'Natural-language visual condition to monitor.' },
+          io_id: { type: 'string', description: 'VideoMemory device io_id. Defaults to 0.' },
+          semantic_filter_keywords: { type: 'string', description: 'Optional keywords for semantic frame filtering.' },
+          bot_id: { type: 'string', description: 'Optional creator id. Defaults to claude.' },
+          save_note_frames: { type: 'boolean', description: 'Save trigger frames. Defaults to true.' },
+          save_note_videos: { type: 'boolean', description: 'Save trigger videos. Defaults to true.' },
+        },
+        required: ['task_description'],
+      },
+    },
+    {
+      name: 'configure_channel_webhook',
+      description: 'Point VideoMemory task-update webhooks at this Claude channel.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          webhook_url: { type: 'string', description: 'Optional override. Defaults to this channel endpoint.' },
+          clear_token: { type: 'boolean', description: 'Clear the saved VideoMemory webhook token. Defaults to true.' },
+        },
+      },
+    },
   ],
 }))
 
@@ -271,6 +299,44 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const suffix = ioId ? `?io_id=${encodeURIComponent(ioId)}` : ''
         const payload = await requestVideoMemory(`/api/tasks${suffix}`)
         return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
+      }
+      case 'create_monitor': {
+        const taskDescription = cleanText(args.task_description)
+        if (!taskDescription) throw new Error('task_description is required')
+        const payload = await requestVideoMemory('/api/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            io_id: cleanText(args.io_id) || '0',
+            task_description: taskDescription,
+            bot_id: cleanText(args.bot_id) || 'claude',
+            semantic_filter_keywords: cleanText(args.semantic_filter_keywords),
+            save_note_frames: args.save_note_frames !== false,
+            save_note_videos: args.save_note_videos !== false,
+          }),
+        })
+        return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
+      }
+      case 'configure_channel_webhook': {
+        const webhookUrl = cleanText(args.webhook_url) || `http://${HOST}:${PORT}/videomemory-event`
+        await requestVideoMemory('/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_URL', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: webhookUrl }),
+        })
+        await requestVideoMemory('/api/settings/VIDEOMEMORY_SELF_BASE_URL', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: BASE_URL }),
+        })
+        if (args.clear_token !== false) {
+          await requestVideoMemory('/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: '' }),
+          })
+        }
+        return { content: [{ type: 'text', text: `configured ${webhookUrl}` }] }
       }
       default:
         return { content: [{ type: 'text', text: `unknown tool: ${req.params.name}` }], isError: true }
