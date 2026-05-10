@@ -1,4 +1,5 @@
 datasets/tvqa
+.DS_Store
 __pycache__/
 **/__pycache__/
 *.pyc
@@ -24,6 +25,9 @@ misc/
 
 # Database files
 *.db
+*.db-shm
+*.db-wal
+data/
 
 AgentDevelopmentKit_exploration/videomemory/logs/*
 
@@ -45,5 +49,10 @@ videomemory/experiments/*.jpeg
 videomemory/experiments/latency_results.json
 # Local launcher cache
 .cache/
+
+# Local Claude/Codex development config
+/.claude/
+/.mcp.json
+claude-videomemory-channel/node_modules/
 
 old/

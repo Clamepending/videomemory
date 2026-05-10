@@ -1,9 +1,9 @@
 {
   "name": "@clamepending/videomemory",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "VideoMemory OpenClaw plugin, hook pack, and host onboarding CLI",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "bin": {
     "videomemory-openclaw": "cli.mjs"
   },

@@ -165,6 +165,47 @@ console.log(JSON.stringify(result));
         self.assertFalse(result["deliver"])
         self.assertNotIn("sessionKey", result)
 
+    def test_registry_driven_message_includes_saved_video_url_when_requested(self):
+        self._write_registry(
+            {
+                "task_id": "0",
+                "io_id": "0",
+                "bot_id": "openclaw",
+                "task_description": "Watch for a red marker.",
+                "trigger_condition": "Watch for a red marker in the frame.",
+                "action_instruction": "Tell me when the red marker is visible.",
+                "delivery_mode": "internal",
+                "delivery_source": "webchat",
+                "delivery_sender_id": "",
+                "delivery_target": "",
+                "delivery_session_key": "",
+                "include_note_frame": False,
+                "include_note_video": True,
+                "original_request": "Use VideoMemory and tell me when the red marker appears.",
+            }
+        )
+
+        result = self._run_transform(
+            {
+                "event_id": "vm-test-video-url",
+                "bot_id": "openclaw",
+                "io_id": "0",
+                "task_id": "0",
+                "task_description": "Watch for a red marker.",
+                "note": "A red marker is visible in the frame.",
+                "note_has_video": True,
+                "note_video_api_url": "http://127.0.0.1:5050/api/task-note/42/video",
+            }
+        )
+
+        self.assertEqual(result["kind"], "agent")
+        self.assertFalse(result["deliver"])
+        self.assertIn(
+            "Saved triggering video URL: http://127.0.0.1:5050/api/task-note/42/video",
+            result["message"],
+        )
+        self.assertIn("Fetch that exact saved clip", result["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

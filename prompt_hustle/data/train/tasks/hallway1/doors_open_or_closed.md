@@ -1,1 +1,0 @@
-Are any doors visible in the frame? If so, report whether each door is open or closed.

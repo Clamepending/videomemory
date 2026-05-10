@@ -62,12 +62,23 @@ class TaskCreationApiTests(unittest.TestCase):
         body = resp.get_json()
         self.assertEqual(body.get("status"), "success")
         self.assertEqual(body.get("task_id"), "0")
-        mock_add_task.assert_called_once_with(
+        mock_add_task.assert_called_once()
+        mock_add_task.assert_called_with(
             "net0",
             "Watch for a person entering the room",
             bot_id=None,
             save_note_frames=None,
             save_note_videos=None,
+            semantic_filter_config={
+                "enabled": False,
+                "keywords": "",
+                "backend": "dino_clip_adapter",
+                "threshold": 0.3,
+                "threshold_mode": "absolute",
+                "reduce": "max",
+                "smoothing": 0.0,
+                "ensemble": "off",
+            },
         )
 
     def test_create_task_passes_per_task_evidence_preferences(self):
@@ -94,15 +105,26 @@ class TaskCreationApiTests(unittest.TestCase):
                     "save_note_frames": False,
                     "save_note_videos": True,
                 },
-            )
+        )
 
         self.assertEqual(resp.status_code, 201)
-        mock_add_task.assert_called_once_with(
+        mock_add_task.assert_called_once()
+        mock_add_task.assert_called_with(
             "net0",
             "Watch for a person entering the room",
             bot_id=None,
             save_note_frames=False,
             save_note_videos=True,
+            semantic_filter_config={
+                "enabled": False,
+                "keywords": "",
+                "backend": "dino_clip_adapter",
+                "threshold": 0.3,
+                "threshold_mode": "absolute",
+                "reduce": "max",
+                "smoothing": 0.0,
+                "ensemble": "off",
+            },
         )
 
 

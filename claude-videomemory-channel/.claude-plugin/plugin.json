@@ -1,0 +1,15 @@
+{
+  "name": "videomemory-channel",
+  "description": "Claude Code channel that receives VideoMemory camera monitor events and pushes them into a running Claude session.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Mark"
+  },
+  "keywords": [
+    "videomemory",
+    "camera",
+    "channel",
+    "webhook",
+    "monitoring"
+  ]
+}

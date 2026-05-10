@@ -4,6 +4,10 @@ VideoMemory is a video monitoring system. You create **tasks** for camera input 
 
 This document describes how to run the VideoMemory **core service** and interact with it via HTTP from an external agent.
 
+For Codex/plugin work, start with `.agents/skills/videomemory/SKILL.md`. That skill documents the local Codex plugin, OpenClaw webhook setup, semantic-filter defaults, and the fresh-agent wakeup test. In particular, a VideoMemory task is the long-running monitor; Codex should not add heartbeat/polling automations after task creation. For "when X happens, do Y", keep the visual trigger in VideoMemory and store the follow-up action in the webhook runtime registry.
+
+For true push-style Claude Code wakeups, use `docs/claude-code-channel.md` and `claude-videomemory-channel/`. Claude Code channels can receive external events into a running Claude session, unlike current Codex plugin tools.
+
 ## Quick Start
 
 If the server is not already running, start it:

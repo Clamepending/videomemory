@@ -12,6 +12,9 @@ This document defines the integration contract between **VideoMemory Core** and 
   - user conversation and orchestration
   - policy, memory, authz/authn, and tool planning
   - translating user intent into VideoMemory API calls
+  - follow-up actions and delivery routing for "when X happens, do Y" monitors
+
+For event workflows, treat VideoMemory as the perception engine and the external agent as the action engine. Store the visual condition in the VideoMemory task. Store the follow-up instruction, destination, and delivery policy in the agent runtime. The current local Codex plugin can configure and create these monitors, but native Codex plugins do not expose an inbound webhook surface for waking a Codex chat; use Claude Code Channels, OpenClaw, or another webhook-capable runtime for the actual wakeup.
 
 ## Core HTTP API contract (agent -> core)
 
@@ -37,6 +40,52 @@ Machine-readable schema:
 
 - `GET /openapi.json`
 - `GET /openclaw/skill.md` for a curl-oriented OpenClaw skill document
+
+## Event monitor contract
+
+For a user request like "tell me when I hold my phone up":
+
+- VideoMemory task description: "Watch for a phone visibly held up in the user's hand."
+- Semantic filter keywords: `phone`, `smartphone`, `hand`, `person`
+- Follow-up action in agent registry: "Tell the user that the phone is held up."
+- Default semantic threshold: `0.3`
+
+OpenClaw-compatible action registry path:
+
+```text
+~/.openclaw/hooks/state/videomemory-task-actions.json
+```
+
+Registry entries are keyed by `(bot_id, io_id, task_id)` and include:
+
+```json
+{
+  "task_id": "1",
+  "io_id": "0",
+  "bot_id": "codex",
+  "trigger_condition": "Watch for a phone visibly held up in the user's hand.",
+  "action_instruction": "Tell the user that the phone is held up.",
+  "delivery_mode": "internal",
+  "delivery_target": "",
+  "delivery_session_key": "",
+  "include_note_frame": false,
+  "include_note_video": false
+}
+```
+
+OpenClaw webhook settings:
+
+- `VIDEOMEMORY_OPENCLAW_WEBHOOK_URL`, for example `http://127.0.0.1:18789/hooks/videomemory-alert`
+- `VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN`, matching `hooks.token` in the OpenClaw config
+- `VIDEOMEMORY_SELF_BASE_URL`, for task/note URLs inside event payloads
+
+Task-update webhooks include saved evidence URLs when the task note has them:
+
+- `note_frame_api_url`
+- `note_video_api_url`
+
+Use those exact URLs for follow-up actions. They point at the triggering note,
+not a later live camera snapshot.
 
 Error shape:
 

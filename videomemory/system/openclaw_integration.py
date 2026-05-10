@@ -119,9 +119,13 @@ class OpenClawWebhookDispatcher:
         note_id = getattr(note, "note_id", None) if note is not None else None
         note_frame_api_path = ""
         note_has_frame = False
+        note_video_api_path = ""
+        note_has_video = False
         if note is not None:
             note_frame_api_path = str(getattr(note, "frame_url", "") or "")
             note_has_frame = bool(note_frame_api_path)
+            note_video_api_path = str(getattr(note, "video_url", "") or "")
+            note_has_video = bool(note_video_api_path)
         task_id = str(getattr(task, "task_id", "") or "")
         event_basis = "|".join(
             [
@@ -159,6 +163,9 @@ class OpenClawWebhookDispatcher:
             "note_has_frame": note_has_frame,
             "note_frame_api_path": note_frame_api_path,
             "note_frame_api_url": self._build_api_url(videomemory_base_url, note_frame_api_path),
+            "note_has_video": note_has_video,
+            "note_video_api_path": note_video_api_path,
+            "note_video_api_url": self._build_api_url(videomemory_base_url, note_video_api_path),
             "notes_count": len(note_entries),
             "observed_at": self._isoformat(now_ts),
         }

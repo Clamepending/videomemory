@@ -1,1 +1,0 @@
-Count the number of tables visible in the frame

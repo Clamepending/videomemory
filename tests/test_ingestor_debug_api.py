@@ -48,7 +48,7 @@ class IngestorDebugApiTests(unittest.TestCase):
 
             with (
                 patch.object(app_module.task_manager, "has_ingestor", return_value=False),
-                patch.object(app_module.task_manager, "get_ingestor", return_value=None),
+                patch.object(app_module.task_manager, "peek_ingestor", return_value=None),
                 patch.object(app_module.task_manager, "get_task_objects", return_value=[task]),
                 patch.object(app_module.db, "get_note_frame_path", return_value=frame_path),
             ):
@@ -80,7 +80,7 @@ class IngestorDebugApiTests(unittest.TestCase):
             )
 
             with (
-                patch.object(app_module.task_manager, "get_ingestor", return_value=None),
+                patch.object(app_module.task_manager, "peek_ingestor", return_value=None),
                 patch.object(app_module.task_manager, "get_task_objects", return_value=[task]),
                 patch.object(app_module.db, "get_note_frame_path", return_value=frame_path),
             ):
@@ -123,7 +123,7 @@ class IngestorDebugApiTests(unittest.TestCase):
             )
 
             with (
-                patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor),
+                patch.object(app_module.task_manager, "peek_ingestor", return_value=ingestor),
                 patch.object(app_module.task_manager, "get_task_objects", return_value=[task]),
                 patch.object(app_module.db, "get_note_frame_path", return_value=frame_path),
             ):
@@ -157,7 +157,7 @@ class IngestorDebugApiTests(unittest.TestCase):
             get_tasks_list=lambda: [task],
         )
 
-        with patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor):
+        with patch.object(app_module.task_manager, "peek_ingestor", return_value=ingestor):
             resp = self.client.get("/api/device/0/debug/frame-and-prompt")
 
         self.assertEqual(resp.status_code, 200)
@@ -205,7 +205,7 @@ class IngestorDebugApiTests(unittest.TestCase):
             get_tasks_list=lambda: [task],
         )
 
-        with patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor):
+        with patch.object(app_module.task_manager, "peek_ingestor", return_value=ingestor):
             resp = self.client.get("/api/device/0/debug/frame-and-prompt")
 
         self.assertEqual(resp.status_code, 200)
@@ -249,7 +249,7 @@ class IngestorDebugApiTests(unittest.TestCase):
             get_tasks_list=lambda: [task],
         )
 
-        with patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor):
+        with patch.object(app_module.task_manager, "peek_ingestor", return_value=ingestor):
             resp = self.client.get("/api/device/0/debug/frame-and-prompt")
 
         self.assertEqual(resp.status_code, 200)
@@ -270,8 +270,8 @@ class IngestorDebugApiTests(unittest.TestCase):
         ingestor = SimpleNamespace(get_tasks_list=lambda: [])
 
         with (
-            patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor),
-            patch.object(app_module.task_manager, "get_task_objects", return_value=[task]),
+            patch.object(app_module.task_manager, "peek_ingestor", return_value=ingestor),
+            patch.object(app_module.task_manager, "peek_task_objects", return_value=[task]),
         ):
             resp = self.client.get("/api/device/net0/debug/tasks")
 
@@ -295,7 +295,7 @@ class IngestorDebugApiTests(unittest.TestCase):
 
         with (
             patch.object(app_module.task_manager, "has_ingestor", return_value=True),
-            patch.object(app_module.task_manager, "get_ingestor", return_value=ingestor),
+            patch.object(app_module.task_manager, "peek_ingestor", return_value=ingestor),
             patch.object(app_module, "_get_latest_persisted_debug_snapshot", return_value=None),
         ):
             status_resp = self.client.get("/api/device/0/debug/status")
@@ -327,7 +327,7 @@ class IngestorDebugApiTests(unittest.TestCase):
 
         with (
             patch.object(app_module.task_manager, "has_ingestor", return_value=False),
-            patch.object(app_module.task_manager, "get_ingestor", return_value=None),
+            patch.object(app_module.task_manager, "peek_ingestor", return_value=None),
         ):
             api_resp = self.client.get("/api/device/net0/debug/status")
 

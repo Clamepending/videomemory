@@ -1,367 +1,203 @@
 # VideoMemory
 
-Use vision language models to let your openclaw see and monitor cameras (USB, RTSP, Android devices)
+VideoMemory is a small HTTP service that lets agents monitor video streams.
+An agent creates a natural-language task such as "tell me when a phone is held
+up", VideoMemory watches the camera with a vision-language model, then emits a
+webhook when the task note changes.
 
-You or your agent creates a **tasks** describing what to watch for, and the system continuously analyses the video stream.
+Supported inputs:
+
+- USB or built-in cameras
+- RTSP / HTTP video streams
+- Android phone snapshot streams
+- Browser camera frames posted into VideoMemory
 
 ## Quick Start
 
-### I already installed OpenClaw and want VideoMemory
-
-1. [Install OpenClaw](https://docs.openclaw.ai/install)
-
-This path now starts VideoMemory directly on that machine with `uv` or `python3`. It does not use Docker.
-
-If your OpenClaw can install plugins, the first-class path is:
+Run the core service:
 
 ```bash
-openclaw plugins install @clamepending/videomemory@0.1.7
+uv run flask_app/app.py
 ```
 
-Restart the gateway, then send:
+Open [http://localhost:5050](http://localhost:5050), set a model API key in
+Settings, add or select a device, then create a task.
 
-```text
-/videomemory-onboard
-```
-
-If your OpenClaw has ClawHub enabled, you can also send this message:
-
-```text
-Install the VideoMemory skill from ClawHub and send me the VideoMemory UI link.
-```
-
-The ClawHub skill is intentionally small: it installs cleanly, then tells OpenClaw to run the published VideoMemory host CLI in safe/explain mode before starting the app.
-
-If you want the explicit fallback command, send this instead:
-
-```text
-Please inspect `npx -y @clamepending/videomemory@0.1.7 onboard --safe --repo-ref v0.1.3 --explain`, then if it looks safe run `npx -y @clamepending/videomemory@0.1.7 onboard --safe --repo-ref v0.1.3` and send me the VideoMemory UI link. If you are not comfortable running it, show me the exact command so I can run it manually.
-```
-After that, your OpenClaw should be able to:
-- create/list/edit/stop/delete VideoMemory tasks
-- answer one-off camera questions like `what do you see on camera?`
-- Monitor cameras like `when X happens in camera Y, do Z`
-Hint: You can set up telegram in openclaw.
-Install Tailscale to stream video to videomemory over the android app.
-
-### I want to launch both OpenClaw and VideoMemory in containers (useful for local development)
-```bash
-ANTHROPIC_API_KEY=<YOUR ANTHROPIC API KEY> \
-OPENCLAW_GATEWAY_TOKEN=chooseyourowntoken \
-bash ./launch_openclaw_with_videomemory.sh
-```
-(OPENAI_API_KEY, GOOGLE_API_KEY, and OPENROUTER_API_KEY are supported too)
-
-It prints:
-- a ready-to-open OpenClaw dashboard link
-- the VideoMemory UI link
-
-The bundled stack already includes the OpenClaw config that wires VideoMemory webhooks.
-
-Supported bundled provider keys:
-- `ANTHROPIC_API_KEY`
-- `OPENAI_API_KEY`
-- `GOOGLE_API_KEY` or `GEMINI_API_KEY`
-- `OPENROUTER_API_KEY`
-
-The launcher auto-selects matching default models for both VideoMemory and OpenClaw based on whichever of those keys you provide.
-To launch just Videomemory (no openclaw)
-```bash
-./start.sh
-```
-This starts VideoMemory for local development. Open http://localhost:5050. Set your model API key in the **Settings** tab, then use the **Devices** and **Tasks** pages to manage ingestion and monitoring.
-
-### Updates
-
-VideoMemory checks `docs/update-manifest.json` for the latest stable app release. If the running app version is older than the manifest, the web UI shows an **Update** badge in the top bar with the relaunch command.
-
-For host/OpenClaw installs, the update command is:
-
-```bash
-npx -y @clamepending/videomemory@0.1.7 relaunch --repo-ref v0.1.3
-```
-
-Release checklist:
-
-1. Bump `pyproject.toml`.
-2. Update `docs/update-manifest.json`.
-3. Tag the release, for example `git tag v0.1.3`.
-4. Push the branch and tag, then publish GitHub release notes.
-
-### I already have OpenClaw in a container
-
-1. Start VideoMemory on the host:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Clamepending/videomemory/main/docs/install-videomemory.sh)
-```
-
-That script launches VideoMemory directly on the host machine and leaves Docker out of the host-side install.
-
-2. Send this message to OpenClaw:
-
-```text
-Please inspect `npx -y @clamepending/videomemory@0.1.7 onboard --safe --repo-ref v0.1.3 --videomemory-base http://host.docker.internal:5050 --explain`. If it looks safe, run `npx -y @clamepending/videomemory@0.1.7 onboard --safe --repo-ref v0.1.3 --videomemory-base http://host.docker.internal:5050`. Then use VideoMemory from http://host.docker.internal:5050/openclaw/skill.md and use the videomemory task helper for any "when X happens, do Y" request.
-```
-
-If `host.docker.internal` does not resolve on Linux, relaunch the OpenClaw container with:
-
-```bash
---add-host=host.docker.internal:host-gateway
-```
-
-## Mobile camera (Android)
-
-Use your Android phone as a wireless camera: the phone serves the latest frame over a simple **HTTP snapshot** endpoint, and VideoMemory pulls from that URL.
-
-**Setup:**
-1. Run VideoMemory (locally or via Docker).
-2. Open the [Android app](android/README.md) and tap **Start Server**.
-3. Copy the snapshot URL shown on the phone.
-4. In the videomemory web app: **Devices** -> **Add Network Camera** -> paste that URL.
-5. Create tasks for that device as usual.
-
-You can also just ask your openclaw to add a device and it will help you.
-
-IMPORTANT:
-Phone and VideoMemory should be on the same LAN, or both connected with [Tailscale](https://tailscale.com/download) so VideoMemory can reach the phone's snapshot URL directly.
-
-## I want both OpenClaw and VideoMemory in Docker
-
-This is the bundled two-container setup for **OpenClaw + VideoMemory**:
-
-```bash
-ANTHROPIC_API_KEY=your_key_here \
-TELEGRAM_BOT_TOKEN=your_bot_token_here \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash ./launch_openclaw_with_videomemory.sh
-```
-
-Gemini / Google AI Studio:
-
-```bash
-GOOGLE_API_KEY=your_key_here \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash ./launch_openclaw_with_videomemory.sh
-```
-
-OpenRouter:
-
-```bash
-OPENROUTER_API_KEY=your_key_here \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash ./launch_openclaw_with_videomemory.sh
-```
-
-On macOS, the launcher will try to open Docker Desktop automatically if the daemon is not ready yet.
-
-After launch, the script prints:
-- `VideoMemory UI: http://localhost:5050/devices`
-- `OpenClaw dashboard: http://localhost:18889/?token=...`
-
-That OpenClaw dashboard link already includes the gateway token, so you can open it directly without pasting the token manually.
-
-If you want the terminal UI, keep it as two commands:
-
-```bash
-ANTHROPIC_API_KEY=your_key_here \
-TELEGRAM_BOT_TOKEN=your_bot_token_here \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash ./launch_openclaw_with_videomemory.sh
-
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash docs/launch-openclaw-real-tui.sh
-```
-
-If you want Telegram alerts, set `OPENCLAW_TELEGRAM_OWNER_ID` yourself:
-
-1. Send any message to your Telegram bot.
-2. Run:
-
-```bash
-curl -fsSL "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates"
-```
-
-3. Copy the `message.chat.id` value from the latest update. That is your `OPENCLAW_TELEGRAM_OWNER_ID`.
-
-Example explicit launch:
-
-```bash
-ANTHROPIC_API_KEY=your_key_here \
-TELEGRAM_BOT_TOKEN=your_bot_token_here \
-OPENCLAW_TELEGRAM_OWNER_ID=123456789 \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash ./launch_openclaw_with_videomemory.sh
-```
-
-You can also launch with raw `docker compose`. The bundled compose file forwards launch-time keys to both **OpenClaw** and **VideoMemory**:
-
-```bash
-ANTHROPIC_API_KEY=your_key_here \
-VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-OPENCLAW_FALLBACK_MODEL_1=anthropic/claude-haiku-4-5 \
-OPENCLAW_FALLBACK_MODEL_2=anthropic/claude-haiku-4-5 \
-docker compose -f docker-compose.real-openclaw.yml up -d --build
-```
-
-Or use OpenAI for both OpenClaw and VideoMemory:
-
-```bash
-OPENAI_API_KEY=your_key_here \
-VIDEO_INGESTOR_MODEL=gpt-4o-mini \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-OPENCLAW_FALLBACK_MODEL_1=openai/gpt-5-mini \
-OPENCLAW_FALLBACK_MODEL_2=openai/gpt-5-mini \
-docker compose -f docker-compose.real-openclaw.yml up -d --build
-```
-
-Or use Gemini for both:
-
-```bash
-GOOGLE_API_KEY=your_key_here \
-GEMINI_API_KEY=your_key_here \
-VIDEO_INGESTOR_MODEL=gemini-2.5-flash \
-OPENCLAW_PRIMARY_MODEL=google/gemini-3-flash-preview \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-OPENCLAW_FALLBACK_MODEL_1=google/gemini-3-pro-preview \
-OPENCLAW_FALLBACK_MODEL_2=google/gemini-3-pro-preview \
-docker compose -f docker-compose.real-openclaw.yml up -d --build
-```
-
-Or use OpenRouter for both:
-
-```bash
-OPENROUTER_API_KEY=your_key_here \
-VIDEO_INGESTOR_MODEL=qwen3-vl-8b \
-OPENCLAW_PRIMARY_MODEL=openrouter/anthropic/claude-sonnet-4-5 \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-OPENCLAW_FALLBACK_MODEL_1=openrouter/google/gemini-2.0-flash-vision:free \
-OPENCLAW_FALLBACK_MODEL_2=openrouter/google/gemini-2.0-flash-vision:free \
-docker compose -f docker-compose.real-openclaw.yml up -d --build
-```
-
-Then open the printed links from the launcher output.
-
-After the stack starts, add your own camera in the VideoMemory Devices page, then try these in OpenClaw:
-
-```text
-what do you see on camera
-```
-
-```text
-when you see a red marker, notify me
-```
-
-## Docker
-
-### Core only
+Core-only Docker:
 
 ```bash
 docker compose -f docker-compose.core.yml up --build
 ```
 
-This starts VideoMemory. Open http://localhost:5050.
-
-### Bundled real OpenClaw + VideoMemory
-
-Launch the bundled Docker setup:
+Health and discovery:
 
 ```bash
-docker compose -f docker-compose.real-openclaw.yml up -d --build
+curl -fsSL http://localhost:5050/api/health
+curl -fsSL http://localhost:5050/api/devices
+curl -fsSL http://localhost:5050/openapi.json
 ```
 
-For the easiest single-command launch, use:
+## Agent Wakeups
+
+VideoMemory is the perception engine. The external agent owns conversation,
+policy, delivery, and follow-up actions.
+
+For "when X happens, do Y":
+
+1. Put only the visual condition in the VideoMemory task.
+2. Store the follow-up action in the agent runtime.
+3. Configure `VIDEOMEMORY_OPENCLAW_WEBHOOK_URL` or another compatible webhook.
+4. Use saved `note_frame_api_url` / `note_video_api_url` from the webhook when
+   responding. Do not take a fresh snapshot unless the user asked for current
+   state.
+
+Create a task directly:
 
 ```bash
-ANTHROPIC_API_KEY=your_key_here \
-TELEGRAM_BOT_TOKEN=your_bot_token_here \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash docs/launch-openclaw-real.sh
+curl -fsSL -X POST http://localhost:5050/api/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "io_id": "0",
+    "task_description": "Watch for a phone visibly held up in the user hand.",
+    "bot_id": "my-agent",
+    "semantic_filter_keywords": "phone, smartphone, hand, person",
+    "save_note_frames": true,
+    "save_note_videos": true
+  }'
 ```
 
-To launch the stack and then attach directly to `openclaw tui` inside the running container, use two commands:
+Configure a generic webhook receiver:
 
 ```bash
-ANTHROPIC_API_KEY=your_key_here \
-TELEGRAM_BOT_TOKEN=your_bot_token_here \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash docs/launch-openclaw-real.sh
+curl -fsSL -X PUT http://localhost:5050/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_URL \
+  -H 'Content-Type: application/json' \
+  -d '{"value":"http://127.0.0.1:18789/hooks/videomemory-alert"}'
 
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-bash docs/launch-openclaw-real-tui.sh
+curl -fsSL -X PUT http://localhost:5050/api/settings/VIDEOMEMORY_SELF_BASE_URL \
+  -H 'Content-Type: application/json' \
+  -d '{"value":"http://127.0.0.1:5050"}'
 ```
 
-The TUI helper is intentionally very small. It just finds the running `openclaw` container and runs:
+## OpenClaw
+
+The maintained OpenClaw package is the easiest current end-to-end path for
+agent wakeups:
 
 ```bash
-docker exec -e TERM="$TERM" -it <openclaw-container> \
-  sh -lc 'exec openclaw tui --url ws://127.0.0.1:18789 --token "$OPENCLAW_GATEWAY_TOKEN" --session main'
+openclaw plugins install @clamepending/videomemory@0.1.8
 ```
 
-If you want Telegram alerts, fetch the chat id yourself:
-
-```bash
-curl -fsSL "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates"
-```
-
-Use the `message.chat.id` from the latest update as `OPENCLAW_TELEGRAM_OWNER_ID`.
-
-To inject model keys directly at launch time, without configuring them in the web UI:
-
-```bash
-ANTHROPIC_API_KEY=your_key_here \
-VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-docker compose -f docker-compose.real-openclaw.yml up -d --build
-```
-
-To include Telegram in the raw compose launch:
-
-```bash
-ANTHROPIC_API_KEY=your_key_here \
-TELEGRAM_BOT_TOKEN=your_bot_token_here \
-OPENCLAW_TELEGRAM_OWNER_ID=your_chat_id_here \
-VIDEO_INGESTOR_MODEL=claude-sonnet-4-6 \
-OPENCLAW_GATEWAY_TOKEN=openclaw-real-dev-token \
-docker compose -f docker-compose.real-openclaw.yml up -d --build
-```
-
-The bundled compose file passes launch-time model keys into both containers:
-- **VideoMemory** uses them for `/api/caption_frame` and monitoring tasks
-- **OpenClaw** uses them for chat, tool use, and webhook wakeups
-
-This starts:
-- **VideoMemory** on `http://localhost:5050` (UI + API)
-- **OpenClaw** on `http://localhost:18889` (real OpenClaw UI + gateway)
-
-OpenClaw connects to VideoMemory via plain HTTP API at `http://videomemory:5050`.
-It should fetch the skill from `http://videomemory:5050/openclaw/skill.md` before making task/device calls.
-
-The bundled Docker stack does not add a demo camera anymore. Add your own camera from the VideoMemory Devices page or with `POST /api/devices/network`.
-
-Gateway token:
+Restart the OpenClaw gateway, then run:
 
 ```text
-openclaw-real-dev-token
+/videomemory-onboard
 ```
 
-### Legacy stand-in stack
-
-If you specifically want the older SimpleAgent-backed stand-in stack for debugging:
-
-1. Clone [SimpleAgent](https://github.com/Clamepending/simpleagent) as a sibling directory.
-2. Run:
+Fallback CLI:
 
 ```bash
-docker compose -f docker-compose.openclaw.yml up --build
+npx -y @clamepending/videomemory@0.1.8 onboard --safe --repo-ref v0.1.4 --explain
+npx -y @clamepending/videomemory@0.1.8 onboard --safe --repo-ref v0.1.4
 ```
 
-## Integration
+Bundled local OpenClaw + VideoMemory stack:
 
-VideoMemory exposes a stable HTTP API for external agents:
+```bash
+ANTHROPIC_API_KEY=your_key_here \
+OPENCLAW_GATEWAY_TOKEN=choose-a-token \
+bash ./launch_openclaw_with_videomemory.sh
+```
 
-- Integration contract: [docs/agent-integration-contract.md](docs/agent-integration-contract.md)
-- OpenClaw skill: [docs/openclaw-skill.md](docs/openclaw-skill.md)
-- Agent guide: [AGENTS.md](AGENTS.md)
-- OpenAPI spec: `GET /openapi.json`
+The launcher prints both the VideoMemory UI and the OpenClaw dashboard URL.
+
+## Claude Code
+
+Claude Code wakeups use the experimental channel package in
+`claude-videomemory-channel/`.
+
+```bash
+cd claude-videomemory-channel
+npm install
+npm run check
+```
+
+From the repo root:
+
+```bash
+CLAUDE_PLUGIN_ROOT=$PWD/claude-videomemory-channel \
+claude \
+  --mcp-config claude-videomemory-channel/.mcp.json \
+  --dangerously-load-development-channels server:videomemory
+```
+
+Then point VideoMemory at the channel:
+
+```bash
+curl -fsSL -X PUT http://127.0.0.1:5050/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_URL \
+  -H 'Content-Type: application/json' \
+  -d '{"value":"http://127.0.0.1:8791/videomemory-event"}'
+```
+
+See [docs/claude-code-channel.md](docs/claude-code-channel.md).
+
+## Android Camera
+
+Use the Android app as a wireless camera:
+
+1. Run VideoMemory.
+2. Open [android/README.md](android/README.md) and start the phone snapshot server.
+3. Add the snapshot URL in the VideoMemory Devices page.
+4. Create tasks for that network camera.
+
+The phone and VideoMemory host must be mutually reachable, usually on the same
+LAN or through Tailscale.
+
+## API
+
+Useful endpoints:
+
+- `GET /api/health`
+- `GET /api/devices`
+- `POST /api/device/{io_id}/capture`
+- `GET /api/device/{io_id}/preview`
+- `POST /api/caption_frame`
+- `GET /api/tasks`
+- `POST /api/tasks`
+- `GET /api/task/{task_id}`
+- `PUT /api/task/{task_id}`
+- `POST /api/task/{task_id}/stop`
+- `DELETE /api/task/{task_id}`
+- `GET /api/task-note/{note_id}/frame`
+- `GET /api/task-note/{note_id}/video`
+- `GET /openapi.json`
+
+More integration detail:
+
+- [AGENTS.md](AGENTS.md)
+- [docs/agent-integration-contract.md](docs/agent-integration-contract.md)
+- [docs/openclaw-skill.md](docs/openclaw-skill.md)
+
+## Release
+
+Current release line:
+
+- Core app: `0.1.4`
+- OpenClaw package: `@clamepending/videomemory@0.1.8`
+- App tag expected by installers: `v0.1.4`
+
+Release checklist:
+
+```bash
+uv run python -m unittest tests.test_openclaw_integration \
+  tests.test_videomemory_alert_transform \
+  tests.test_openclaw_plugin_scaffold \
+  tests.test_videomemory_task_helper_original_request \
+  tests.test_video_stream_ingestor_detection_callbacks \
+  tests.test_task_note_videos \
+  tests.test_task_note_video_api
+
+cd openclaw-plugin && npm pack
+```
+
+Then tag `v0.1.4`, push the tag, publish the npm package, and publish GitHub
+release notes.

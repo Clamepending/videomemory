@@ -165,8 +165,11 @@ ensure_repo() {
     /flask_app/ \
     /videomemory/ \
     /docs/update-manifest.json \
+    /docs/openclaw-bootstrap.sh \
+    /docs/relaunch-videomemory.sh \
     /docs/openclaw-skill.md \
     /docs/openclaw-videomemory-task-helper.mjs \
+    /scripts/openclaw_send_current_camera_image.sh \
     /deploy/openclaw-real-home/hooks/transforms/videomemory-alert.mjs >/dev/null
   "$GIT_BIN" -C "$REPO_DIR" checkout --detach FETCH_HEAD >/dev/null
 }
@@ -732,6 +735,13 @@ copy_if_exists() {
   cp "$src" "$dest"
 }
 
+copy_executable_if_exists() {
+  src="$1"
+  dest="$2"
+  copy_if_exists "$src" "$dest"
+  chmod 755 "$dest"
+}
+
 install_openclaw_files() {
   ensure_repo
 
@@ -744,6 +754,9 @@ install_openclaw_files() {
   copy_if_exists \
     "$REPO_DIR/docs/openclaw-skill.md" \
     "$OPENCLAW_HOME/workspace/skills/videomemory/SKILL.md"
+  copy_executable_if_exists \
+    "$REPO_DIR/scripts/openclaw_send_current_camera_image.sh" \
+    "$OPENCLAW_HOME/workspace/bin/openclaw_send_current_camera_image.sh"
 }
 
 merge_openclaw_config() {
@@ -1009,8 +1022,10 @@ log "VideoMemory base: $VIDEOMEMORY_BASE"
 log "User-facing VideoMemory UI: $USER_FACING_UI_URL"
 log "VideoMemory log: $LOG_FILE"
 log "OpenClaw home: $OPENCLAW_HOME"
+log "OpenClaw camera image helper: $OPENCLAW_HOME/workspace/bin/openclaw_send_current_camera_image.sh"
 if [ -z "$TAILSCALE_UI_URL" ] && [ "$SKIP_TAILSCALE" -eq 0 ]; then
   log "Tailscale UI link unavailable yet. Finish 'sudo tailscale up' or provide --tailscale-authkey to make the UI reachable over Tailscale."
 fi
 notify_user_with_ui_link "$USER_FACING_UI_URL"
 log "Next prompt to OpenClaw: Please onboard to VideoMemory here $VIDEOMEMORY_BASE/openclaw/skill.md and use the videomemory task helper for any 'when X happens, do Y' request."
+log "If OpenClaw was already chatting before this bootstrap, send /new once so the next session loads the VideoMemory image helper guidance."

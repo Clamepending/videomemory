@@ -137,6 +137,44 @@ class OpenClawWebhookDispatcherTests(unittest.TestCase):
         self.assertTrue(call["json"]["note_has_frame"])
         self.assertEqual(call["json"]["note_frame_api_path"], "/api/task-note/42/frame")
         self.assertEqual(call["json"]["note_frame_api_url"], "http://127.0.0.1:5050/api/task-note/42/frame")
+        self.assertFalse(call["json"]["note_has_video"])
+        self.assertEqual(call["json"]["note_video_api_path"], "")
+        self.assertEqual(call["json"]["note_video_api_url"], "")
+
+    def test_dispatch_includes_saved_note_video_metadata(self):
+        client = _MockHttpClient()
+        dispatcher = OpenClawWebhookDispatcher(
+            config_loader=lambda: OpenClawWebhookConfig(
+                url="http://openclaw:18789/hooks/videomemory-alert",
+                token="shared-token",
+                timeout_s=5.0,
+                dedupe_ttl_s=30.0,
+                min_interval_s=0.0,
+                default_bot_id="openclaw",
+                videomemory_base_url="http://127.0.0.1:5050",
+            ),
+            http_client=client,
+            clock=lambda: 1_700_000_100.0,
+        )
+
+        task = self._task(bot_id="owner-bot")
+        note = NoteEntry(
+            "red marker visible",
+            timestamp=1_700_000_000.0,
+            note_id=42,
+            video_path="task_note_videos/task-1/note_42.mp4",
+        )
+        result = dispatcher.dispatch_task_update(task, note)
+
+        self.assertEqual(result["status"], "sent")
+        call = client.calls[0]
+        self.assertEqual(call["json"]["note_id"], 42)
+        self.assertFalse(call["json"]["note_has_frame"])
+        self.assertEqual(call["json"]["note_frame_api_path"], "")
+        self.assertEqual(call["json"]["note_frame_api_url"], "")
+        self.assertTrue(call["json"]["note_has_video"])
+        self.assertEqual(call["json"]["note_video_api_path"], "/api/task-note/42/video")
+        self.assertEqual(call["json"]["note_video_api_url"], "http://127.0.0.1:5050/api/task-note/42/video")
 
     def test_dispatch_suppresses_duplicate_note_within_ttl(self):
         client = _MockHttpClient()

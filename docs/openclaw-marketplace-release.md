@@ -55,8 +55,8 @@ Expected package name:
 Validate the published package through OpenClaw:
 
 ```bash
-openclaw plugins install @clamepending/videomemory@0.1.7
-openclaw hooks install @clamepending/videomemory@0.1.7
+openclaw plugins install @clamepending/videomemory@0.1.8
+openclaw hooks install @clamepending/videomemory@0.1.8
 openclaw plugins doctor
 openclaw hooks check
 openclaw videomemory onboard --explain
@@ -77,7 +77,7 @@ clawhub package publish . \
   --family code-plugin \
   --name @clamepending/videomemory \
   --display-name "VideoMemory" \
-  --version 0.1.7 \
+  --version 0.1.8 \
   --source-repo Clamepending/videomemory \
   --source-ref main \
   --source-path openclaw-plugin
@@ -119,7 +119,7 @@ From OpenClaw setup / Skills UI:
 3. When the user says `install videomemory please` or `Install the VideoMemory skill from ClawHub and send me the UI`, the skill first tries:
 
 ```bash
-openclaw plugins install @clamepending/videomemory@0.1.7
+openclaw plugins install @clamepending/videomemory@0.1.8
 ```
 
 After a gateway restart, the plugin exposes:
@@ -136,8 +136,8 @@ videomemory_status
 If plugin installation is unavailable, the skill falls back to:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.7 onboard --safe --repo-ref v0.1.3 --explain
-npx -y @clamepending/videomemory@0.1.7 onboard --safe --repo-ref v0.1.3
+npx -y @clamepending/videomemory@0.1.8 onboard --safe --repo-ref v0.1.4 --explain
+npx -y @clamepending/videomemory@0.1.8 onboard --safe --repo-ref v0.1.4
 ```
 
 That command:
@@ -147,20 +147,23 @@ That command:
 - avoids Tailscale setup, model API-key copying, Telegram notifications, and sudo-requiring setup paths in safe mode
 - returns the user-facing UI link
 
-## Local verification already completed in this repo
+## Release verification to run before publishing
 
 - `npm pack`
 - `node cli.mjs onboard --help`
-- `node cli.mjs status --videomemory-base http://localhost:5051 --json`
+- `node cli.mjs status --videomemory-base http://127.0.0.1:5050 --json`
 - `openclaw plugins install /path/to/openclaw-plugin`
 - `openclaw hooks install /path/to/openclaw-plugin`
-- `openclaw plugins install clamepending-videomemory-0.1.7.tgz`
-- `openclaw hooks install clamepending-videomemory-0.1.7.tgz`
-- `openclaw plugins install @clamepending/videomemory@0.1.7`
-- `openclaw hooks install @clamepending/videomemory@0.1.7`
+- `openclaw plugins install clamepending-videomemory-0.1.8.tgz`
+- `openclaw hooks install clamepending-videomemory-0.1.8.tgz`
 - `openclaw plugins doctor`
 - `openclaw hooks check`
 - `openclaw videomemory onboard --explain`
+
+After npm publish, also verify:
+
+- `openclaw plugins install @clamepending/videomemory@0.1.8`
+- `openclaw hooks install @clamepending/videomemory@0.1.8`
 
 ## Why this avoids the security scanner block
 

@@ -1,1 +1,0 @@
-Describe the color of the inflatable on top of the purple inflatable
