@@ -97,16 +97,47 @@ export function openClawRegistryPath(options = {}) {
   );
 }
 
+export function settingValue(settings, key) {
+  const info = settings?.[key];
+  if (!info || typeof info !== "object") {
+    return "";
+  }
+  return cleanText(info.value);
+}
+
+async function videoMemoryWebhookSettings(options = {}) {
+  const baseUrl = getBaseUrl(options);
+  const result = await maybeRequestJson(`${baseUrl}/api/settings`);
+  if (!result.ok) {
+    return {};
+  }
+  const settings = result.payload?.settings || {};
+  return {
+    url: settingValue(settings, "VIDEOMEMORY_OPENCLAW_WEBHOOK_URL"),
+    token: settingValue(settings, "VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN"),
+  };
+}
+
+function usableToken(value) {
+  const token = cleanText(value);
+  return token && !token.includes("*") ? token : "";
+}
+
 export async function inferOpenClawWebhook(options = {}) {
+  const configured = await videoMemoryWebhookSettings(options);
   const configPath = openClawConfigPath(options);
   const config = await readJsonFile(configPath, {});
   const gatewayPort = Number(config?.gateway?.port || 18789);
   const hookRoot = cleanText(config?.hooks?.path || "/hooks").replace(/^\/?/, "/").replace(/\/+$/, "");
   const mappingPath = cleanText(options["mapping-path"]) || "videomemory-alert";
-  const url =
-    cleanText(options["webhook-url"]) ||
-    `http://127.0.0.1:${gatewayPort}${hookRoot}/${encodeURIComponent(mappingPath)}`;
-  const token = cleanText(options["webhook-token"]) || cleanText(config?.hooks?.token);
+  const explicitUrl = cleanText(options["webhook-url"]);
+  const configuredUrl = cleanText(configured.url);
+  const fallbackUrl = `http://127.0.0.1:${gatewayPort}${hookRoot}/${encodeURIComponent(mappingPath)}`;
+  const url = explicitUrl || configuredUrl || fallbackUrl;
+  const token =
+    cleanText(options["webhook-token"]) ||
+    usableToken(configured.token) ||
+    (!explicitUrl && !configuredUrl ? cleanText(config?.hooks?.token) : "");
   return { url, token, configPath, mappingPath };
 }
 

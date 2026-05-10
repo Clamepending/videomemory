@@ -41,6 +41,17 @@ GET /api/health
 
 Returns `{"status": "ok", ...}` when the server is running.
 
+Health is not the same as monitor readiness. A monitor also needs a reachable
+model runtime or configured model API key, plus camera permission for local USB
+or built-in cameras. Coding agents should run:
+
+```bash
+node .agents/skills/videomemory/scripts/ensure-server.mjs --json
+```
+
+On macOS, the terminal or host app that launches Python may need Camera
+permission in System Settings before OpenCV can read built-in/USB cameras.
+
 ---
 
 ## API Reference

@@ -14,6 +14,10 @@ Check model and webhook settings:
 curl -fsSL http://127.0.0.1:5050/api/settings
 ```
 
+`/api/health` only proves the Flask service is running. A monitor is ready only
+when the selected model has either a reachable runtime or a configured provider
+API key, and the selected camera can actually return frames.
+
 Model readiness rules:
 
 - `local-vllm` needs a reachable `LOCAL_MODEL_BASE_URL`, defaulting to `http://localhost:8100`.
@@ -21,6 +25,11 @@ Model readiness rules:
 - Claude models need `ANTHROPIC_API_KEY`.
 - Gemini models need `GOOGLE_API_KEY`.
 - OpenRouter models need `OPENROUTER_API_KEY`.
+
+macOS camera note:
+
+- Terminal, Codex, Claude, or the host app that launches Python may need Camera
+  permission in System Settings before OpenCV can read USB/built-in cameras.
 
 Set settings through HTTP:
 
@@ -63,6 +72,20 @@ curl -fsSL -X PUT http://127.0.0.1:5050/api/settings/VIDEOMEMORY_SELF_BASE_URL \
   -H 'Content-Type: application/json' \
   -d '{"value":"http://127.0.0.1:5050"}'
 ```
+
+Test the configured webhook receiver without waiting for a real camera event:
+
+```bash
+node .agents/skills/videomemory/scripts/simulate-webhook-event.mjs \
+  --task-id 0 \
+  --confirm true \
+  --json
+```
+
+The simulator uses `VIDEOMEMORY_OPENCLAW_WEBHOOK_URL` from VideoMemory settings
+by default. Pass `--webhook-url http://127.0.0.1:18790/hooks/videomemory-alert`
+when testing a dummy receiver. Pass `--webhook-token` if the receiver requires
+auth because `GET /api/settings` masks saved secret values.
 
 ## Codex Plugin Boundary
 

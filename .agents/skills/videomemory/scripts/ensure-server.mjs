@@ -1,14 +1,6 @@
 #!/usr/bin/env node
 
-import { getBaseUrl, maybeRequestJson, parseArgs, requestJson } from "./common.mjs";
-
-function settingValue(settings, key) {
-  const info = settings?.[key];
-  if (!info || typeof info !== "object") {
-    return "";
-  }
-  return typeof info.value === "string" ? info.value.trim() : "";
-}
+import { getBaseUrl, maybeRequestJson, parseArgs, requestJson, settingValue } from "./common.mjs";
 
 function settingIsSet(settings, key) {
   if (!key) {

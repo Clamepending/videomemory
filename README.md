@@ -37,6 +37,18 @@ curl -fsSL http://localhost:5050/api/devices
 curl -fsSL http://localhost:5050/openapi.json
 ```
 
+`/api/health` only proves the server is up. Before expecting monitors to
+analyze frames, confirm model and webhook readiness:
+
+```bash
+node .agents/skills/videomemory/scripts/ensure-server.mjs --json
+```
+
+If the model is `local-vllm`, start the configured local model server or switch
+`VIDEO_INGESTOR_MODEL` to a cloud model and set the matching API key. On macOS,
+the terminal or app that launches Python may also need Camera permission before
+USB/built-in cameras can produce frames.
+
 ## Agent Wakeups
 
 VideoMemory is the perception engine. The external agent owns conversation,
@@ -77,6 +89,20 @@ curl -fsSL -X PUT http://localhost:5050/api/settings/VIDEOMEMORY_SELF_BASE_URL \
   -H 'Content-Type: application/json' \
   -d '{"value":"http://127.0.0.1:5050"}'
 ```
+
+To test a webhook receiver without waiting for a real detection:
+
+```bash
+node .agents/skills/videomemory/scripts/simulate-webhook-event.mjs \
+  --task-id 0 \
+  --confirm true \
+  --json
+```
+
+The simulator uses the saved `VIDEOMEMORY_OPENCLAW_WEBHOOK_URL` by default; pass
+`--webhook-url` to override it for a dummy local receiver. If the receiver
+requires a bearer token, pass `--webhook-token` because the settings API masks
+saved secrets.
 
 ## OpenClaw
 
