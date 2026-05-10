@@ -4,9 +4,13 @@ VideoMemory is a video monitoring system. You create **tasks** for camera input 
 
 This document describes how to run the VideoMemory **core service** and interact with it via HTTP from an external agent.
 
-For Codex/plugin work, start with `.agents/skills/videomemory/SKILL.md`. That skill documents the local Codex plugin, OpenClaw webhook setup, semantic-filter defaults, and the fresh-agent wakeup test. In particular, a VideoMemory task is the long-running monitor; Codex should not add heartbeat/polling automations after task creation. For "when X happens, do Y", keep the visual trigger in VideoMemory and store the follow-up action in the webhook runtime registry.
+For agent integrations, keep VideoMemory as the long-running visual monitor.
+For "when X happens, do Y", put the visual trigger in the VideoMemory task and
+store the follow-up action in the webhook-capable agent runtime.
 
-For true push-style Claude Code wakeups, use `docs/claude-code-channel.md` and `claude-videomemory-channel/`. Claude Code channels can receive external events into a running Claude session, unlike current Codex plugin tools.
+For true push-style Claude Code wakeups, use `docs/claude-code-channel.md` and
+`claude-videomemory-channel/`. Claude Code channels can receive external events
+into a running Claude session.
 
 ## Quick Start
 
@@ -46,7 +50,7 @@ model runtime or configured model API key, plus camera permission for local USB
 or built-in cameras. Coding agents should run:
 
 ```bash
-node .agents/skills/videomemory/scripts/ensure-server.mjs --json
+node scripts/agent/ensure-server.mjs --json
 ```
 
 On macOS, the terminal or host app that launches Python may need Camera

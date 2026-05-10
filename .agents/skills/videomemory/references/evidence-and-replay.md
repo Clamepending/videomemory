@@ -10,7 +10,7 @@ Task notes may include saved evidence:
 Inspect latest task evidence:
 
 ```bash
-node .agents/skills/videomemory/scripts/inspect-event.mjs --task-id 1 --json
+node scripts/agent/inspect-event.mjs --task-id 1 --json
 ```
 
 Fetch a saved triggering frame:

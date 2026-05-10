@@ -34,7 +34,7 @@ Expected result:
 After a task exists, test the event path without holding up an object:
 
 ```bash
-node .agents/skills/videomemory/scripts/simulate-webhook-event.mjs \
+node scripts/agent/simulate-webhook-event.mjs \
   --task-id <task_id> \
   --io-id 0 \
   --bot-id codex \
@@ -55,7 +55,7 @@ Use the same monitor, then hold the phone up in the camera view. A successful re
 Check:
 
 ```bash
-node .agents/skills/videomemory/scripts/inspect-event.mjs --task-id <task_id> --json
+node scripts/agent/inspect-event.mjs --task-id <task_id> --json
 ```
 
 If no note appears:

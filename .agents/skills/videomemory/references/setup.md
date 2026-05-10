@@ -5,7 +5,7 @@
 Check the server:
 
 ```bash
-node .agents/skills/videomemory/scripts/ensure-server.mjs --json
+node scripts/agent/ensure-server.mjs --json
 ```
 
 Check model and webhook settings:
@@ -76,7 +76,7 @@ curl -fsSL -X PUT http://127.0.0.1:5050/api/settings/VIDEOMEMORY_SELF_BASE_URL \
 Test the configured webhook receiver without waiting for a real camera event:
 
 ```bash
-node .agents/skills/videomemory/scripts/simulate-webhook-event.mjs \
+node scripts/agent/simulate-webhook-event.mjs \
   --task-id 0 \
   --confirm true \
   --json

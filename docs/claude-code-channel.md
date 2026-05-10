@@ -14,9 +14,9 @@ VideoMemory monitor task
   -> running Claude Code session receives <channel source="videomemory" ...>
 ```
 
-This is true push-style event delivery into Claude Code. It is different from
-Codex plugin tools, which are currently a control plane rather than an inbound
-event receiver.
+This is true push-style event delivery into Claude Code. Generic HTTP polling
+or control-plane tools can create VideoMemory tasks, but they do not wake a
+running Claude session unless a channel or webhook receiver is active.
 
 ## One-Time Install
 

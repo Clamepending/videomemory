@@ -41,7 +41,7 @@ curl -fsSL http://localhost:5050/openapi.json
 analyze frames, confirm model and webhook readiness:
 
 ```bash
-node .agents/skills/videomemory/scripts/ensure-server.mjs --json
+node scripts/agent/ensure-server.mjs --json
 ```
 
 If the model is `local-vllm`, start the configured local model server or switch
@@ -93,7 +93,7 @@ curl -fsSL -X PUT http://localhost:5050/api/settings/VIDEOMEMORY_SELF_BASE_URL \
 To test a webhook receiver without waiting for a real detection:
 
 ```bash
-node .agents/skills/videomemory/scripts/simulate-webhook-event.mjs \
+node scripts/agent/simulate-webhook-event.mjs \
   --task-id 0 \
   --confirm true \
   --json
@@ -202,6 +202,7 @@ More integration detail:
 - [AGENTS.md](AGENTS.md)
 - [docs/agent-integration-contract.md](docs/agent-integration-contract.md)
 - [docs/openclaw-skill.md](docs/openclaw-skill.md)
+- [docs/claude-code-channel.md](docs/claude-code-channel.md)
 
 ## Release
 
@@ -213,17 +214,5 @@ Current release line:
 
 Release checklist:
 
-```bash
-uv run python -m unittest tests.test_openclaw_integration \
-  tests.test_videomemory_alert_transform \
-  tests.test_openclaw_plugin_scaffold \
-  tests.test_videomemory_task_helper_original_request \
-  tests.test_video_stream_ingestor_detection_callbacks \
-  tests.test_task_note_videos \
-  tests.test_task_note_video_api
-
-cd openclaw-plugin && npm pack
-```
-
-Then tag `v0.1.4`, push the tag, publish the npm package, and publish GitHub
-release notes.
+- [CHANGELOG.md](CHANGELOG.md)
+- [docs/release-checklist.md](docs/release-checklist.md)
