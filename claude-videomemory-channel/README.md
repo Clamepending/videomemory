@@ -1,9 +1,16 @@
-# Claude VideoMemory Channel
+# VideoMemory for Claude Code
 
-This is a Claude Code channel for VideoMemory monitor events.
+This is the Claude Code plugin for VideoMemory.
 
-It starts a localhost HTTP server and forwards VideoMemory `task_update`
-webhooks into the running Claude Code session as channel messages.
+It gives Claude tools to start/check local VideoMemory, open the FaceTime
+browser camera bridge, create camera monitors, and receive VideoMemory
+`task_update` webhooks as channel messages.
+
+After the plugin is installed, the intended user prompt is natural language:
+
+```text
+Download VideoMemory and watch my pet dog from my FaceTime camera.
+```
 
 ## Launch
 
@@ -13,12 +20,13 @@ From the VideoMemory repo:
 CLAUDE_PLUGIN_ROOT=$PWD/claude-videomemory-channel \
 claude \
   --mcp-config claude-videomemory-channel/.mcp.json \
-  --dangerously-load-development-channels server:videomemory
+  --channels server:videomemory \
+  --allowedTools mcp__videomemory__setup_local,mcp__videomemory__reply,mcp__videomemory__inspect_task,mcp__videomemory__inspect_device,mcp__videomemory__list_devices,mcp__videomemory__list_monitors,mcp__videomemory__create_monitor,mcp__videomemory__configure_channel_webhook
 ```
 
-Claude Code channels are a research preview. The development flag is required
-for this local custom channel unless it is installed from an approved channel
-marketplace.
+Use `videomemory claude launch --dev` only while developing the local channel
+package. That mode uses Claude Code's development-channel flag and asks for
+local-development confirmation.
 
 The server uses Node.js and `@modelcontextprotocol/sdk`. Install once:
 
@@ -65,3 +73,8 @@ To see replies emitted through the channel test surface:
 ```bash
 curl -N http://127.0.0.1:8791/events
 ```
+
+For simple true/false visual triggers, create monitors with
+`monitor_type: "binary"`. The create-monitor tool returns a `readiness` object;
+if `readiness.ready` is false, the task was created but the camera feed still
+needs attention.

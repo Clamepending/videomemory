@@ -38,19 +38,19 @@ curl -fsSL http://host.docker.internal:5050/openclaw/skill.md
 Prefer the packaged host CLI over network-downloaded shell snippets. Inspect the safe onboarding plan first:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.5 --explain
+npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.6 --explain
 ```
 
 If the plan matches the user's request, run the safe onboarding path:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.5
+npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.6
 ```
 
 If OpenClaw is in Docker and the human already started VideoMemory on the host, bootstrap against the host alias:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.5 --videomemory-base http://host.docker.internal:5050
+npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.6 --videomemory-base http://host.docker.internal:5050
 ```
 
 What this bootstrap does:
@@ -70,7 +70,7 @@ If the user asks to relaunch, restart, or update VideoMemory, do not improvise w
 Run the packaged relaunch command so the repo is upgraded first, the local host-managed process is restarted, and the user gets the current UI link plus commit:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.9 relaunch --repo-ref v0.1.5
+npx -y @clamepending/videomemory@0.1.9 relaunch --repo-ref v0.1.6
 ```
 
 What this relaunch does:
@@ -113,6 +113,7 @@ Do not precompute those results during setup unless the user explicitly asked fo
 - If the user asks to rerun the bootstrap or install step, rerun the packaged command instead of assuming an earlier failure still applies.
 - When a bootstrap or install command fails, report the actual failing command or stderr before proposing a fix.
 - If `POST /api/tasks` fails because the selected model is not configured, surface that error directly instead of pretending the task was created.
+- Use `GET /api/device/{io_id}/readiness` for camera diagnostics and inspect the helper's returned readiness immediately after creating a monitor. If post-create `ready` is false, tell the user the concrete blocker instead of saying the monitor is armed.
 - Include `Content-Type: application/json` on `POST`, `PUT`, and `DELETE` calls that send JSON.
 - When the user wants monitoring to stop but keep history, call `POST /api/task/{task_id}/stop`.
 - When the user explicitly wants a task erased, call `DELETE /api/task/{task_id}`.
@@ -134,6 +135,19 @@ List devices:
 ```bash
 curl -fsSL http://videomemory:5050/api/devices
 ```
+
+Check whether a device can actually feed monitors:
+
+```bash
+curl -fsSL http://videomemory:5050/api/device/net0/readiness
+```
+
+Readiness returning `ready:false` means the camera path is not usable yet, or no
+monitor has started an ingestor yet. For task setup, the strongest signal is the
+readiness object returned by `videomemory-task-helper.mjs create` after
+VideoMemory has tried to start the ingestor. Surface the `warnings` field
+directly; common causes are browser camera permission, no fresh browser frames,
+or a stale network snapshot source.
 
 ## One-off camera questions
 
@@ -231,6 +245,21 @@ curl -fsSL -X POST http://videomemory:5050/api/tasks \
   -d '{"io_id":"net0","task_description":"Watch for a red marker and record it, but do not notify anyone.","bot_id":"openclaw","semantic_filter_keywords":"red marker"}'
 ```
 
+For simple boolean done/not-done monitors, pass `monitor_type:"binary"` instead
+of using the chunked general VLM monitor:
+
+```bash
+curl -fsSL -X POST http://videomemory:5050/api/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"io_id":"net0","task_description":"a human is visible","bot_id":"openclaw","monitor_type":"binary"}'
+```
+
+Binary monitors are intended for local agentic wakeups. They use the local
+FastVLM true/false path, default to a 0.5 true threshold, and require 2 true
+votes out of the last 3 evaluated frames before marking the task done. Use the
+default `general` monitor when the user needs richer notes or open-ended scene
+analysis.
+
 ### Semantic Filter Keywords
 
 Use `semantic_filter_keywords` when the user provides the visual object/region that should gate expensive VLM calls. This is a local, device-level pre-filter: VideoMemory first runs frame-difference filtering, then the semantic-autogaze model checks whether the requested keywords appear in the frame, and only frames that pass are queued into VLM chunks.
@@ -247,6 +276,7 @@ Create a split trigger-plus-action task:
 node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs create \
   --io-id net0 \
   --trigger 'Watch for a backpack in the frame. Add a note only when a backpack appears, disappears, or the visible backpack count changes.' \
+  --monitor-type general \
   --semantic-keywords 'backpack, person' \
   --action 'Tell one short backpack joke when a backpack is newly visible.' \
   --include-frame false \
@@ -261,6 +291,7 @@ Create a split trigger-plus-action task that replies back into the current OpenC
 node ~/.openclaw/hooks/bin/videomemory-task-helper.mjs create \
   --io-id net0 \
   --trigger 'Watch for a card in the frame. Add a note only when a card appears, disappears, or the visible card count changes.' \
+  --monitor-type general \
   --semantic-keywords 'card' \
   --action 'Tell me one concise sentence when a card is visible.' \
   --include-frame false \
@@ -402,15 +433,18 @@ curl -fsSL -X PUT http://videomemory:5050/api/settings/VIDEO_INGESTOR_MODEL \
 4. Fetch this skill with `curl`.
 5. Check `/api/health`.
 6. Call `/api/devices`.
-7. If no suitable camera exists, add one with `/api/devices/network`.
-8. If the user asks a one-off camera question, call `/api/caption_frame`.
-9. If the user wants record-only monitoring, use `/api/tasks` directly with a neutral condition-only description.
-10. If the user wants "when X happens, do Y", use `videomemory-task-helper.mjs` so OpenClaw keeps `do Y` locally and VideoMemory only sees `watch for X`.
-11. Use `--delivery webchat` for "tell me here/in this chat" requests only when you know the actual originating OpenClaw session key.
-12. Never hardcode `agent:main:main` as a generic "main chat" fallback for `--session-key`; it may point at heartbeat/internal traffic on current OpenClaw builds.
-13. Use `--delivery telegram` when the user explicitly wants Telegram or the current interaction already came from Telegram. Pass `--to <sender_id>` from the current Telegram metadata.
-14. If Telegram delivery setup fails, do not silently downgrade to `webchat` unless you also have the real current chat session key.
-15. Use `--include-frame true` only when the user explicitly wants the saved triggering image or photo to be used later. Do not infer that from wording at alert time.
-16. Use `--include-video true` only when the user explicitly wants the saved triggering clip to be used later.
-17. When a VideoMemory alert webhook arrives, prefer `note_frame_api_url` or `note_video_api_url` from that webhook over taking a new snapshot.
-18. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.
+7. For camera diagnostics, call `/api/device/{io_id}/readiness`; before the first monitor exists, a missing ingestor is expected.
+8. If no suitable camera exists, add one with `/api/devices/network`.
+9. If the user asks a one-off camera question, call `/api/caption_frame`.
+10. If the user wants record-only monitoring, use `/api/tasks` directly with a neutral condition-only description.
+11. If the user wants "when X happens, do Y", use `videomemory-task-helper.mjs` so OpenClaw keeps `do Y` locally and VideoMemory only sees `watch for X`.
+12. Use `--monitor-type binary` for simple local true/false triggers and `--monitor-type general` for richer note-writing monitors.
+13. Inspect the helper's returned `readiness`; if `ready:false`, report the concrete warning instead of claiming the monitor is armed.
+14. Use `--delivery webchat` for "tell me here/in this chat" requests only when you know the actual originating OpenClaw session key.
+15. Never hardcode `agent:main:main` as a generic "main chat" fallback for `--session-key`; it may point at heartbeat/internal traffic on current OpenClaw builds.
+16. Use `--delivery telegram` when the user explicitly wants Telegram or the current interaction already came from Telegram. Pass `--to <sender_id>` from the current Telegram metadata.
+17. If Telegram delivery setup fails, do not silently downgrade to `webchat` unless you also have the real current chat session key.
+18. Use `--include-frame true` only when the user explicitly wants the saved triggering image or photo to be used later. Do not infer that from wording at alert time.
+19. Use `--include-video true` only when the user explicitly wants the saved triggering clip to be used later.
+20. When a VideoMemory alert webhook arrives, prefer `note_frame_api_url` or `note_video_api_url` from that webhook over taking a new snapshot.
+21. When a VideoMemory alert webhook arrives, use the stored action plus the latest note to decide whether to reply with `NO_REPLY` or a real user-facing message.

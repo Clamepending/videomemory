@@ -435,6 +435,14 @@
                 <textarea id="taskDescription" placeholder="e.g. Count the number of people entering the room"></textarea>
             </div>
             <div class="form-group">
+                <label for="monitorType">Monitor Type</label>
+                <select id="monitorType">
+                    <option value="general" selected>General VLM monitor</option>
+                    <option value="binary">Binary local done monitor</option>
+                </select>
+                <div class="task-form-hint">Binary monitors complete when the visual criterion becomes true. They are local and fast on Mac, but not for counting or rich notes.</div>
+            </div>
+            <div class="form-group">
                 <label>Evidence</label>
                 <div class="task-evidence-grid">
                     <label class="task-evidence-option">
@@ -554,6 +562,7 @@
         async function submitTask() {
             const ioId = document.getElementById('deviceSelect').value;
             const desc = document.getElementById('taskDescription').value.trim();
+            const monitorType = document.getElementById('monitorType').value || 'general';
             const saveNoteFrames = document.getElementById('saveNoteFrames').checked;
             const saveNoteVideos = document.getElementById('saveNoteVideos').checked;
             if (!ioId) {
@@ -577,6 +586,7 @@
                     body: JSON.stringify({
                         io_id: ioId,
                         task_description: desc,
+                        monitor_type: monitorType,
                         save_note_frames: saveNoteFrames,
                         save_note_videos: saveNoteVideos,
                     })
@@ -710,6 +720,8 @@
                     };
 
                     const deviceName = deviceNames[task.io_id] || `Device ${task.io_id}`;
+                    const monitorType = task.monitor_type || 'general';
+                    const monitorLabel = monitorType === 'binary' ? 'Binary local monitor' : 'General VLM monitor';
                     const botLabel = task.bot_id ? `Bot: ${escapeHtml(task.bot_id)}` : '';
                     const safeTaskIdArg = JSON.stringify(String(taskId));
                     const pauseButton = status === 'active'
@@ -736,6 +748,7 @@
                         <div class="task-device">
                             <span class="device-icon">&#9654;</span>
                             ${escapeHtml(deviceName)}
+                            <span class="task-bot-id"> · ${escapeHtml(monitorLabel)}</span>
                             ${botLabel ? `<span class="task-bot-id"> · ${botLabel}</span>` : ''}
                         </div>
                         <div class="task-description">${escapeHtml(task.task_desc || 'No description')}</div>

@@ -10,6 +10,10 @@ STATUS_ACTIVE = "active"          # Currently being processed by an ingestor
 STATUS_DONE = "done"              # Completed successfully
 STATUS_TERMINATED = "terminated"  # Was active but interrupted (e.g. app restart)
 
+MONITOR_TYPE_GENERAL = "general"
+MONITOR_TYPE_BINARY = "binary"
+SUPPORTED_MONITOR_TYPES = {MONITOR_TYPE_GENERAL, MONITOR_TYPE_BINARY}
+
 
 class NoteEntry:
     """Represents a single note entry with timestamp."""
@@ -97,6 +101,7 @@ class Task:
     def __init__(self, task_number: int, task_desc: str, task_note: List[NoteEntry] = None,
                  done: bool = False, io_id: str = None, task_id: str = None,
                  status: str = STATUS_ACTIVE, bot_id: str = None,
+                 monitor_type: str = MONITOR_TYPE_GENERAL,
                  save_note_frames: Optional[bool] = None,
                  save_note_videos: Optional[bool] = None):
         self.task_number = task_number
@@ -107,8 +112,13 @@ class Task:
         self.io_id = io_id
         self.status = status
         self.bot_id = bot_id  # Optional; which bot created this task (debug / multi-bot compatibility)
+        self.monitor_type = monitor_type if monitor_type in SUPPORTED_MONITOR_TYPES else MONITOR_TYPE_GENERAL
         self.save_note_frames = save_note_frames
         self.save_note_videos = save_note_videos
+
+    @property
+    def is_binary_monitor(self) -> bool:
+        return self.monitor_type == MONITOR_TYPE_BINARY
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -120,6 +130,7 @@ class Task:
             "done": self.done,
             "io_id": self.io_id,
             "status": self.status,
+            "monitor_type": self.monitor_type,
             "save_note_frames": self.save_note_frames,
             "save_note_videos": self.save_note_videos,
         }

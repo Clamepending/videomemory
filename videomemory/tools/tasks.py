@@ -141,6 +141,7 @@ def add_task(
     io_id: str,
     task_description: str,
     bot_id: Optional[str] = None,
+    monitor_type: str = "general",
     save_note_frames: Optional[bool] = None,
     save_note_videos: Optional[bool] = None,
     semantic_filter_config: Optional[Dict[str, Any]] = None,
@@ -151,6 +152,7 @@ def add_task(
         io_id: The unique identifier of the input device.
         task_description: A description of the task to be performed.
         bot_id: Optional identifier of the bot that created this task (for multi-bot / debug).
+        monitor_type: Monitoring engine to use: "general" or "binary".
         save_note_frames: Optional per-task override for saving note frames.
         save_note_videos: Optional per-task override for saving note videos.
         semantic_filter_config: Optional device-level semantic filter settings to apply before starting the task.
@@ -201,6 +203,7 @@ def add_task(
                 io_id,
                 task_description,
                 bot_id=bot_id,
+                monitor_type=monitor_type,
                 save_note_frames=save_note_frames,
                 save_note_videos=save_note_videos,
                 semantic_filter_config=semantic_filter_config,

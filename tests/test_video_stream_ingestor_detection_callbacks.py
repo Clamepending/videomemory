@@ -5,9 +5,10 @@ import unittest
 import numpy as np
 
 from videomemory.system.stream_ingestors.frame_utils import subsample_frames
+from videomemory.system.stream_ingestors.binary_monitor import BinaryMonitorDecision, BinaryMonitorScore
 from videomemory.system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from videomemory.system.stream_ingestors.prompting import TaskUpdate, VideoIngestorOutput
-from videomemory.system.task_types import Task
+from videomemory.system.task_types import MONITOR_TYPE_BINARY, MONITOR_TYPE_GENERAL, Task
 
 
 class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
@@ -20,6 +21,17 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
             done=False,
             io_id="net0",
             bot_id="openclaw",
+        )
+
+    def _binary_task(self):
+        return Task(
+            task_id="task-binary",
+            task_number=0,
+            task_desc="a red marker is visible",
+            task_note=[],
+            done=False,
+            io_id="net0",
+            monitor_type=MONITOR_TYPE_BINARY,
         )
 
     def test_process_ml_results_emits_callbacks_when_task_done_without_new_note(self):
@@ -271,6 +283,7 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
 
     def test_chunk_keeps_duplicate_frames_after_motion_trigger(self):
         ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=object())
+        ingestor._tasks_list = [self._task()]
         ingestor._frame_diff_threshold = 5.0
         first = np.zeros((2, 2, 3), dtype=np.uint8)
         duplicate = first.copy()
@@ -282,6 +295,75 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
         self.assertTrue(first_has_motion)
         self.assertFalse(duplicate_has_motion)
         self.assertEqual(len(chunk_frames), 2)
+
+    def test_binary_monitor_tasks_are_not_sent_to_general_vlm_provider(self):
+        provider = Mock()
+        ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=provider)
+        ingestor._tasks_list = [self._binary_task()]
+
+        result = ingestor._VLM_processing([np.zeros((12, 16, 3), dtype=np.uint8)])
+
+        self.assertIsNone(result)
+        provider._sync_generate_content.assert_not_called()
+
+    def test_binary_monitor_done_updates_task_without_general_provider(self):
+        class FakeBinaryMonitor:
+            threshold = 0.5
+            required_hits = 2
+            window = 3
+            resize = 256
+
+            def __init__(self):
+                self.reset_task_calls = []
+
+            def score_task(self, frame, task):
+                return BinaryMonitorDecision(
+                    task_id=str(task.task_id),
+                    criterion=task.task_desc,
+                    score=BinaryMonitorScore(
+                        answer="True",
+                        p_true=0.91,
+                        p_false=0.09,
+                        raw_text="True",
+                        inference_ms=12.0,
+                        model="fake-fastvlm",
+                        resize=256,
+                    ),
+                    threshold=0.5,
+                    required_hits=2,
+                    window=3,
+                    hits=2,
+                    done=True,
+                )
+
+            def reset_task(self, task_id):
+                self.reset_task_calls.append(task_id)
+
+        updates = []
+        detections = []
+        provider = Mock()
+        ingestor = VideoStreamIngestor(
+            "http://camera.example/snapshot.jpg",
+            model_provider=provider,
+            on_task_updated=lambda task, note: updates.append((task, note)),
+            on_detection_event=lambda task, note: detections.append((task, note)),
+        )
+        fake_monitor = FakeBinaryMonitor()
+        ingestor._binary_monitor = fake_monitor
+        task = self._binary_task()
+        ingestor._tasks_list = [task]
+        frame = np.zeros((12, 16, 3), dtype=np.uint8)
+
+        ingestor._process_binary_monitor_frame(frame)
+
+        self.assertTrue(task.done)
+        self.assertEqual(len(task.task_note), 1)
+        self.assertIn("Binary criterion met", task.task_note[0].content)
+        self.assertEqual(ingestor._tasks_list, [])
+        self.assertEqual(fake_monitor.reset_task_calls, ["task-binary"])
+        provider._sync_generate_content.assert_not_called()
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(len(detections), 1)
 
 
 class VideoStreamIngestorStartupTests(unittest.IsolatedAsyncioTestCase):

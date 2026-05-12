@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.6 - 2026-05-12
+
+Release focus: make the Claude Code plugin path public and friend-installable.
+
+- Added a repo-root Claude plugin marketplace manifest so Claude Code can
+  install `videomemory@videomemory` from the public GitHub repo.
+- Added a `setup_local` Claude MCP tool that starts/checks VideoMemory, wires
+  the webhook, opens the browser FaceTime camera bridge, and reports readiness
+  blockers.
+- Added binary true/false video monitors for fast "done when criterion is met"
+  use cases.
+- Added camera readiness checks for browser camera feeds and task creation.
+- Updated the npm CLI default repo ref to `v0.1.6` so
+  `@clamepending/videomemory@0.1.9` installs the current Claude plugin path by
+  default.
+
 ## 0.1.5 - 2026-05-10
 
 Release focus: make Claude Code onboarding a first-class path without adding a

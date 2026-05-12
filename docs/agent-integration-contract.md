@@ -28,11 +28,12 @@ Use these stable endpoints from your external agent:
 - `GET /api/devices`
 - `POST /api/device/{io_id}/capture`
 - `GET /api/device/{io_id}/preview`
+- `GET /api/device/{io_id}/readiness`
 - `GET /api/captures/{capture_id}`
 - `POST /api/devices/network`
 - `DELETE /api/devices/network/{io_id}`
 - `GET /api/tasks`
-- `POST /api/tasks` (body may include optional `bot_id` for multi-bot / debug and `semantic_filter_keywords` / `required_keywords` to gate VLM calls with the local semantic filter)
+- `POST /api/tasks` (body may include optional `bot_id`, `monitor_type`, and `semantic_filter_keywords` / `required_keywords` to gate VLM calls with the local semantic filter)
 - `GET /api/task/{task_id}`
 - `PUT /api/task/{task_id}`
 - `POST /api/task/{task_id}/stop`
@@ -44,6 +45,71 @@ Machine-readable schema:
 
 - `GET /openapi.json`
 - `GET /openclaw/skill.md` for a curl-oriented OpenClaw skill document
+
+## Device readiness contract
+
+Agents should call `GET /api/device/{io_id}/readiness` for camera diagnostics
+and inspect readiness immediately after creating a monitor. A successfully
+created task is not the same thing as a usable camera feed. Before any monitor
+exists, `ready:false` can simply mean no ingestor has been started yet; after
+task creation, it means the agent should report or fix the blocker.
+
+The endpoint returns HTTP 200 when the device is registered and HTTP 404 when
+the `io_id` is unknown. In both cases, the body is machine-readable:
+
+```json
+{
+  "status": "ready",
+  "ready": true,
+  "io_id": "browser_facetime",
+  "device_exists": true,
+  "ingestor": {
+    "exists": true,
+    "running": true,
+    "has_frame": true,
+    "frame_age_ms": 110.5
+  },
+  "browser_camera": {
+    "has_fresh_frame": true,
+    "stale": false
+  },
+  "binary_monitor": {
+    "enabled": true,
+    "condition": "a human is visible"
+  },
+  "semantic_filter": {
+    "enabled": false
+  },
+  "warnings": []
+}
+```
+
+If `ready` is false, agents must report the warning instead of saying the
+monitor is fully armed. Common blockers are missing browser-camera frames,
+macOS camera permission, a stale network snapshot URL, or an unregistered
+device id.
+
+## Binary monitor contract
+
+Use `monitor_type: "binary"` for simple done/not-done visual criteria:
+
+```json
+{
+  "io_id": "browser_facetime",
+  "task_description": "a human is visible",
+  "monitor_type": "binary",
+  "bot_id": "claude-code"
+}
+```
+
+The binary monitor is designed for local agentic systems that need a fast
+boolean trigger, not a rich narrative note. It uses the local FastVLM true/false
+path, defaults to a `0.5` true threshold, and requires 2 true votes out of the
+last 3 evaluated frames before marking the task done.
+
+Use `monitor_type: "general"` or omit `monitor_type` for the older chunked VLM
+monitor that writes richer task notes and may require a configured provider API
+key.
 
 ## Event monitor contract
 
@@ -67,6 +133,7 @@ Registry entries are keyed by `(bot_id, io_id, task_id)` and include:
   "task_id": "1",
   "io_id": "0",
   "bot_id": "my-agent",
+  "monitor_type": "binary",
   "trigger_condition": "Watch for a phone visibly held up in the user's hand.",
   "action_instruction": "Tell the user that the phone is held up.",
   "delivery_mode": "internal",

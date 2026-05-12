@@ -23,7 +23,8 @@ const sessionStorePath =
 function usage() {
   return [
     "Usage:",
-    "  node openclaw-videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--semantic-keywords 'backpack, person'] [--semantic-threshold 0.5] [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--include-video true|false] [--session-key <current-session-key>] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
+    "  node openclaw-videomemory-task-helper.mjs readiness --io-id net0 [--base-url http://videomemory:5050]",
+    "  node openclaw-videomemory-task-helper.mjs create --io-id net0 --trigger 'Watch for backpacks...' --action 'Tell one short backpack joke when a backpack is newly seen.' [--monitor-type general|binary] [--semantic-keywords 'backpack, person'] [--semantic-threshold 0.5] [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--include-video true|false] [--session-key <current-session-key>] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request 'When you see a backpack, tell a backpack joke.'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
     "  node openclaw-videomemory-task-helper.mjs update --task-id 0 --trigger 'Watch for backpacks...' [--action 'Tell one short backpack joke...'] [--delivery telegram|session|webchat|internal] [--include-frame true|false] [--include-video true|false] [--session-key <current-session-key>] [--to 123456789] [--source webchat|telegram] [--sender-id 123456789] [--original-request '...'] [--bot-id openclaw] [--base-url http://videomemory:5050]",
     "  node openclaw-videomemory-task-helper.mjs stop --task-id 0 [--base-url http://videomemory:5050]",
     "  node openclaw-videomemory-task-helper.mjs delete --task-id 0 [--base-url http://videomemory:5050]",
@@ -36,6 +37,7 @@ function usage() {
     "  internal keeps the follow-up action inside the hook flow and does not reply in the current web chat.",
     "  --include-frame true explicitly tells OpenClaw to fetch and use the saved triggering note frame.",
     "  --include-video true explicitly tells OpenClaw to fetch and use the saved triggering note evidence clip.",
+    "  --monitor-type binary uses VideoMemory's local true/false monitor for simple done/not-done visual criteria.",
   ].join("\n");
 }
 
@@ -84,6 +86,17 @@ function normalizeDelivery(rawValue) {
   throw new Error(
     `Unsupported delivery mode: ${rawValue}. Supported modes are telegram, session, webchat, or internal.`,
   );
+}
+
+function normalizeMonitorType(rawValue) {
+  const value = cleanText(rawValue).toLowerCase();
+  if (!value || value === "default") {
+    return "general";
+  }
+  if (value === "general" || value === "binary") {
+    return value;
+  }
+  throw new Error(`Unsupported monitor type: ${rawValue}. Supported values are general or binary.`);
 }
 
 function parseBooleanOption(rawValue, fallback = false) {
@@ -410,11 +423,16 @@ function resolveIncludeVideo(options, previousEntry) {
   return resolveIncludeFlag(options, previousEntry, "include-video", "include_note_video");
 }
 
+async function getDeviceReadiness(baseUrl, ioId) {
+  return requestJson(`${baseUrl}/api/device/${encodeURIComponent(ioId)}/readiness`);
+}
+
 async function createTask(options) {
   const ioId = requireOption(options, "io-id");
   const trigger = requireOption(options, "trigger");
   const action = requireOption(options, "action");
   const botId = cleanText(options["bot-id"]) || "openclaw";
+  const monitorType = normalizeMonitorType(options["monitor-type"]);
   const delivery = validateDeliveryConfig(buildDeliveryConfig(options));
   const originalRequest = cleanText(options["original-request"]);
   const baseUrl = await resolveBaseUrl(options["base-url"]);
@@ -428,6 +446,7 @@ async function createTask(options) {
     io_id: ioId,
     task_description: trigger,
     bot_id: botId,
+    monitor_type: monitorType,
   };
   if (semanticKeywords) {
     createPayload.semantic_filter_keywords = semanticKeywords;
@@ -449,6 +468,16 @@ async function createTask(options) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(createPayload),
   });
+  let readiness = null;
+  try {
+    readiness = await getDeviceReadiness(baseUrl, ioId);
+  } catch (error) {
+    readiness = {
+      status: "unknown",
+      ready: false,
+      warnings: [`Could not read device readiness after task creation: ${cleanText(error?.message) || String(error)}`],
+    };
+  }
 
   const registry = await loadRegistry();
   const now = new Date().toISOString();
@@ -456,6 +485,7 @@ async function createTask(options) {
     task_id: cleanText(created.task_id),
     io_id: ioId,
     bot_id: botId,
+    monitor_type: cleanText(created.monitor_type) || monitorType,
     task_description: trigger,
     trigger_condition: trigger,
     action_instruction: action,
@@ -468,6 +498,7 @@ async function createTask(options) {
     include_note_video: includeVideo,
     semantic_filter_keywords: semanticKeywords,
     semantic_filter: created.semantic_filter || null,
+    readiness,
     original_request: originalRequest || trigger,
     created_at: now,
     updated_at: now,
@@ -476,7 +507,7 @@ async function createTask(options) {
   await saveRegistry(registry);
 
   process.stdout.write(
-    `${JSON.stringify({ status: "success", task: created, registry_key: registryKey, registry_entry: entry }, null, 2)}\n`,
+    `${JSON.stringify({ status: "success", task: created, readiness, registry_key: registryKey, registry_entry: entry }, null, 2)}\n`,
   );
 }
 
@@ -519,6 +550,7 @@ async function updateTask(options) {
     task_id: taskId,
     io_id: cleanText(task?.io_id),
     bot_id: botIdOverride || cleanText(task?.bot_id) || "openclaw",
+    monitor_type: cleanText(task?.monitor_type) || cleanText(previousEntry?.monitor_type) || "general",
     task_description: trigger,
     trigger_condition: trigger,
     action_instruction: action || cleanText(previousEntry?.action_instruction),
@@ -545,6 +577,13 @@ async function updateTask(options) {
 
   await saveRegistry(registry);
   process.stdout.write(`${JSON.stringify({ status: "success", task: updated, registry_removed: true }, null, 2)}\n`);
+}
+
+async function checkReadiness(options) {
+  const baseUrl = await resolveBaseUrl(options["base-url"]);
+  const ioId = requireOption(options, "io-id");
+  const readiness = await getDeviceReadiness(baseUrl, ioId);
+  process.stdout.write(`${JSON.stringify({ status: "success", readiness }, null, 2)}\n`);
 }
 
 async function stopTask(options) {
@@ -579,6 +618,10 @@ async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
   if (!command) {
     throw new Error(usage());
+  }
+  if (command === "readiness") {
+    await checkReadiness(options);
+    return;
   }
   if (command === "create") {
     await createTask(options);

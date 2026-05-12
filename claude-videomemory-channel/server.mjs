@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
+import { spawn } from 'node:child_process'
 import http from 'node:http'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -15,6 +17,8 @@ const HOST = process.env.VIDEOMEMORY_CLAUDE_CHANNEL_HOST || '127.0.0.1'
 const PORT = Number(process.env.VIDEOMEMORY_CLAUDE_CHANNEL_PORT || 8791)
 const BASE_URL = (process.env.VIDEOMEMORY_BASE_URL || 'http://127.0.0.1:5050').replace(/\/+$/, '')
 const TOKEN = cleanText(process.env.VIDEOMEMORY_CLAUDE_CHANNEL_TOKEN)
+const PLUGIN_ROOT = dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = resolve(PLUGIN_ROOT, '..')
 const STATE_DIR = join(homedir(), '.claude', 'channels', 'videomemory')
 const REPLY_LOG = join(STATE_DIR, 'replies.jsonl')
 
@@ -75,6 +79,29 @@ function shouldSuppressDuplicate(eventId) {
 
 function safeMeta(value) {
   return asString(value).slice(0, 500)
+}
+
+function normalizeMonitorType(value) {
+  const monitorType = cleanText(value || 'general').toLowerCase()
+  if (monitorType === 'general' || monitorType === 'binary') return monitorType
+  throw new Error('monitor_type must be "general" or "binary"')
+}
+
+function normalizeReadinessPayload(payload) {
+  if (typeof payload !== 'object' || !payload) {
+    return {
+      status: 'unknown',
+      ready: false,
+      warnings: ['VideoMemory returned a non-object readiness payload.'],
+    }
+  }
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings.map(cleanText).filter(Boolean) : []
+  return {
+    ...payload,
+    status: cleanText(payload.status) || (payload.ready ? 'ready' : 'not_ready'),
+    ready: Boolean(payload.ready),
+    warnings,
+  }
 }
 
 function metaFromPayload(payload) {
@@ -169,6 +196,179 @@ async function requestVideoMemory(path, init = {}) {
   return payload
 }
 
+async function maybeRequestVideoMemory(path, init = {}) {
+  try {
+    return { ok: true, payload: await requestVideoMemory(path, init) }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function waitForVideoMemory(timeoutMs = 25000) {
+  const startedAt = Date.now()
+  let lastError = ''
+  while (Date.now() - startedAt < timeoutMs) {
+    const health = await maybeRequestVideoMemory('/api/health')
+    if (health.ok) return { ok: true, payload: health.payload }
+    lastError = health.error
+    await sleep(500)
+  }
+  return { ok: false, error: lastError || `Timed out waiting for ${BASE_URL}/api/health` }
+}
+
+function chooseLocalServerCommand() {
+  const venvPython = join(REPO_ROOT, '.venv', 'bin', 'python')
+  if (existsSync(venvPython)) {
+    return { command: venvPython, args: ['flask_app/app.py'], label: '.venv/bin/python flask_app/app.py' }
+  }
+  return { command: 'uv', args: ['run', 'flask_app/app.py'], label: 'uv run flask_app/app.py' }
+}
+
+async function ensureLocalVideoMemoryServer() {
+  const health = await maybeRequestVideoMemory('/api/health')
+  if (health.ok) {
+    return { started: false, ready: true, base_url: BASE_URL, health: health.payload }
+  }
+  if (!existsSync(join(REPO_ROOT, 'flask_app', 'app.py'))) {
+    return {
+      started: false,
+      ready: false,
+      base_url: BASE_URL,
+      error: `Cannot start VideoMemory because flask_app/app.py is missing under ${REPO_ROOT}`,
+    }
+  }
+  const server = chooseLocalServerCommand()
+  const logPath = join(homedir(), '.videomemory', 'claude', 'videomemory-server.log')
+  mkdirSync(dirname(logPath), { recursive: true })
+  const child = spawn(server.command, server.args, {
+    cwd: REPO_ROOT,
+    detached: true,
+    stdio: ['ignore', 'ignore', 'ignore'],
+    env: process.env,
+  })
+  child.unref()
+  const ready = await waitForVideoMemory()
+  return {
+    started: true,
+    ready: ready.ok,
+    base_url: BASE_URL,
+    command: server.label,
+    pid: child.pid || 0,
+    log_path: logPath,
+    ...(ready.ok ? { health: ready.payload } : { error: ready.error }),
+  }
+}
+
+async function configureVideoMemoryWebhook() {
+  const webhookUrl = `http://${HOST}:${PORT}/videomemory-event`
+  await requestVideoMemory('/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_URL', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: webhookUrl }),
+  })
+  await requestVideoMemory('/api/settings/VIDEOMEMORY_SELF_BASE_URL', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: BASE_URL }),
+  })
+  if (!TOKEN) {
+    await requestVideoMemory('/api/settings/VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: '' }),
+    })
+  }
+  return { configured: true, webhook_url: webhookUrl, token_required: Boolean(TOKEN) }
+}
+
+async function openBrowserCameraBridge(cameraId = 'facetime') {
+  const safeCameraId = cleanText(cameraId) || 'facetime'
+  const bridgeUrl = `${BASE_URL}/browser-camera/${encodeURIComponent(safeCameraId)}`
+  if (process.platform !== 'darwin') {
+    return { opened: false, url: bridgeUrl, reason: 'automatic browser opening is only implemented on macOS' }
+  }
+  try {
+    const child = spawn('open', [bridgeUrl], { detached: true, stdio: 'ignore' })
+    child.unref()
+    return { opened: true, url: bridgeUrl }
+  } catch (error) {
+    return { opened: false, url: bridgeUrl, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function setupLocalVideoMemory(args = {}) {
+  const cameraId = cleanText(args.camera_id) || 'facetime'
+  const ioId = cleanText(args.io_id) || `browser_${cameraId}`
+  const server = args.start_server === false
+    ? { started: false, ready: false, skipped: true, base_url: BASE_URL }
+    : await ensureLocalVideoMemoryServer()
+  if (!server.ready) {
+    return { status: 'not_ready', server, next: server.error || 'Start VideoMemory and retry setup.' }
+  }
+
+  const webhook = args.configure_webhook === false
+    ? { configured: false, skipped: true }
+    : await configureVideoMemoryWebhook()
+  const camera = args.open_camera === false
+    ? { opened: false, skipped: true, url: `${BASE_URL}/browser-camera/${encodeURIComponent(cameraId)}` }
+    : await openBrowserCameraBridge(cameraId)
+  const devices = await maybeRequestVideoMemory('/api/devices')
+  const readiness = await getDeviceReadiness(ioId)
+
+  return {
+    status: readiness.ready ? 'ready' : 'needs_camera',
+    server,
+    webhook,
+    camera,
+    devices: devices.ok ? devices.payload : { error: devices.error },
+    readiness,
+    recommended_io_id: ioId,
+    next: readiness.ready
+      ? 'Create the requested monitor.'
+      : 'Grant camera permission in the opened browser tab and keep it open so VideoMemory receives fresh frames.',
+  }
+}
+
+async function getDeviceReadiness(ioId) {
+  const normalizedIoId = cleanText(ioId) || '0'
+  const readiness = await maybeRequestVideoMemory(`/api/device/${encodeURIComponent(normalizedIoId)}/readiness`)
+  if (readiness.ok) {
+    return normalizeReadinessPayload(readiness.payload)
+  }
+
+  const debugStatus = await maybeRequestVideoMemory(
+    `/api/device/${encodeURIComponent(normalizedIoId)}/debug/semantic-preview/status`,
+  )
+  if (!debugStatus.ok) {
+    return normalizeReadinessPayload({
+      status: 'unknown',
+      ready: false,
+      io_id: normalizedIoId,
+      warnings: [
+        `Could not read device readiness: ${readiness.error}`,
+        `Could not read debug status: ${debugStatus.error}`,
+      ],
+    })
+  }
+  const payload = debugStatus.payload || {}
+  return normalizeReadinessPayload({
+    status: payload.has_frame ? 'ready' : 'not_ready',
+    ready: Boolean(payload.has_frame),
+    io_id: normalizedIoId,
+    ingestor: {
+      exists: Boolean(payload.has_ingestor),
+      running: Boolean(payload.running),
+      has_frame: Boolean(payload.has_frame),
+      frame_age_ms: payload.frame_age_ms ?? null,
+    },
+    warnings: payload.has_frame ? [] : ['Device has no current frame. Camera permission or stream setup may be required.'],
+  })
+}
+
 function logReply(entry) {
   mkdirSync(STATE_DIR, { recursive: true })
   writeFileSync(REPLY_LOG, `${JSON.stringify(entry)}\n`, { flag: 'a' })
@@ -186,7 +386,10 @@ const mcp = new Server(
       'They are camera monitor task updates, not ordinary user prompts.',
       'Use the observation and task fields to decide whether the requested visual trigger happened.',
       'If the event asks for a user-visible alert during testing, call mcp__videomemory__reply with a concise message.',
+      'When the user asks to download, install, set up, or use VideoMemory, call mcp__videomemory__setup_local first.',
       'When the user asks to start watching for a visual condition, call mcp__videomemory__create_monitor.',
+      'Use monitor_type "binary" for simple local true/false done conditions such as person visible, phone visible, or door open.',
+      'After creating a monitor, inspect the returned readiness. If readiness.ready is false, report the blocker instead of saying the monitor is fully armed.',
       'Do not create polling loops after a monitor event.',
     ].join(' '),
   },
@@ -194,6 +397,20 @@ const mcp = new Server(
 
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
+    {
+      name: 'setup_local',
+      description: 'Start/check local VideoMemory, wire this Claude channel as its webhook, and open the browser FaceTime camera bridge.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          camera_id: { type: 'string', description: 'Browser camera bridge id. Defaults to facetime.' },
+          io_id: { type: 'string', description: 'VideoMemory device id to inspect. Defaults to browser_<camera_id>.' },
+          start_server: { type: 'boolean', description: 'Start VideoMemory if not already running. Defaults to true.' },
+          configure_webhook: { type: 'boolean', description: 'Point VideoMemory webhooks at this Claude channel. Defaults to true.' },
+          open_camera: { type: 'boolean', description: 'Open the browser camera bridge. Defaults to true.' },
+        },
+      },
+    },
     {
       name: 'reply',
       description: 'Emit a user-visible reply on the VideoMemory channel test surface.',
@@ -237,6 +454,16 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'inspect_device',
+      description: 'Return machine-readable readiness for a VideoMemory device before or after monitor creation.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          io_id: { type: 'string', description: 'VideoMemory device io_id. Defaults to 0.' },
+        },
+      },
+    },
+    {
       name: 'create_monitor',
       description: 'Create a VideoMemory camera monitor task for a visual condition.',
       inputSchema: {
@@ -244,6 +471,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           task_description: { type: 'string', description: 'Natural-language visual condition to monitor.' },
           io_id: { type: 'string', description: 'VideoMemory device io_id. Defaults to 0.' },
+          monitor_type: {
+            type: 'string',
+            enum: ['general', 'binary'],
+            description: 'general uses the chunked VLM monitor; binary uses the local FastVLM true/false done monitor. Defaults to general.',
+          },
           semantic_filter_keywords: { type: 'string', description: 'Optional keywords for semantic frame filtering.' },
           bot_id: { type: 'string', description: 'Optional creator id. Defaults to claude.' },
           save_note_frames: { type: 'boolean', description: 'Save trigger frames. Defaults to true.' },
@@ -284,6 +516,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         broadcast('reply', entry)
         return { content: [{ type: 'text', text: `sent ${entry.id}` }] }
       }
+      case 'setup_local': {
+        const payload = await setupLocalVideoMemory(args)
+        return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
+      }
       case 'inspect_task': {
         const taskId = cleanText(args.task_id)
         if (!taskId) throw new Error('task_id is required')
@@ -300,22 +536,38 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const payload = await requestVideoMemory(`/api/tasks${suffix}`)
         return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
       }
+      case 'inspect_device': {
+        const payload = await getDeviceReadiness(cleanText(args.io_id) || '0')
+        return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
+      }
       case 'create_monitor': {
         const taskDescription = cleanText(args.task_description)
         if (!taskDescription) throw new Error('task_description is required')
+        const ioId = cleanText(args.io_id) || '0'
+        const monitorType = normalizeMonitorType(args.monitor_type)
         const payload = await requestVideoMemory('/api/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            io_id: cleanText(args.io_id) || '0',
+            io_id: ioId,
             task_description: taskDescription,
+            monitor_type: monitorType,
             bot_id: cleanText(args.bot_id) || 'claude',
             semantic_filter_keywords: cleanText(args.semantic_filter_keywords),
             save_note_frames: args.save_note_frames !== false,
             save_note_videos: args.save_note_videos !== false,
           }),
         })
-        return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
+        const readiness = await getDeviceReadiness(payload.io_id || ioId)
+        const response = {
+          ...payload,
+          monitor_type: payload.monitor_type || monitorType,
+          readiness,
+          warning: readiness.ready
+            ? ''
+            : `Monitor was created, but device is not ready: ${readiness.warnings.join(' ') || readiness.status}`,
+        }
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] }
       }
       case 'configure_channel_webhook': {
         const webhookUrl = cleanText(args.webhook_url) || `http://${HOST}:${PORT}/videomemory-event`

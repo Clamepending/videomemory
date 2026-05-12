@@ -1,16 +1,27 @@
-# OpenClaw VideoMemory Package
+# VideoMemory npm Package
 
 This directory now contains the npm package published as `@clamepending/videomemory`.
 
 What the package does:
-- declares a first-class OpenClaw plugin via `openclaw.plugin.json`
-- exposes OpenClaw tools: `videomemory_onboard`, `videomemory_relaunch`, and `videomemory_status`
-- exposes OpenClaw commands: `/videomemory-onboard`, `/videomemory-relaunch`, and `/videomemory-status`
-- ships a hook pack entry for `openclaw hooks install @clamepending/videomemory`
 - exposes the `videomemory` host CLI plus the backward-compatible `videomemory-openclaw` alias
+- provides `videomemory claude`, the one-command Claude Code setup/launch path
 - runs the maintained VideoMemory onboarding and relaunch scripts bundled inside this npm package version
+- still declares the legacy OpenClaw plugin/hook pack for existing OpenClaw users
 
-Preferred install:
+Claude Code flow:
+
+```bash
+videomemory claude
+```
+
+The Claude flow starts or checks VideoMemory, installs/checks the repo channel
+package, configures VideoMemory's webhook, opens the browser camera bridge on
+macOS, checks Claude auth, launches through Claude Code's approved channel path,
+allowlists the VideoMemory MCP tools used for wakeup replies, and exposes MCP
+tools so Claude can create monitor tasks itself. Use `videomemory claude launch
+--dev` only for local channel development.
+
+Legacy OpenClaw install:
 
 ```bash
 openclaw plugins install @clamepending/videomemory
@@ -38,19 +49,10 @@ Current source-of-truth split:
 - the current OpenClaw bridge files still live in the repo under `docs/` and `deploy/openclaw-real-home/`
 - the ClawHub skill lives separately under `clawhub-skill/videomemory/`
 
-Fallback CLI flow:
+Legacy OpenClaw CLI flow:
 1. `videomemory-openclaw onboard --safe --explain`
 2. `videomemory-openclaw onboard --safe`
 3. The CLI bootstraps VideoMemory without Docker and returns the UI link
-
-Claude Code channel flow:
-1. `videomemory claude install`
-2. `videomemory claude doctor`
-3. `videomemory claude launch`
-
-The Claude flow installs the repo channel package, configures VideoMemory's
-webhook when the server is reachable, hides the development-channel launch
-flags, and exposes MCP tools so Claude can create monitor tasks itself.
 
 Safe mode:
 - disables automatic Tailscale setup

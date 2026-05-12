@@ -2,7 +2,7 @@
 
 This repo now contains the pieces needed for the desired OpenClaw setup flow:
 
-- the first-class OpenClaw plugin / hook-pack / host CLI package at `openclaw-plugin/`
+- the first-class OpenClaw plugin / hook-pack / host CLI package at `videomemory-package/`
 - the ClawHub skill folder at `clawhub-skill/videomemory/`
 
 ## Why there are two artifacts
@@ -29,7 +29,7 @@ So the release flow is intentionally:
 Package root:
 
 ```bash
-cd openclaw-plugin
+cd videomemory-package
 ```
 
 Validate locally:
@@ -67,7 +67,7 @@ openclaw videomemory onboard --explain
 Package root:
 
 ```bash
-cd openclaw-plugin
+cd videomemory-package
 ```
 
 Publish package metadata:
@@ -80,7 +80,7 @@ clawhub package publish . \
   --version 0.1.9 \
   --source-repo Clamepending/videomemory \
   --source-ref main \
-  --source-path openclaw-plugin
+  --source-path videomemory-package
 ```
 
 ## Artifact 3: ClawHub skill
@@ -136,8 +136,8 @@ videomemory_status
 If plugin installation is unavailable, the skill falls back to:
 
 ```bash
-npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.5 --explain
-npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.5
+npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.6 --explain
+npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.6
 ```
 
 That command:
@@ -152,8 +152,8 @@ That command:
 - `npm pack`
 - `node cli.mjs onboard --help`
 - `node cli.mjs status --videomemory-base http://127.0.0.1:5050 --json`
-- `openclaw plugins install /path/to/openclaw-plugin`
-- `openclaw hooks install /path/to/openclaw-plugin`
+- `openclaw plugins install /path/to/videomemory-package`
+- `openclaw hooks install /path/to/videomemory-package`
 - `openclaw plugins install clamepending-videomemory-0.1.9.tgz`
 - `openclaw hooks install clamepending-videomemory-0.1.9.tgz`
 - `openclaw plugins doctor`

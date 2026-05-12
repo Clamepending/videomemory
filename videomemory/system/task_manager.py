@@ -12,7 +12,15 @@ from .stream_ingestors.semantic_filter import (
     DEFAULT_SEMANTIC_FILTER_THRESHOLD,
 )
 from .io_manager import IOmanager
-from .task_types import NoteEntry, Task, STATUS_ACTIVE, STATUS_DONE, STATUS_TERMINATED
+from .task_types import (
+    MONITOR_TYPE_GENERAL,
+    SUPPORTED_MONITOR_TYPES,
+    NoteEntry,
+    Task,
+    STATUS_ACTIVE,
+    STATUS_DONE,
+    STATUS_TERMINATED,
+)
 from .database import TaskDatabase
 from .model_providers import BaseModelProvider, get_VLM_provider
 logger = logging.getLogger('TaskManager')
@@ -95,6 +103,7 @@ class TaskManager:
                     io_id=t['io_id'],
                     status=t.get('status', STATUS_ACTIVE),
                     bot_id=t.get('bot_id'),
+                    monitor_type=t.get('monitor_type', MONITOR_TYPE_GENERAL),
                     save_note_frames=t.get('save_note_frames'),
                     save_note_videos=t.get('save_note_videos'),
                 )
@@ -466,6 +475,7 @@ class TaskManager:
         io_id: str,
         task_description: str,
         bot_id: Optional[str] = None,
+        monitor_type: str = MONITOR_TYPE_GENERAL,
         save_note_frames: Optional[bool] = None,
         save_note_videos: Optional[bool] = None,
         semantic_filter_config: Optional[Dict[str, Any]] = None,
@@ -476,6 +486,7 @@ class TaskManager:
             io_id: The unique identifier of the IO stream
             task_description: Description of the task to be performed
             bot_id: Optional identifier of the bot that created this task (for multi-bot / debug)
+            monitor_type: Monitoring engine to use: "general" for chunked VLM reasoning, "binary" for local done/not-done checks
             save_note_frames: Optional per-task override for saving note frames
             save_note_videos: Optional per-task override for saving note videos
             semantic_filter_config: Optional device-level semantic filter settings to apply before starting the task
@@ -516,6 +527,13 @@ class TaskManager:
                     "message": str(exc),
                 }
         
+        monitor_type = str(monitor_type or MONITOR_TYPE_GENERAL).strip().lower()
+        if monitor_type not in SUPPORTED_MONITOR_TYPES:
+            return {
+                "status": "error",
+                "message": f"monitor_type must be one of: {', '.join(sorted(SUPPORTED_MONITOR_TYPES))}",
+            }
+
         # Create task with sequential ID starting from 0
         task_id = str(self._task_counter)
         self._task_counter += 1
@@ -529,6 +547,7 @@ class TaskManager:
             done=False,
             io_id=io_id,
             bot_id=bot_id,
+            monitor_type=monitor_type,
             save_note_frames=save_note_frames,
             save_note_videos=save_note_videos,
         )
@@ -577,6 +596,7 @@ class TaskManager:
             "task_id": task_id,
             "io_id": io_id,
             "task_description": task_description,
+            "monitor_type": monitor_type,
         }
         if bot_id is not None:
             result["bot_id"] = bot_id

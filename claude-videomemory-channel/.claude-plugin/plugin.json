@@ -1,6 +1,6 @@
 {
-  "name": "videomemory-channel",
-  "description": "Claude Code channel that receives VideoMemory camera monitor events and pushes them into a running Claude session.",
+  "name": "videomemory",
+  "description": "Local camera monitoring for Claude Code. Ask Claude to watch a camera for a visual condition and wake up when it happens.",
   "version": "0.1.0",
   "author": {
     "name": "Mark"

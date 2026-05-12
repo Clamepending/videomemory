@@ -12,7 +12,40 @@ Supported inputs:
 - Android phone snapshot streams
 - Browser camera frames posted into VideoMemory
 
-## Quick Start
+## Quick Start: Claude Code
+
+Install the VideoMemory Claude plugin:
+
+```bash
+claude auth login
+claude plugin marketplace add https://github.com/Clamepending/videomemory
+claude plugin install videomemory@videomemory
+```
+
+Then ask Claude Code:
+
+```text
+Use VideoMemory to watch my pet dog from my FaceTime camera. Wake me when the dog is visible.
+```
+
+Claude will start/check VideoMemory, open the FaceTime browser camera bridge,
+ask you to grant camera permission if needed, create a fast binary monitor, and
+wake up when the visual condition is met. Keep the opened camera tab running
+while the monitor is active.
+
+For a different stream, ask naturally:
+
+```text
+Use VideoMemory to watch the RTSP stream at rtsp://... and tell me when a person enters.
+```
+
+Until the next public package release, local development can use:
+
+```bash
+node videomemory-package/cli.mjs claude --repo-dir "$PWD"
+```
+
+## Core Service Quick Start
 
 Run the core service:
 
@@ -104,67 +137,63 @@ The simulator uses the saved `VIDEOMEMORY_OPENCLAW_WEBHOOK_URL` by default; pass
 requires a bearer token, pass `--webhook-token` because the settings API masks
 saved secrets.
 
-## OpenClaw
-
-The maintained OpenClaw package is the easiest current end-to-end path for
-agent wakeups:
-
-```bash
-openclaw plugins install @clamepending/videomemory@0.1.9
-```
-
-Restart the OpenClaw gateway, then run:
-
-```text
-/videomemory-onboard
-```
-
-Fallback CLI:
-
-```bash
-npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.5 --explain
-npx -y @clamepending/videomemory@0.1.9 onboard --safe --repo-ref v0.1.5
-```
-
-Bundled local OpenClaw + VideoMemory stack:
-
-```bash
-ANTHROPIC_API_KEY=your_key_here \
-OPENCLAW_GATEWAY_TOKEN=choose-a-token \
-bash ./launch_openclaw_with_videomemory.sh
-```
-
-The launcher prints both the VideoMemory UI and the OpenClaw dashboard URL.
-
 ## Claude Code
 
-Claude Code wakeups use the experimental channel package in
-`claude-videomemory-channel/`. The published CLI hides the setup and launch
-flags:
+VideoMemory is meant to feel like a Claude Code capability, not a separate
+agent platform. From this checkout, the local path is:
 
 ```bash
-npm i -g @clamepending/videomemory@0.1.9
-videomemory claude install
-videomemory claude doctor
-videomemory claude launch
+node videomemory-package/cli.mjs claude --repo-dir "$PWD"
 ```
 
-Inside Claude, ask it to create a monitor, for example:
+After the npm package is republished, the same flow should be available as
+`videomemory claude`.
+
+The command starts or checks VideoMemory, installs/checks the channel package,
+wires the VideoMemory webhook to Claude, opens the browser camera bridge on
+macOS, checks Claude auth, and launches Claude Code with the VideoMemory
+channel and MCP tools enabled.
+
+If Claude auth is stale, run `claude auth login` once and rerun
+the command.
+
+With the Claude plugin installed, the target UX is natural language:
 
 ```text
-Watch the camera and tell me when a phone is visibly held up.
+Download VideoMemory and watch my pet dog from my FaceTime camera.
+```
+
+Claude should call VideoMemory setup, open the FaceTime browser camera bridge,
+ask you to grant camera permission if needed, then create a binary monitor for
+the visual condition.
+
+For direct installation from this repo as a Claude Code plugin:
+
+```bash
+claude plugin marketplace add https://github.com/Clamepending/videomemory
+claude plugin install videomemory@videomemory
+```
+
+Then in Claude:
+
+```text
+Use VideoMemory to watch my pet dog from my FaceTime camera.
 ```
 
 The channel exposes MCP tools for device discovery, monitor creation, task
 inspection, and webhook configuration. If you are developing from the repo, the
-equivalent manual launch is:
+equivalent manual launch after `videomemory claude install` is:
 
 ```bash
 CLAUDE_PLUGIN_ROOT=$PWD/claude-videomemory-channel \
 claude \
   --mcp-config claude-videomemory-channel/.mcp.json \
-  --dangerously-load-development-channels server:videomemory
+  --channels server:videomemory \
+  --allowedTools mcp__videomemory__setup_local,mcp__videomemory__reply,mcp__videomemory__inspect_task,mcp__videomemory__inspect_device,mcp__videomemory__list_devices,mcp__videomemory__list_monitors,mcp__videomemory__create_monitor,mcp__videomemory__configure_channel_webhook
 ```
+
+Use `videomemory claude launch --dev` only while developing the local channel
+package; it will trigger Claude Code's local-development channel confirmation.
 
 Then point VideoMemory at the channel:
 
@@ -196,9 +225,10 @@ Useful endpoints:
 - `GET /api/devices`
 - `POST /api/device/{io_id}/capture`
 - `GET /api/device/{io_id}/preview`
+- `GET /api/device/{io_id}/readiness`
 - `POST /api/caption_frame`
 - `GET /api/tasks`
-- `POST /api/tasks`
+- `POST /api/tasks` (`monitor_type` can be `general` or `binary`)
 - `GET /api/task/{task_id}`
 - `PUT /api/task/{task_id}`
 - `POST /api/task/{task_id}/stop`
@@ -211,16 +241,26 @@ More integration detail:
 
 - [AGENTS.md](AGENTS.md)
 - [docs/agent-integration-contract.md](docs/agent-integration-contract.md)
-- [docs/openclaw-skill.md](docs/openclaw-skill.md)
 - [docs/claude-code-channel.md](docs/claude-code-channel.md)
+- [docs/openclaw-skill.md](docs/openclaw-skill.md) for legacy OpenClaw integration
 
 ## Release
 
 Current release line:
 
-- Core app: `0.1.5`
-- OpenClaw package: `@clamepending/videomemory@0.1.9`
-- App tag expected by installers: `v0.1.5`
+- Core app: `0.1.6`
+- npm package: `@clamepending/videomemory@0.1.9`
+- App tag expected by installers: `v0.1.6`
+
+## Legacy OpenClaw
+
+The npm package still includes an OpenClaw integration for existing users:
+
+```bash
+openclaw plugins install @clamepending/videomemory@0.1.9
+```
+
+Restart the OpenClaw gateway, then run `/videomemory-onboard`.
 
 Release checklist:
 

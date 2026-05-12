@@ -25,11 +25,21 @@ Use `VIDEOMEMORY_CLAUDE_CHANNEL_TOKEN` if the endpoint needs a bearer token.
 
 When the user asks Claude to watch for something on camera:
 
-1. Use `mcp__videomemory__list_devices` to choose the target `io_id`.
-2. Use `mcp__videomemory__create_monitor` with only the visual condition in
+1. Call `mcp__videomemory__setup_local` if the user asked to install, download,
+   set up, or use VideoMemory and setup has not already been confirmed.
+2. Use `mcp__videomemory__list_devices` to choose the target `io_id`.
+3. Use `mcp__videomemory__inspect_device` if you need to verify camera/frame
+   readiness before creating the monitor.
+4. Use `mcp__videomemory__create_monitor` with only the visual condition in
    `task_description`.
-3. Keep any user-facing follow-up action in your own response plan.
-4. Report the created task id and stop; VideoMemory owns the long-running watch.
+5. For simple true/false conditions such as "a person is visible", "the phone is
+   visible", or "the door is open", set `monitor_type` to `binary` so VideoMemory
+   uses the local FastVLM done monitor.
+6. Read the `readiness` object returned by `create_monitor`. If
+   `readiness.ready` is false, report the blocker instead of saying the monitor
+   is fully armed.
+7. Keep any user-facing follow-up action in your own response plan.
+8. Report the created task id and stop; VideoMemory owns the long-running watch.
 
 If events are not arriving, call `mcp__videomemory__configure_channel_webhook`
 and then retry a synthetic event from the host with `videomemory claude test-event`.

@@ -39,6 +39,7 @@ from videomemory.system.model_providers.factory import (
 )
 from videomemory.system.database import TaskDatabase, get_default_data_dir
 from videomemory.system.openclaw_integration import OpenClawWebhookDispatcher
+from videomemory.system.task_types import MONITOR_TYPE_BINARY, MONITOR_TYPE_GENERAL, SUPPORTED_MONITOR_TYPES
 from videomemory.system.usage import build_usage_dashboard_payload
 from videomemory.system.update_check import DEFAULT_UPDATE_MANIFEST_URL, build_update_payload
 import cv2
@@ -592,6 +593,7 @@ def create_task():
         io_id = data.get('io_id', '').strip()
         task_description = data.get('task_description', '').strip()
         bot_id = data.get('bot_id', '').strip() or None
+        monitor_type = _parse_monitor_type(data.get('monitor_type'))
         save_note_frames = _coerce_optional_boolean_request_value(data.get('save_note_frames'))
         save_note_videos = _coerce_optional_boolean_request_value(data.get('save_note_videos'))
         semantic_filter_config, semantic_filter_error = _parse_task_semantic_filter_config(data)
@@ -600,18 +602,22 @@ def create_task():
             return jsonify({'status': 'error', 'error': 'io_id is required'}), 400
         if not task_description:
             return jsonify({'status': 'error', 'error': 'task_description is required'}), 400
+        if monitor_type is None:
+            return jsonify({'status': 'error', 'error': 'monitor_type must be general or binary'}), 400
         if semantic_filter_error:
             return jsonify({'status': 'error', 'error': semantic_filter_error}), 400
 
-        provider_error = _build_task_creation_model_error()
-        if provider_error is not None:
-            body, status_code = provider_error
-            return jsonify(body), status_code
+        if monitor_type == MONITOR_TYPE_GENERAL:
+            provider_error = _build_task_creation_model_error()
+            if provider_error is not None:
+                body, status_code = provider_error
+                return jsonify(body), status_code
         
         result = videomemory.tools.tasks.add_task(
             io_id,
             task_description,
             bot_id=bot_id,
+            monitor_type=monitor_type,
             save_note_frames=save_note_frames,
             save_note_videos=save_note_videos,
             semantic_filter_config=semantic_filter_config,
@@ -950,22 +956,126 @@ def browser_camera_latest(camera_id):
 
 @app.route('/api/browser-camera/<camera_id>/status', methods=['GET'])
 def browser_camera_status(camera_id):
+    return jsonify(_get_browser_camera_status_payload(camera_id))
+
+
+def _get_browser_camera_status_payload(camera_id: str) -> Dict[str, Any]:
     safe_id = _safe_browser_camera_id(camera_id)
     with _browser_camera_lock:
         payload = dict(_browser_camera_frames.get(safe_id) or {})
     timestamp = payload.get('timestamp')
     age_ms = None if timestamp is None else max(0.0, (time.time() - float(timestamp)) * 1000.0)
-    return jsonify({
+    has_frame = bool(payload)
+    stale = bool(timestamp is None or (time.time() - float(timestamp)) > _BROWSER_CAMERA_STALE_SECONDS)
+    return {
         'camera_id': safe_id,
         'io_id': f"browser_{safe_id}",
-        'has_frame': bool(payload),
+        'has_frame': has_frame,
+        'has_fresh_frame': bool(has_frame and not stale),
+        'stale': stale,
         'frame_age_ms': age_ms,
         'width': payload.get('width'),
         'height': payload.get('height'),
         'mean': payload.get('mean'),
         'std': payload.get('std'),
         'snapshot_url': url_for('browser_camera_latest', camera_id=safe_id, _external=True),
-    })
+    }
+
+
+def _get_device_readiness_payload(io_id: str) -> Dict[str, Any]:
+    device_info = io_manager.get_stream_info(io_id)
+    ingestor = (
+        task_manager.peek_ingestor(io_id)
+        if hasattr(task_manager, 'peek_ingestor')
+        else task_manager.get_ingestor(io_id)
+    )
+    latest_frame = ingestor.get_latest_frame() if ingestor is not None and hasattr(ingestor, 'get_latest_frame') else None
+    latest_frame_timestamp = (
+        ingestor.get_latest_frame_timestamp()
+        if ingestor is not None and hasattr(ingestor, 'get_latest_frame_timestamp')
+        else None
+    )
+    frame_age_ms = (
+        max(0.0, (time.time() - float(latest_frame_timestamp)) * 1000.0)
+        if latest_frame_timestamp is not None
+        else None
+    )
+    running = bool(ingestor and getattr(ingestor, '_running', False))
+    has_frame = bool(latest_frame is not None and getattr(latest_frame, 'size', 0) > 0)
+    warnings: List[str] = []
+    browser_camera = None
+
+    if io_id.startswith('browser_'):
+        browser_camera_id = io_id.removeprefix('browser_')
+        browser_camera = _get_browser_camera_status_payload(browser_camera_id)
+        if not browser_camera.get('has_fresh_frame'):
+            warnings.append(
+                "Browser camera source has no fresh frames. Open the browser camera bridge and grant camera permission."
+            )
+
+    if device_info is None:
+        warnings.append("Device is not registered. Call GET /api/devices and choose a current io_id.")
+    elif not running:
+        warnings.append("No ingestor is currently running for this device.")
+
+    if running and not has_frame:
+        warnings.append("Ingestor is running but has not captured a frame yet.")
+
+    source = str((device_info or {}).get('source') or '')
+    if source == 'local' and not has_frame:
+        warnings.append(
+            "Local camera has no frames. On macOS, grant Camera permission to Terminal, Python, or the browser bridge."
+        )
+
+    binary_status = (
+        ingestor.get_binary_monitor_status()
+        if ingestor is not None and hasattr(ingestor, 'get_binary_monitor_status')
+        else None
+    )
+    semantic_status = (
+        ingestor.get_semantic_filter_status()
+        if ingestor is not None and hasattr(ingestor, 'get_semantic_filter_status')
+        else None
+    )
+    ready = bool(device_info is not None and running and has_frame)
+    if browser_camera is not None:
+        ready = ready and bool(browser_camera.get('has_fresh_frame'))
+
+    return {
+        'status': 'ready' if ready else 'not_ready',
+        'ready': ready,
+        'io_id': io_id,
+        'device_exists': device_info is not None,
+        'device': {
+            'io_id': (device_info or {}).get('io_id', io_id),
+            'name': (device_info or {}).get('name', ''),
+            'source': (device_info or {}).get('source', ''),
+            'category': (device_info or {}).get('category', ''),
+            'url': (device_info or {}).get('url', ''),
+        },
+        'ingestor': {
+            'exists': ingestor is not None,
+            'running': running,
+            'has_frame': has_frame,
+            'frame_age_ms': frame_age_ms,
+        },
+        'browser_camera': browser_camera,
+        'binary_monitor': binary_status,
+        'semantic_filter': semantic_status,
+        'warnings': warnings,
+    }
+
+
+@app.route('/api/device/<io_id>/readiness', methods=['GET'])
+def device_readiness(io_id):
+    """Return monitor readiness for external agents before/after creating a task."""
+    try:
+        payload = _get_device_readiness_payload(io_id)
+        status_code = 200 if payload.get('device_exists') else 404
+        return jsonify(payload), status_code
+    except Exception as e:
+        flask_logger.error("Error reading device readiness for %s: %s", io_id, e, exc_info=True)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
 @app.route('/api/browser-camera/<camera_id>/register', methods=['POST'])
@@ -1745,6 +1855,7 @@ def ingestor_semantic_preview_status(io_id):
                 'chunk_queue': _default_chunk_queue_status(),
                 'semantic_frame_queue': _default_semantic_frame_queue_status(),
                 'semantic_filter': task_manager.get_ingestor_semantic_filter_config(io_id),
+                'binary_monitor': None,
             }), 200
 
         latest_frame = ingestor.get_latest_frame() if hasattr(ingestor, 'get_latest_frame') else None
@@ -1792,6 +1903,11 @@ def ingestor_semantic_preview_status(io_id):
             if hasattr(ingestor, 'get_semantic_filter_status')
             else None
         )
+        binary_status = (
+            ingestor.get_binary_monitor_status()
+            if hasattr(ingestor, 'get_binary_monitor_status')
+            else None
+        )
         semantic_result_age_ms = None
         if semantic_status and semantic_status.get('latest_evaluation_timestamp') is not None:
             semantic_result_age_ms = max(
@@ -1813,6 +1929,7 @@ def ingestor_semantic_preview_status(io_id):
             'chunk_queue': ingestor.get_chunk_queue_status() if hasattr(ingestor, 'get_chunk_queue_status') else None,
             'semantic_frame_queue': ingestor.get_semantic_frame_queue_status() if hasattr(ingestor, 'get_semantic_frame_queue_status') else None,
             'semantic_filter': semantic_status,
+            'binary_monitor': binary_status,
         })
     except Exception as e:
         flask_logger.error(f"Error reading semantic preview status for {io_id}: {e}", exc_info=True)
@@ -2700,6 +2817,40 @@ def openapi_spec():
                     },
                 }
             },
+            "/api/device/{io_id}/readiness": {
+                "get": {
+                    "operationId": "get_device_readiness",
+                    "summary": "Check whether a device is ready for monitoring",
+                    "description": (
+                        "Returns a machine-readable readiness payload for external agents. "
+                        "Use this before or after creating a monitor to distinguish a created "
+                        "task from a usable camera feed."
+                    ),
+                    "parameters": [{
+                        "name": "io_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                        "description": "Device identifier from GET /api/devices",
+                    }],
+                    "responses": {
+                        "200": {
+                            "description": "Device exists; readiness may be ready or not_ready",
+                            "content": {"application/json": {"schema": {
+                                "type": "object",
+                                "properties": {
+                                    "status": {"type": "string", "enum": ["ready", "not_ready"]},
+                                    "ready": {"type": "boolean"},
+                                    "io_id": {"type": "string"},
+                                    "device_exists": {"type": "boolean"},
+                                    "warnings": {"type": "array", "items": {"type": "string"}},
+                                },
+                            }}},
+                        },
+                        "404": {"description": "Device is not registered"},
+                    },
+                }
+            },
             "/api/device/{io_id}/capture": {
                 "post": {
                     "operationId": "capture_device_frame",
@@ -2846,6 +2997,12 @@ def openapi_spec():
                             "properties": {
                                 "io_id": {"type": "string", "description": "Device identifier from GET /api/devices"},
                                 "task_description": {"type": "string", "description": "What to monitor for, e.g. 'Count the number of people entering the room'"},
+                                "monitor_type": {
+                                    "type": "string",
+                                    "enum": ["general", "binary"],
+                                    "default": "general",
+                                    "description": "general uses the chunked VLM ingestor; binary uses a local done/not-done monitor and does not require a cloud model key.",
+                                },
                                 "bot_id": {"type": "string", "description": "Optional identifier of the bot that created this task (multi-bot / debug)."},
                                 "save_note_frames": {"type": "boolean", "description": "Optional per-task override for saving a frame with each task note."},
                                 "save_note_videos": {"type": "boolean", "description": "Optional per-task override for saving an evidence clip with each task note."},
@@ -3009,6 +3166,7 @@ def openapi_spec():
                         "task_id": {"type": "string"},
                         "task_desc": {"type": "string"},
                         "io_id": {"type": "string"},
+                        "monitor_type": {"type": "string", "enum": ["general", "binary"]},
                         "status": {"type": "string", "enum": ["active", "done", "terminated"]},
                         "done": {"type": "boolean"},
                         "bot_id": {"type": "string", "description": "Optional bot that created this task (multi-bot / debug)."},
@@ -3059,6 +3217,11 @@ _KNOWN_SETTINGS = [
     'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES',
     'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE',
     'VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE',
+    'VIDEOMEMORY_FASTVLM_MODEL',
+    'VIDEOMEMORY_FASTVLM_VISION_SIZE',
+    'VIDEOMEMORY_FASTVLM_THRESHOLD',
+    'VIDEOMEMORY_FASTVLM_REQUIRED_HITS',
+    'VIDEOMEMORY_FASTVLM_WINDOW',
     'LOCAL_MODEL_BASE_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
@@ -3252,6 +3415,14 @@ def _coerce_semantic_keywords(value) -> str:
     if isinstance(value, list):
         return ", ".join(str(item).strip() for item in value if str(item).strip())
     return str(value).strip()
+
+
+def _parse_monitor_type(value) -> Optional[str]:
+    """Normalize the requested monitor mode for task creation."""
+    monitor_type = str(value or MONITOR_TYPE_GENERAL).strip().lower()
+    if monitor_type not in SUPPORTED_MONITOR_TYPES:
+        return None
+    return monitor_type
 
 
 def _parse_task_semantic_filter_config(data: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], Optional[str]]:

@@ -67,6 +67,7 @@ class TaskCreationApiTests(unittest.TestCase):
             "net0",
             "Watch for a person entering the room",
             bot_id=None,
+            monitor_type="general",
             save_note_frames=None,
             save_note_videos=None,
             semantic_filter_config={
@@ -113,6 +114,7 @@ class TaskCreationApiTests(unittest.TestCase):
             "net0",
             "Watch for a person entering the room",
             bot_id=None,
+            monitor_type="general",
             save_note_frames=False,
             save_note_videos=True,
             semantic_filter_config={
@@ -126,6 +128,37 @@ class TaskCreationApiTests(unittest.TestCase):
                 "ensemble": "off",
             },
         )
+
+    def test_create_binary_monitor_skips_cloud_model_key_requirement(self):
+        mock_db = MagicMock()
+        mock_db.get_setting.return_value = None
+        add_result = {
+            "status": "success",
+            "task_id": "0",
+            "io_id": "net0",
+            "task_description": "a red marker is visible",
+            "monitor_type": "binary",
+        }
+
+        with (
+            patch.object(app_module, "db", mock_db),
+            patch.object(app_module.videomemory.tools.tasks, "add_task", return_value=add_result) as mock_add_task,
+            patch.dict(os.environ, {"VIDEO_INGESTOR_MODEL": "claude-sonnet-4-6"}, clear=False),
+        ):
+            resp = self.client.post(
+                "/api/tasks",
+                json={
+                    "io_id": "net0",
+                    "task_description": "a red marker is visible",
+                    "monitor_type": "binary",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 201)
+        body = resp.get_json()
+        self.assertEqual(body.get("monitor_type"), "binary")
+        mock_add_task.assert_called_once()
+        self.assertEqual(mock_add_task.call_args.kwargs["monitor_type"], "binary")
 
 
 if __name__ == "__main__":

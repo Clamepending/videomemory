@@ -5,17 +5,18 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PLUGIN_ROOT = REPO_ROOT / "openclaw-plugin"
+PACKAGE_ROOT = REPO_ROOT / "videomemory-package"
+CLAUDE_PLUGIN_ROOT = REPO_ROOT / "claude-videomemory-channel"
 MARKETPLACE_SKILL = REPO_ROOT / "clawhub-skill" / "videomemory" / "SKILL.md"
 
 
 class OpenClawPackageScaffoldTests(unittest.TestCase):
     def test_package_json_exposes_openclaw_artifacts(self):
-        package = json.loads((PLUGIN_ROOT / "package.json").read_text())
+        package = json.loads((PACKAGE_ROOT / "package.json").read_text())
 
         self.assertIn("bin", package)
         for relative_path in package["bin"].values():
-            self.assertTrue((PLUGIN_ROOT / relative_path).exists(), relative_path)
+            self.assertTrue((PACKAGE_ROOT / relative_path).exists(), relative_path)
         self.assertIn("openclaw", package)
         self.assertIn("./index.mjs", package["openclaw"]["extensions"])
         self.assertIn("./hooks/videomemory-startup", package["openclaw"]["hooks"])
@@ -24,14 +25,14 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
         self.assertEqual(package["name"], "@clamepending/videomemory")
 
     def test_package_files_include_plugin_runtime_assets(self):
-        package = json.loads((PLUGIN_ROOT / "package.json").read_text())
+        package = json.loads((PACKAGE_ROOT / "package.json").read_text())
         packaged = set(package["files"])
         self.assertEqual(packaged, {"README.md", "bundled", "cli.mjs", "hooks", "index.mjs", "openclaw.plugin.json", "skills", "src"})
-        self.assertTrue((PLUGIN_ROOT / "openclaw.plugin.json").exists())
+        self.assertTrue((PACKAGE_ROOT / "openclaw.plugin.json").exists())
         self.assertTrue(MARKETPLACE_SKILL.exists())
 
     def test_package_runs_bundled_scripts_instead_of_remote_main(self):
-        shared = (PLUGIN_ROOT / "src" / "shared.mjs").read_text()
+        shared = (PACKAGE_ROOT / "src" / "shared.mjs").read_text()
         self.assertIn("SCRIPT_PATHS", shared)
         self.assertIn("bundled", shared)
         self.assertNotIn("raw.githubusercontent.com", shared)
@@ -44,13 +45,13 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
         for source, bundled in script_pairs:
             self.assertEqual(
                 (REPO_ROOT / source).read_text(),
-                (PLUGIN_ROOT / bundled).read_text(),
+                (PACKAGE_ROOT / bundled).read_text(),
                 bundled,
             )
 
     def test_marketplace_skill_uses_published_cli(self):
         skill_text = MARKETPLACE_SKILL.read_text()
-        package_version = json.loads((PLUGIN_ROOT / "package.json").read_text())["version"]
+        package_version = json.loads((PACKAGE_ROOT / "package.json").read_text())["version"]
         self.assertIn('"emoji":"camera"', skill_text)
         self.assertNotIn('"package"', skill_text)
         self.assertNotIn('"bins"', skill_text)
@@ -70,7 +71,7 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
         result = subprocess.run(
             [
                 "node",
-                str(PLUGIN_ROOT / "cli.mjs"),
+                str(PACKAGE_ROOT / "cli.mjs"),
                 "onboard",
                 "--safe",
                 "--repo-ref",
@@ -86,6 +87,27 @@ class OpenClawPackageScaffoldTests(unittest.TestCase):
         self.assertIn("Will not copy model provider API keys", result.stdout)
         self.assertIn("Will not install or configure Tailscale", result.stdout)
         self.assertIn("No changes were made", result.stdout)
+
+
+class ClaudePluginScaffoldTests(unittest.TestCase):
+    def test_claude_plugin_is_named_videomemory(self):
+        plugin = json.loads((CLAUDE_PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())
+        self.assertEqual(plugin["name"], "videomemory")
+        self.assertIn("camera", plugin["description"].lower())
+
+    def test_claude_marketplace_exposes_videomemory_plugin(self):
+        marketplace = json.loads((REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text())
+        self.assertEqual(marketplace["name"], "videomemory")
+        plugin_names = {entry["name"] for entry in marketplace["plugins"]}
+        self.assertIn("videomemory", plugin_names)
+        source = next(entry["source"] for entry in marketplace["plugins"] if entry["name"] == "videomemory")
+        self.assertEqual(source, "./claude-videomemory-channel")
+
+    def test_claude_skill_supports_natural_language_setup(self):
+        skill = (CLAUDE_PLUGIN_ROOT / "skills" / "videomemory" / "SKILL.md").read_text()
+        self.assertIn("download VideoMemory", skill)
+        self.assertIn("mcp__videomemory__setup_local", skill)
+        self.assertIn("mcp__videomemory__create_monitor", skill)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ import httpx
 import numpy as np
 from dotenv import load_dotenv
 
-from ..task_types import NoteEntry, Task
+from ..task_types import MONITOR_TYPE_BINARY, MONITOR_TYPE_GENERAL, NoteEntry, Task
 from ..model_providers import BaseModelProvider, get_VLM_provider
 from ..io_manager.url_utils import is_snapshot_url
 from .prompting import (
@@ -42,6 +42,7 @@ from .frame_utils import (
     normalize_frames,
     subsample_frames,
 )
+from .binary_monitor import BinaryFrameMonitor, BinaryMonitorDecision
 from .semantic_filter import DEFAULT_SEMANTIC_FILTER_MODEL, SemanticFilterResult, SemanticFrameFilter, coerce_config
 
 # Load environment variables
@@ -106,6 +107,8 @@ class VideoStreamIngestor:
         self._chunk_queue: Optional[asyncio.Queue] = None
         self._semantic_processor_task: Optional[asyncio.Task] = None
         self._semantic_frame_queue: Optional[asyncio.Queue] = None
+        self._binary_processor_task: Optional[asyncio.Task] = None
+        self._binary_frame_queue: Optional[asyncio.Queue] = None
         self._camera: Optional[Any] = None  # Will hold cv2.VideoCapture when started
         self._snapshot_client: Optional[httpx.Client] = None
         self._latest_frame: Optional[Any] = None  # Store latest frame for debugging
@@ -123,6 +126,7 @@ class VideoStreamIngestor:
         self._queued_chunk_frame_counts: deque = deque()
         self._queued_semantic_frame_created_at: deque = deque()
         self._semantic_queue_frames_dropped: int = 0
+        self._binary_queue_frames_dropped: int = 0
 
         evidence_clip_fps = float(os.getenv("VIDEOMEMORY_NOTE_VIDEO_FPS", self.DEFAULT_EVIDENCE_CLIP_FPS))
         evidence_clip_preroll_seconds = float(
@@ -169,6 +173,12 @@ class VideoStreamIngestor:
             os.getenv("VIDEOMEMORY_SEMANTIC_REFRESH_DURING_FRAME_DIFF_SKIPS", "").strip().lower()
             in {"1", "true", "yes", "on"}
         )
+        self._binary_monitor = BinaryFrameMonitor()
+        self._latest_binary_decision: Optional[BinaryMonitorDecision] = None
+        self._binary_evaluations: int = 0
+        self._latest_binary_monitor_timestamp: Optional[float] = None
+        self._binary_monitor_fps_ema: float = 0.0
+        self._latest_binary_monitor_error: Optional[str] = None
         
         # Frame capture failure tracking (for network stream reconnection)
         self._consecutive_capture_failures: int = 0
@@ -374,6 +384,11 @@ class VideoStreamIngestor:
         self._semantic_processor_task = asyncio.create_task(
             self._semantic_frame_processing_loop(),
             name=f"semantic_processor_{self.camera_index}",
+        )
+        self._binary_frame_queue = asyncio.Queue(maxsize=1)
+        self._binary_processor_task = asyncio.create_task(
+            self._binary_frame_processing_loop(),
+            name=f"binary_monitor_{self.camera_index}",
         )
         self._loop = asyncio.create_task(self._capture_loop(), name=f"capture_{self.camera_index}")
         
@@ -597,7 +612,7 @@ class VideoStreamIngestor:
             Results dict with task_updates, processing_time_ms, prompt, and frame
             if VLM was called and returned results. None if skipped.
         """
-        if frames is None or not self._tasks_list:
+        if frames is None or not self._general_tasks():
             return None
 
         frames = normalize_frames(frames)
@@ -820,7 +835,7 @@ class VideoStreamIngestor:
                     self._record_semantic_skip()
                     continue
 
-                if self._tasks_list:
+                if self._general_tasks():
                     if not chunk_frames:
                         chunk_start_monotonic = frame_monotonic
                     chunk_frames.append(frame.copy())
@@ -845,6 +860,145 @@ class VideoStreamIngestor:
 
         if chunk_frames and chunk_has_motion:
             self._enqueue_frame_chunk(chunk_frames)
+
+    async def _binary_frame_processing_loop(self) -> None:
+        """Run local binary monitors on latest motion-filtered frames."""
+
+        while self._running:
+            queue = self._binary_frame_queue
+            if queue is None:
+                await asyncio.sleep(0.05)
+                continue
+            try:
+                frame, evidence_buffer_snapshot = await asyncio.wait_for(queue.get(), timeout=0.2)
+            except asyncio.TimeoutError:
+                continue
+            try:
+                await asyncio.to_thread(
+                    self._process_binary_monitor_frame,
+                    frame,
+                    evidence_buffer_snapshot,
+                )
+            except Exception:
+                logger.error(
+                    "Error in binary monitor processing loop [camera=%s]",
+                    self.camera_index,
+                    exc_info=True,
+                )
+            finally:
+                queue.task_done()
+
+    def _general_tasks(self) -> List[Task]:
+        return [
+            task
+            for task in self._tasks_list
+            if not task.done and getattr(task, "monitor_type", MONITOR_TYPE_GENERAL) == MONITOR_TYPE_GENERAL
+        ]
+
+    def _binary_tasks(self) -> List[Task]:
+        return [
+            task
+            for task in self._tasks_list
+            if not task.done and getattr(task, "monitor_type", MONITOR_TYPE_GENERAL) == MONITOR_TYPE_BINARY
+        ]
+
+    def _binary_monitor_is_active(self) -> bool:
+        return bool(self._binary_tasks())
+
+    def _enqueue_binary_frame(self, frame: Any) -> None:
+        """Queue the latest frame for binary monitoring, dropping stale work."""
+
+        queue = self._binary_frame_queue
+        if queue is None:
+            return
+        item = (frame.copy(), snapshot_evidence_buffer(self._evidence_frame_buffer))
+        try:
+            queue.put_nowait(item)
+        except asyncio.QueueFull:
+            try:
+                queue.get_nowait()
+                queue.task_done()
+            except asyncio.QueueEmpty:
+                pass
+            queue.put_nowait(item)
+            self._binary_queue_frames_dropped += 1
+
+    def _process_binary_monitor_frame(
+        self,
+        frame: Any,
+        evidence_buffer_snapshot: Optional[List[EvidenceFrameRecord]] = None,
+    ) -> None:
+        """Score binary monitor tasks and emit task updates when voting passes."""
+
+        tasks = self._binary_tasks()
+        if not tasks:
+            return
+
+        previous_timestamp = self._latest_binary_monitor_timestamp
+        now = time.time()
+        self._latest_binary_monitor_timestamp = now
+        if previous_timestamp is not None and now > previous_timestamp:
+            instant_fps = 1.0 / max(now - previous_timestamp, 1e-6)
+            self._binary_monitor_fps_ema = (
+                instant_fps
+                if self._binary_monitor_fps_ema <= 0
+                else (0.85 * self._binary_monitor_fps_ema) + (0.15 * instant_fps)
+            )
+
+        for task in tasks:
+            try:
+                decision = self._binary_monitor.score_task(frame, task)
+            except Exception as exc:
+                self._latest_binary_monitor_error = str(exc)
+                logger.error(
+                    "Binary monitor inference failed [camera=%s task=%s]: %s",
+                    self.camera_index,
+                    task.task_id,
+                    exc,
+                    exc_info=True,
+                )
+                continue
+
+            self._latest_binary_decision = decision
+            self._latest_binary_monitor_error = None
+            self._binary_evaluations += 1
+            if not decision.done:
+                continue
+
+            note = (
+                f"Binary criterion met: {task.task_desc} "
+                f"(p_true={decision.score.p_true:.3f}, hits={decision.hits}/{decision.window})."
+            )
+            self._process_ml_results(
+                {
+                    "frame": frame.copy(),
+                    "evidence_frame": frame.copy(),
+                    "evidence_clip_frames": self._build_evidence_clip_payload(
+                        [frame],
+                        evidence_buffer_snapshot=evidence_buffer_snapshot,
+                    ),
+                    "task_updates": [
+                        {
+                            "task_number": task.task_number,
+                            "task_note": note,
+                            "task_done": True,
+                        }
+                    ],
+                    "binary_monitor": {
+                        "task_id": decision.task_id,
+                        "criterion": decision.criterion,
+                        "p_true": decision.score.p_true,
+                        "p_false": decision.score.p_false,
+                        "threshold": decision.threshold,
+                        "hits": decision.hits,
+                        "window": decision.window,
+                        "required_hits": decision.required_hits,
+                        "inference_ms": decision.score.inference_ms,
+                        "model": decision.score.model,
+                        "resize": decision.score.resize,
+                    },
+                }
+            )
 
     def _semantic_filter_is_active(self) -> bool:
         """Return whether frames need the local semantic scorer before chunking."""
@@ -893,7 +1047,7 @@ class VideoStreamIngestor:
     def _enqueue_frame_chunk(self, frames: List[Any]) -> None:
         """Queue a completed motion-triggered chunk without blocking capture."""
 
-        if not frames or not self._tasks_list:
+        if not frames or not self._general_tasks():
             return
 
         queue = self._chunk_queue
@@ -1038,6 +1192,12 @@ class VideoStreamIngestor:
             return False
 
         self._remember_frame_for_diff(frame)
+        if self._binary_monitor_is_active():
+            self._enqueue_binary_frame(frame)
+
+        if not self._general_tasks():
+            return False
+
         if self._semantic_filter_is_active():
             self._enqueue_semantic_frame(frame, frame_monotonic)
             return False
@@ -1209,7 +1369,7 @@ class VideoStreamIngestor:
                 "Use all frames to detect short actions or state changes that may appear in only one frame."
             )
         return build_video_ingestor_prompt(
-            self._tasks_list,
+            self._general_tasks(),
             context_label=self.camera_index,
             visual_context=visual_context,
         )
@@ -1235,9 +1395,12 @@ class VideoStreamIngestor:
 
     def _prune_completed_tasks(self) -> None:
         active_tasks = [task for task in self._tasks_list if not task.done]
+        completed_tasks = [task for task in self._tasks_list if task.done]
         removed = len(self._tasks_list) - len(active_tasks)
         if removed <= 0:
             return
+        for task in completed_tasks:
+            self._binary_monitor.reset_task(str(task.task_id))
         self._tasks_list = active_tasks
         for i, task in enumerate(self._tasks_list):
             task.task_number = i
@@ -1355,6 +1518,7 @@ class VideoStreamIngestor:
         for task in self._tasks_list:
             if task.task_desc == task_desc:
                 self._tasks_list.remove(task)
+                self._binary_monitor.reset_task(str(task.task_id))
                 task_found = True
                 break
         
@@ -1434,6 +1598,15 @@ class VideoStreamIngestor:
         self._semantic_processor_task = None
         self._semantic_frame_queue = None
         self._queued_semantic_frame_created_at.clear()
+
+        if self._binary_processor_task and not self._binary_processor_task.done():
+            self._binary_processor_task.cancel()
+            try:
+                await asyncio.wait_for(self._binary_processor_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+        self._binary_processor_task = None
+        self._binary_frame_queue = None
 
         self._release_camera()
         
@@ -1577,6 +1750,43 @@ class VideoStreamIngestor:
                     "last_backend": result.backend,
                     "last_model": result.model,
                     "has_heatmap": result.overlay_frame is not None,
+                }
+            )
+        return payload
+
+    def get_binary_monitor_status(self) -> Dict[str, Any]:
+        """Return local binary monitor status for this ingestor."""
+
+        decision = self._latest_binary_decision
+        queue_size = self._binary_frame_queue.qsize() if self._binary_frame_queue is not None else 0
+        payload: Dict[str, Any] = {
+            "enabled": self._binary_monitor_is_active(),
+            "active_tasks": len(self._binary_tasks()),
+            "evaluations": self._binary_evaluations,
+            "latest_evaluation_timestamp": self._latest_binary_monitor_timestamp,
+            "evaluation_fps": float(self._binary_monitor_fps_ema),
+            "queued_frames": int(queue_size),
+            "dropped_frames": int(self._binary_queue_frames_dropped),
+            "threshold": float(self._binary_monitor.threshold),
+            "required_hits": int(self._binary_monitor.required_hits),
+            "window": int(self._binary_monitor.window),
+            "resize": int(self._binary_monitor.resize),
+            "latest_error": self._latest_binary_monitor_error,
+        }
+        if decision is not None:
+            payload.update(
+                {
+                    "last_task_id": decision.task_id,
+                    "last_criterion": decision.criterion,
+                    "last_answer": decision.score.answer,
+                    "last_p_true": float(decision.score.p_true),
+                    "last_p_false": float(decision.score.p_false),
+                    "last_hits": int(decision.hits),
+                    "last_done": bool(decision.done),
+                    "last_inference_ms": float(decision.score.inference_ms),
+                    "last_model": decision.score.model,
+                    "last_resize": int(decision.score.resize),
+                    "last_error": decision.score.error or self._latest_binary_monitor_error,
                 }
             )
         return payload

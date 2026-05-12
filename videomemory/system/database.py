@@ -68,6 +68,7 @@ class TaskDatabase:
                     task_desc TEXT NOT NULL,
                     done INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'active',
+                    monitor_type TEXT DEFAULT 'general',
                     save_note_frames INTEGER,
                     save_note_videos INTEGER,
                     io_id TEXT,
@@ -152,6 +153,9 @@ class TaskDatabase:
             if 'bot_id' not in columns:
                 conn.execute("ALTER TABLE tasks ADD COLUMN bot_id TEXT")
                 logger.info("Migrated tasks table: added bot_id column")
+            if 'monitor_type' not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN monitor_type TEXT DEFAULT 'general'")
+                logger.info("Migrated tasks table: added monitor_type column")
             if 'save_note_frames' not in columns:
                 conn.execute("ALTER TABLE tasks ADD COLUMN save_note_frames INTEGER")
                 logger.info("Migrated tasks table: added save_note_frames column")
@@ -425,15 +429,16 @@ class TaskDatabase:
     def save_task(self, task) -> None:
         """Insert or update a task."""
         bot_id = getattr(task, 'bot_id', None)
+        monitor_type = getattr(task, 'monitor_type', 'general')
         save_note_frames = getattr(task, 'save_note_frames', None)
         save_note_videos = getattr(task, 'save_note_videos', None)
         with self._get_conn() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO tasks
-                   (task_id, task_number, task_desc, done, status, save_note_frames, save_note_videos, io_id, created_at, bot_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (task_id, task_number, task_desc, done, status, monitor_type, save_note_frames, save_note_videos, io_id, created_at, bot_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (task.task_id, task.task_number, task.task_desc,
-                 int(task.done), task.status,
+                 int(task.done), task.status, monitor_type,
                  None if save_note_frames is None else int(bool(save_note_frames)),
                  None if save_note_videos is None else int(bool(save_note_videos)),
                  task.io_id, time.time(), bot_id)
@@ -558,6 +563,7 @@ class TaskDatabase:
                     'task_desc': r['task_desc'],
                     'done': bool(r['done']),
                     'status': r['status'] if 'status' in r.keys() else ('done' if r['done'] else 'active'),
+                    'monitor_type': r['monitor_type'] if 'monitor_type' in r.keys() and r['monitor_type'] else 'general',
                     'save_note_frames': None if r['save_note_frames'] is None else bool(r['save_note_frames']),
                     'save_note_videos': None if r['save_note_videos'] is None else bool(r['save_note_videos']),
                     'io_id': r['io_id'],

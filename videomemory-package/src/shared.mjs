@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { access } from "node:fs/promises";
+import { closeSync, openSync } from "node:fs";
+import { access, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +9,7 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 
 const DEFAULTS = {
   repoUrl: "https://github.com/Clamepending/videomemory.git",
-  repoRef: "v0.1.5",
+  repoRef: "v0.1.6",
   repoDir: path.join(os.homedir(), "videomemory"),
   openclawHome: path.join(os.homedir(), ".openclaw"),
   videomemoryBase: "http://127.0.0.1:5050",
@@ -17,6 +18,17 @@ const DEFAULTS = {
   claudeChannelHost: "127.0.0.1",
   claudeChannelPort: "8791",
 };
+
+const CLAUDE_VIDEOMEMORY_ALLOWED_TOOLS = [
+  "mcp__videomemory__setup_local",
+  "mcp__videomemory__reply",
+  "mcp__videomemory__inspect_task",
+  "mcp__videomemory__inspect_device",
+  "mcp__videomemory__list_devices",
+  "mcp__videomemory__list_monitors",
+  "mcp__videomemory__create_monitor",
+  "mcp__videomemory__configure_channel_webhook",
+];
 
 const SCRIPT_PATHS = {
   bootstrap: path.join(PACKAGE_ROOT, "bundled", "openclaw-bootstrap.sh"),
@@ -97,6 +109,32 @@ function runProcess(command, args, options = {}) {
       });
     });
   });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function startDetachedProcess(command, args, options = {}) {
+  const { cwd, env, logPath } = options;
+  if (logPath) {
+    await mkdir(path.dirname(logPath), { recursive: true });
+  }
+  const outFd = logPath ? openSync(logPath, "a") : "ignore";
+  const errFd = logPath ? openSync(logPath, "a") : "ignore";
+  try {
+    const child = spawn(command, args, {
+      cwd,
+      env: env ? { ...process.env, ...env } : process.env,
+      detached: true,
+      stdio: ["ignore", outFd, errFd],
+    });
+    child.unref();
+    return { pid: child.pid || 0 };
+  } finally {
+    if (typeof outFd === "number") closeSync(outFd);
+    if (typeof errFd === "number" && errFd !== outFd) closeSync(errFd);
+  }
 }
 
 async function runBundledScript(scriptPath, args = [], env = {}) {
@@ -302,6 +340,20 @@ async function maybeRequestJson(url, init = {}) {
   }
 }
 
+async function waitForVideoMemory(baseUrl, timeoutMs = 20000) {
+  const startedAt = Date.now();
+  let lastError = "";
+  while (Date.now() - startedAt < timeoutMs) {
+    const health = await maybeRequestJson(`${baseUrl}/api/health`);
+    if (health.ok) {
+      return { ok: true, payload: health.payload };
+    }
+    lastError = health.error;
+    await sleep(500);
+  }
+  return { ok: false, error: lastError || `Timed out waiting for ${baseUrl}/api/health` };
+}
+
 async function putVideomemorySetting(baseUrl, key, value) {
   return await requestJson(`${baseUrl}/api/settings/${encodeURIComponent(key)}`, {
     method: "PUT",
@@ -343,6 +395,56 @@ async function ensureClaudeRepo(options = {}) {
     throw new Error(`Clone completed but Claude channel package is missing: ${packagePath}`);
   }
   return { repoDir, channelDir, cloned: true, reused: false };
+}
+
+async function chooseVideoMemoryServerCommand(repoDir) {
+  const venvPython = path.join(repoDir, ".venv", "bin", "python");
+  if (await pathExists(venvPython)) {
+    return { command: venvPython, args: ["flask_app/app.py"], label: ".venv/bin/python flask_app/app.py" };
+  }
+  const uv = await commandCheck("uv", ["--version"], 5000);
+  if (uv.ok) {
+    return { command: "uv", args: ["run", "flask_app/app.py"], label: "uv run flask_app/app.py" };
+  }
+  return { command: "python3", args: ["flask_app/app.py"], label: "python3 flask_app/app.py" };
+}
+
+async function ensureVideoMemoryServer(options = {}) {
+  const baseUrl = cleanText(options.videomemoryBase) || DEFAULTS.videomemoryBase;
+  const existing = await maybeRequestJson(`${baseUrl}/api/health`);
+  if (existing.ok) {
+    return { started: false, ready: true, baseUrl, health: existing.payload };
+  }
+  if (truthyFlag(options.skipStart)) {
+    return { started: false, ready: false, baseUrl, error: existing.error };
+  }
+
+  const repoDir = claudeRepoDir(options);
+  if (!(await pathExists(path.join(repoDir, "flask_app", "app.py")))) {
+    return {
+      started: false,
+      ready: false,
+      baseUrl,
+      error: `Cannot start VideoMemory because flask_app/app.py is missing under ${repoDir}`,
+    };
+  }
+
+  const serverCommand = await chooseVideoMemoryServerCommand(repoDir);
+  const logPath = path.join(os.homedir(), ".videomemory", "claude", "videomemory-server.log");
+  const started = await startDetachedProcess(serverCommand.command, serverCommand.args, {
+    cwd: repoDir,
+    logPath,
+  });
+  const ready = await waitForVideoMemory(baseUrl, 30000);
+  return {
+    started: true,
+    ready: ready.ok,
+    baseUrl,
+    command: serverCommand.label,
+    pid: started.pid,
+    logPath,
+    ...(ready.ok ? { health: ready.payload } : { error: ready.error }),
+  };
 }
 
 async function configureClaudeWebhook(options = {}) {
@@ -481,13 +583,19 @@ export async function launchClaudeCode(options = {}) {
   if (cleanText(options.webhookToken)) {
     env.VIDEOMEMORY_CLAUDE_CHANNEL_TOKEN = cleanText(options.webhookToken);
   }
+  const channelArgs = truthyFlag(options.devChannel)
+    ? ["--dangerously-load-development-channels", "server:videomemory"]
+    : ["--channels", "server:videomemory"];
+  const toolArgs = truthyFlag(options.noToolAllowlist)
+    ? []
+    : ["--allowedTools", CLAUDE_VIDEOMEMORY_ALLOWED_TOOLS.join(",")];
   return await runProcess(
     "claude",
     [
       "--mcp-config",
       mcpConfig,
-      "--dangerously-load-development-channels",
-      "server:videomemory",
+      ...channelArgs,
+      ...toolArgs,
     ],
     {
       env,
@@ -495,6 +603,98 @@ export async function launchClaudeCode(options = {}) {
       stdio: "inherit",
     },
   );
+}
+
+async function checkClaudeAuth() {
+  const auth = await runProcess("claude", ["-p", "Respond with exactly ok"], { timeoutMs: 30000 });
+  return {
+    ok: auth.code === 0,
+    detail: auth.code === 0 ? cleanText(auth.stdout) : summarizeFailure(auth.stderr, auth.stdout),
+  };
+}
+
+async function openBrowserCameraBridge(options = {}) {
+  const baseUrl = cleanText(options.videomemoryBase) || DEFAULTS.videomemoryBase;
+  const url = `${baseUrl.replace(/\/+$/, "")}/browser-camera/facetime`;
+  if (process.platform !== "darwin") {
+    return { opened: false, url, reason: "automatic browser opening is only implemented on macOS" };
+  }
+  const result = await runProcess("open", [url], { timeoutMs: 5000 });
+  return {
+    opened: result.code === 0,
+    url,
+    ...(result.code === 0 ? {} : { error: summarizeFailure(result.stderr, result.stdout) }),
+  };
+}
+
+export async function upClaudeCode(options = {}) {
+  const repo = await ensureClaudeRepo(options);
+  const effectiveOptions = {
+    ...options,
+    repoDir: repo.repoDir,
+  };
+  const server = await ensureVideoMemoryServer(effectiveOptions);
+  if (!server.ready) {
+    return {
+      success: false,
+      stage: "videomemory-server",
+      repoDir: repo.repoDir,
+      channelDir: repo.channelDir,
+      server,
+      next: server.error || "Start VideoMemory, then rerun the VideoMemory Claude setup command.",
+    };
+  }
+
+  const install = await installClaudeCode(effectiveOptions);
+
+  let auth = { ok: true, detail: "skipped" };
+  if (!truthyFlag(options.skipAuth)) {
+    auth = await checkClaudeAuth();
+    if (!auth.ok) {
+      return {
+        success: false,
+        stage: "claude-auth",
+        repoDir: repo.repoDir,
+        channelDir: repo.channelDir,
+        server,
+        install,
+        camera: { opened: false, skipped: true, reason: "Claude auth failed before camera setup." },
+        auth,
+        next: "Run `claude auth login`, then rerun the VideoMemory Claude setup command.",
+      };
+    }
+  }
+
+  const camera = truthyFlag(options.noOpenCamera)
+    ? { opened: false, skipped: true }
+    : await openBrowserCameraBridge(effectiveOptions);
+
+  const ready = {
+    success: true,
+    repoDir: repo.repoDir,
+    channelDir: repo.channelDir,
+    server,
+    install,
+    camera,
+    auth,
+    launch: {
+      skipped: truthyFlag(options.noLaunch),
+      command: "claude with VideoMemory channel and MCP tools",
+    },
+  };
+  if (truthyFlag(options.noLaunch)) {
+    return ready;
+  }
+
+  const launch = await launchClaudeCode(effectiveOptions);
+  return {
+    ...ready,
+    launch: {
+      skipped: false,
+      exitCode: launch.code,
+      success: launch.code === 0,
+    },
+  };
 }
 
 export async function testClaudeCodeEvent(options = {}) {

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "videomemory",
+  "description": "Local camera monitoring for Claude Code. Ask Claude to watch a FaceTime or network camera for a visual condition and wake up when it happens.",
+  "owner": {
+    "name": "Clamepending"
+  },
+  "plugins": [
+    {
+      "name": "videomemory",
+      "description": "Use VideoMemory from Claude Code to install/start the local camera monitor, open the FaceTime browser camera bridge, create binary true/false visual monitors, and receive push wakeups through a Claude channel.",
+      "author": {
+        "name": "Clamepending"
+      },
+      "category": "productivity",
+      "source": "./claude-videomemory-channel",
+      "homepage": "https://github.com/Clamepending/videomemory"
+    }
+  ]
+}

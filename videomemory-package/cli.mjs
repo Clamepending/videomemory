@@ -8,25 +8,30 @@ import {
   onboardVideomemory,
   relaunchVideomemory,
   testClaudeCodeEvent,
+  upClaudeCode,
 } from "./src/shared.mjs";
 
 function usage() {
   return [
     "Usage:",
-    "  videomemory onboard [--safe] [--dry-run|--explain] [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--bot-id ID] [--tailscale-authkey KEY] [--skip-start] [--skip-keys] [--skip-tailscale] [--skip-notify]",
-    "  videomemory relaunch [--dry-run|--explain] [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--skip-keys]",
     "  videomemory status [--videomemory-base URL]",
+    "  videomemory claude [--repo-dir DIR] [--videomemory-base URL] [--skip-auth] [--no-open-camera] [--no-launch]",
     "  videomemory claude install [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--skip-webhook]",
     "  videomemory claude doctor [--repo-dir DIR] [--videomemory-base URL] [--skip-auth]",
-    "  videomemory claude launch [--repo-dir DIR] [--videomemory-base URL]",
+    "  videomemory claude up [--repo-dir DIR] [--videomemory-base URL] [--skip-auth] [--no-open-camera] [--no-launch] [--dev] [--no-tool-allowlist]",
+    "  videomemory claude launch [--repo-dir DIR] [--videomemory-base URL] [--dev] [--no-tool-allowlist]",
     "  videomemory claude test-event [--webhook-token TOKEN]",
+    "  videomemory onboard [--safe] [--dry-run|--explain] [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--bot-id ID] [--tailscale-authkey KEY] [--skip-start] [--skip-keys] [--skip-tailscale] [--skip-notify]",
+    "  videomemory relaunch [--dry-run|--explain] [--openclaw-home DIR] [--repo-dir DIR] [--repo-ref REF] [--repo-url URL] [--videomemory-base URL] [--skip-keys]",
     "",
     "Notes:",
-    "  onboard runs the packaged VideoMemory bootstrap script directly on the host.",
+    "  claude is the normal local Claude Code path: start/check VideoMemory, wire the channel, open the FaceTime camera bridge, then launch Claude.",
+    "  onboard/relaunch are legacy OpenClaw-oriented host setup commands.",
     "  --safe disables Tailscale setup, model API-key sync, Telegram notify, and sudo-requiring setup.",
     "  --dry-run and --explain print the exact plan without making changes.",
     "  claude install downloads the VideoMemory repo channel package, installs deps, and wires VideoMemory to it when the server is running.",
-    "  claude launch hides the Claude Code development-channel flags behind one command.",
+    "  claude up is the one-command local Claude Code path: start/check VideoMemory, wire the channel, open the camera bridge, then launch Claude.",
+    "  claude launch uses the approved Claude channel path by default; pass --dev only while developing the channel locally.",
     "  --json prints the full result object.",
   ].join("\n");
 }
@@ -95,6 +100,10 @@ function normalizeOptions(options) {
     skipWebhook: Boolean(options["skip-webhook"]),
     keepWebhookToken: Boolean(options["keep-webhook-token"]),
     skipAuth: Boolean(options["skip-auth"]),
+    noOpenCamera: Boolean(options["no-open-camera"]),
+    noLaunch: Boolean(options["no-launch"]),
+    devChannel: Boolean(options.dev),
+    noToolAllowlist: Boolean(options["no-tool-allowlist"]),
   };
 }
 
@@ -149,6 +158,8 @@ async function main() {
     result = await relaunchVideomemory(normalized);
   } else if (command === "status") {
     result = await getVideomemoryStatus(normalized);
+  } else if (command === "claude" || command === "claude:up") {
+    result = await upClaudeCode(normalized);
   } else if (command === "claude:install") {
     result = await installClaudeCode(normalized);
   } else if (command === "claude:doctor") {
