@@ -351,7 +351,7 @@ class TaskManager:
             logger.error("Failed to determine whether %s is a network camera: %s", io_id, e, exc_info=True)
             return False
 
-        raw_value = os.getenv("VIDEOMEMORY_KEEP_NETWORK_CAMERAS_WARM", "1")
+        raw_value = os.getenv("VIDEOMEMORY_KEEP_NETWORK_CAMERAS_WARM", "0")
         normalized = str(raw_value).strip().lower()
         return normalized not in _FALSE_SETTING_VALUES
 
@@ -734,8 +734,8 @@ class TaskManager:
                     io_id,
                 )
             else:
-                logger.info(f"VideoStreamIngestor for io_id={io_id} has no active tasks. Deleting ingestor.")
-                del self._ingestors[io_id]
+                logger.info(f"VideoStreamIngestor for io_id={io_id} has no active tasks. Releasing ingestor.")
+                self.release_device_ingestor(io_id)
         
         return {
             "status": "success",
@@ -776,18 +776,17 @@ class TaskManager:
             except Exception as e:
                 logger.error(f"Failed to delete task {task_id} from database: {e}")
         
-        # Check if there are no more tasks for this io_id
-        remaining_tasks = [task for task in self._tasks.values() if task.io_id == io_id]
-        if len(remaining_tasks) == 0 and io_id in self._ingestors:
+        # Check if there are no more active tasks for this io_id
+        remaining_active_tasks = [task for task in self._tasks.values() if task.io_id == io_id and not task.done]
+        if len(remaining_active_tasks) == 0 and io_id in self._ingestors:
             if self._should_keep_network_camera_warm(io_id):
                 logger.info(
-                    "VideoStreamIngestor for io_id=%s has no tasks remaining, but the network camera is configured to stay warm.",
+                    "VideoStreamIngestor for io_id=%s has no active tasks remaining, but the network camera is configured to stay warm.",
                     io_id,
                 )
             else:
-                # Delete the ingestor if no tasks remain
-                logger.info(f"VideoStreamIngestor for io_id={io_id} has no tasks remaining. Deleting ingestor.")
-                del self._ingestors[io_id]
+                logger.info(f"VideoStreamIngestor for io_id={io_id} has no active tasks remaining. Releasing ingestor.")
+                self.release_device_ingestor(io_id)
         
         return True
     

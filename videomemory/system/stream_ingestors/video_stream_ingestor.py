@@ -82,6 +82,7 @@ class VideoStreamIngestor:
     DEFAULT_VIDEO_CHUNK_SUBSAMPLE_FRAMES = 9
     DEFAULT_VIDEO_CHUNK_QUEUE_MAXSIZE = 10
     DEFAULT_SEMANTIC_FRAME_QUEUE_MAXSIZE = 3
+    DEFAULT_SNAPSHOT_POLL_SECONDS = 0.5
     
     def __init__(self, camera_source, model_provider: BaseModelProvider, target_resolution: Optional[tuple[int, int]] = (640, 480), on_task_updated=None, on_detection_event=None):
         """Initialize the video stream ingestor.
@@ -98,6 +99,10 @@ class VideoStreamIngestor:
         self.camera_source = camera_source
         self.is_network_stream = isinstance(camera_source, str)
         self.is_snapshot_source = self.is_network_stream and is_snapshot_url(camera_source)
+        self._snapshot_poll_interval_s = max(
+            0.05,
+            float(os.environ.get("VIDEOMEMORY_SNAPSHOT_POLL_SECONDS", self.DEFAULT_SNAPSHOT_POLL_SECONDS)),
+        )
         # Keep camera_index for backward compat in logging/session naming
         self.camera_index = camera_source
         self._tasks_list: List[Task] = []  # List of Task objects (shared by reference with task_manager)
@@ -1145,6 +1150,8 @@ class VideoStreamIngestor:
                         chunk_frames = []
                         chunk_has_motion = False
                         chunk_start_monotonic = now_monotonic
+                    if self.is_snapshot_source:
+                        await asyncio.sleep(self._snapshot_poll_interval_s)
                 except Exception as e:
                     logger.error(f"Error in capture/process loop for camera index={self.camera_index}: {e}", exc_info=True)
                     await asyncio.sleep(0.1)

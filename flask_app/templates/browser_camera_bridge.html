@@ -80,6 +80,11 @@
         color: #ececec;
     }
 
+    .bridge-panel button.secondary-button {
+        background: #333;
+        color: #ececec;
+    }
+
     .bridge-status {
         margin-top: 12px;
         color: #aaa;
@@ -134,6 +139,7 @@
         <label for="cameraSelect">Camera</label>
         <select id="cameraSelect"></select>
         <button id="startButton" type="button">Start Camera Source</button>
+        <button id="stopButton" type="button" class="secondary-button">Stop Camera Source</button>
         <a id="debugLink" href="/device/{{ io_id }}/debug" target="_blank">Open VideoMemory Pipeline</a>
         <div id="bridgeStatus" class="bridge-status">Waiting to start.</div>
         <div class="bridge-metrics">
@@ -166,6 +172,7 @@
     const canvas = document.getElementById('cameraCanvas');
     const cameraSelect = document.getElementById('cameraSelect');
     const startButton = document.getElementById('startButton');
+    const stopButton = document.getElementById('stopButton');
     const statusEl = document.getElementById('bridgeStatus');
     const frameCountEl = document.getElementById('frameCount');
     const lastPostEl = document.getElementById('lastPost');
@@ -173,7 +180,10 @@
     let stream = null;
     let frameCount = 0;
     let postTimer = null;
+    let controlTimer = null;
     const autostart = new URLSearchParams(window.location.search).get('autostart') === '1';
+    let shouldAutostartFromControl = autostart;
+    let isStartingCamera = false;
     let consecutiveRejectedFrames = 0;
 
     function setStatus(text) {
@@ -188,6 +198,34 @@
             return 'Camera is not readable. Close other camera apps, then start again.';
         }
         return error && error.message ? error.message : 'Camera failed to start.';
+    }
+
+    function ensureControlTimer() {
+        if (controlTimer) return;
+        controlTimer = setInterval(() => {
+            checkControl().catch(error => setStatus(error.message));
+        }, 1000);
+    }
+
+    function stopCamera(statusText = 'Camera source stopped.', keepControlPolling = false) {
+        if (postTimer) {
+            clearInterval(postTimer);
+            postTimer = null;
+        }
+        if (controlTimer && !keepControlPolling) {
+            clearInterval(controlTimer);
+            controlTimer = null;
+        }
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+        }
+        video.pause();
+        video.srcObject = null;
+        setStatus(statusText);
+        if (keepControlPolling) {
+            ensureControlTimer();
+        }
     }
 
     function isMissingDeviceError(error) {
@@ -235,13 +273,28 @@
     }
 
     async function registerSource() {
-        const resp = await fetch(`/api/browser-camera/${CAMERA_ID}/register`, { method: 'POST' });
+        const resp = await fetch(`/api/browser-camera/${CAMERA_ID}/register?client=bridge`, { method: 'POST' });
         const data = await resp.json();
         if (!resp.ok) {
             throw new Error(data.error || 'Could not register browser camera source');
         }
         document.getElementById('debugLink').href = data.debug_url || `/device/${IO_ID}/debug`;
         return data;
+    }
+
+    async function checkControl() {
+        const resp = await fetch(`/api/browser-camera/${CAMERA_ID}/control?client=bridge`, { cache: 'no-store' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            throw new Error(data.error || data.message || 'Camera control check failed');
+        }
+        if (data.should_stop && stream) {
+            stopCamera(data.message || 'No active VideoMemory monitor is using this camera source. Camera capture stopped for privacy.', true);
+            return;
+        }
+        if (data.active_task_count > 0 && shouldAutostartFromControl && !stream && !isStartingCamera) {
+            await startCamera();
+        }
     }
 
     async function postFrame() {
@@ -283,7 +336,11 @@
         });
         if (!resp.ok) {
             const data = await resp.json().catch(() => ({}));
-            throw new Error(data.error || 'Frame post failed');
+            if (data.should_stop) {
+                stopCamera(data.message || 'No active VideoMemory monitor is using this camera source. Camera capture stopped for privacy.', true);
+                return;
+            }
+            throw new Error(data.error || data.message || 'Frame post failed');
         }
         frameCount += 1;
         consecutiveRejectedFrames = 0;
@@ -293,35 +350,50 @@
     }
 
     async function startCamera() {
-        if (postTimer) {
-            clearInterval(postTimer);
-            postTimer = null;
-        }
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-        }
+        if (isStartingCamera) return;
+        isStartingCamera = true;
+        try {
+            stopCamera('Restarting camera source...');
+            shouldAutostartFromControl = true;
 
-        const selectedDevice = cameraSelect.value;
-        stream = await openCameraStream(selectedDevice);
-        video.srcObject = stream;
-        await video.play();
-        await listCameras();
-        await registerSource();
-        setStatus('Publishing real browser camera frames into the VideoMemory ingestor snapshot source.');
-        await postFrame();
-        postTimer = setInterval(() => {
-            postFrame().catch(error => setStatus(error.message));
-        }, 125);
+            const selectedDevice = cameraSelect.value;
+            stream = await openCameraStream(selectedDevice);
+            video.srcObject = stream;
+            await video.play();
+            await listCameras();
+            await registerSource();
+            setStatus('Publishing real browser camera frames into the VideoMemory ingestor snapshot source.');
+            await postFrame();
+            postTimer = setInterval(() => {
+                postFrame().catch(error => setStatus(error.message));
+            }, 125);
+            ensureControlTimer();
+        } finally {
+            isStartingCamera = false;
+        }
     }
 
     startButton.addEventListener('click', () => {
         startCamera().catch(error => setStatus(cameraErrorMessage(error)));
     });
 
+    stopButton.addEventListener('click', () => {
+        shouldAutostartFromControl = false;
+        stopCamera('Camera source stopped.');
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+    });
+
     listCameras()
         .then(() => {
             if (autostart) {
                 startCamera().catch(error => setStatus(cameraErrorMessage(error)));
+            } else {
+                ensureControlTimer();
             }
         })
         .catch(error => setStatus(cameraErrorMessage(error)));

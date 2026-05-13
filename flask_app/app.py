@@ -74,6 +74,20 @@ _BROWSER_CAMERA_STALE_SECONDS = 5.0
 _BROWSER_CAMERA_MIN_DIMENSION = 64
 _BROWSER_CAMERA_MIN_MEAN = 1.0
 _BROWSER_CAMERA_MIN_STD = 1.0
+try:
+    _BROWSER_CAMERA_IDLE_SHUTDOWN_SECONDS = max(
+        5.0,
+        float(os.environ.get("VIDEOMEMORY_BROWSER_CAMERA_IDLE_SHUTDOWN_SECONDS", "20")),
+    )
+except (TypeError, ValueError):
+    _BROWSER_CAMERA_IDLE_SHUTDOWN_SECONDS = 20.0
+try:
+    _BROWSER_CAMERA_BRIDGE_SEEN_SECONDS = max(
+        5.0,
+        float(os.environ.get("VIDEOMEMORY_BROWSER_CAMERA_BRIDGE_SEEN_SECONDS", "15")),
+    )
+except (TypeError, ValueError):
+    _BROWSER_CAMERA_BRIDGE_SEEN_SECONDS = 15.0
 
 
 def _apply_no_store_headers(response: Response) -> Response:
@@ -91,6 +105,100 @@ def _env_truthy(name: str) -> bool:
 def _safe_browser_camera_id(camera_id: str) -> str:
     value = re.sub(r"[^A-Za-z0-9_-]+", "-", str(camera_id or "facetime").strip()).strip("-")
     return value[:48] or "facetime"
+
+
+def _active_browser_camera_task_count(camera_id: str) -> int:
+    """Return active monitor count for a browser-camera snapshot source."""
+    safe_id = _safe_browser_camera_id(camera_id)
+    io_id = f"browser_{safe_id}"
+    try:
+        return sum(
+            1
+            for task in task_manager.list_tasks(io_id)
+            if task.get("status") == "active" and not task.get("done")
+        )
+    except Exception as exc:
+        flask_logger.debug(
+            "Failed to inspect active browser camera tasks for %s: %s",
+            io_id,
+            exc,
+            exc_info=True,
+        )
+        return 0
+
+
+def _browser_camera_control_payload(
+    camera_id: str,
+    now: Optional[float] = None,
+    *,
+    mark_bridge_seen: bool = False,
+) -> Dict[str, Any]:
+    """Return whether the browser bridge should keep capturing camera frames."""
+    safe_id = _safe_browser_camera_id(camera_id)
+    now = time.time() if now is None else now
+    active_task_count = _active_browser_camera_task_count(safe_id)
+
+    with _browser_camera_lock:
+        payload = _browser_camera_frames.get(safe_id)
+        if payload is None:
+            payload = {}
+            _browser_camera_frames[safe_id] = payload
+        payload.setdefault("registered_at", now)
+        if mark_bridge_seen:
+            payload["last_bridge_control_at"] = now
+        if active_task_count > 0:
+            payload["last_active_task_at"] = now
+        last_active_task_at = payload.get("last_active_task_at")
+        last_register_at = payload.get("last_register_at")
+        last_bridge_control_at = payload.get("last_bridge_control_at")
+        registered_at = payload.get("registered_at")
+
+    idle_started_at = float(last_active_task_at or last_register_at or registered_at or now)
+    idle_seconds = max(0.0, now - idle_started_at)
+    bridge_seen_age_seconds = (
+        None
+        if last_bridge_control_at is None
+        else max(0.0, now - float(last_bridge_control_at))
+    )
+    bridge_recently_seen = (
+        bridge_seen_age_seconds is not None
+        and bridge_seen_age_seconds <= _BROWSER_CAMERA_BRIDGE_SEEN_SECONDS
+    )
+    should_stop = active_task_count == 0 and idle_seconds >= _BROWSER_CAMERA_IDLE_SHUTDOWN_SECONDS
+    return {
+        "status": "ok",
+        "camera_id": safe_id,
+        "io_id": f"browser_{safe_id}",
+        "active_task_count": active_task_count,
+        "idle_seconds": idle_seconds,
+        "idle_shutdown_seconds": _BROWSER_CAMERA_IDLE_SHUTDOWN_SECONDS,
+        "bridge_recently_seen": bridge_recently_seen,
+        "bridge_seen_age_seconds": bridge_seen_age_seconds,
+        "bridge_seen_seconds": _BROWSER_CAMERA_BRIDGE_SEEN_SECONDS,
+        "should_stop": should_stop,
+        "message": (
+            "No active VideoMemory monitor is using this camera source. Camera capture stopped for privacy."
+            if should_stop
+            else "Camera source is still within its active-monitor or startup window."
+        ),
+    }
+
+
+def _release_browser_camera_ingestor_if_idle(camera_id: str) -> None:
+    safe_id = _safe_browser_camera_id(camera_id)
+    if _active_browser_camera_task_count(safe_id) > 0:
+        return
+    io_id = f"browser_{safe_id}"
+    try:
+        if hasattr(task_manager, "release_device_ingestor"):
+            task_manager.release_device_ingestor(io_id)
+    except Exception as exc:
+        flask_logger.debug(
+            "Failed to release idle browser camera ingestor for %s: %s",
+            io_id,
+            exc,
+            exc_info=True,
+        )
 
 
 def _float_env(name: str, default: float) -> float:
@@ -886,6 +994,11 @@ def browser_camera_bridge(camera_id):
 def browser_camera_frame(camera_id):
     """Accept a JPEG frame from the browser-camera bridge."""
     safe_id = _safe_browser_camera_id(camera_id)
+    control_payload = _browser_camera_control_payload(safe_id)
+    if control_payload.get("should_stop"):
+        _release_browser_camera_ingestor_if_idle(safe_id)
+        return jsonify(control_payload), 409
+
     frame_bytes = request.get_data(cache=False)
     if not frame_bytes:
         return jsonify({'status': 'error', 'error': 'JPEG frame body is required'}), 400
@@ -916,9 +1029,14 @@ def browser_camera_frame(camera_id):
 
     timestamp = time.time()
     with _browser_camera_lock:
+        existing_payload = dict(_browser_camera_frames.get(safe_id) or {})
         _browser_camera_frames[safe_id] = {
             'bytes': bytes(frame_bytes),
             'timestamp': timestamp,
+            'registered_at': existing_payload.get('registered_at') or timestamp,
+            'last_register_at': existing_payload.get('last_register_at'),
+            'last_bridge_control_at': timestamp,
+            'last_active_task_at': existing_payload.get('last_active_task_at'),
             'width': int(width),
             'height': int(height),
             'mean': frame_mean,
@@ -959,13 +1077,22 @@ def browser_camera_status(camera_id):
     return jsonify(_get_browser_camera_status_payload(camera_id))
 
 
+@app.route('/api/browser-camera/<camera_id>/control', methods=['GET'])
+def browser_camera_control(camera_id):
+    mark_bridge_seen = (request.args.get('client') or '').strip().lower() == 'bridge'
+    control_payload = _browser_camera_control_payload(camera_id, mark_bridge_seen=mark_bridge_seen)
+    if control_payload.get("should_stop"):
+        _release_browser_camera_ingestor_if_idle(camera_id)
+    return jsonify(control_payload)
+
+
 def _get_browser_camera_status_payload(camera_id: str) -> Dict[str, Any]:
     safe_id = _safe_browser_camera_id(camera_id)
     with _browser_camera_lock:
         payload = dict(_browser_camera_frames.get(safe_id) or {})
     timestamp = payload.get('timestamp')
     age_ms = None if timestamp is None else max(0.0, (time.time() - float(timestamp)) * 1000.0)
-    has_frame = bool(payload)
+    has_frame = bool(payload.get('bytes'))
     stale = bool(timestamp is None or (time.time() - float(timestamp)) > _BROWSER_CAMERA_STALE_SECONDS)
     return {
         'camera_id': safe_id,
@@ -1085,18 +1212,30 @@ def browser_camera_register(camera_id):
     io_id = f"browser_{safe_id}"
     snapshot_url = url_for('browser_camera_latest', camera_id=safe_id, _external=True)
     try:
+        now = time.time()
+        with _browser_camera_lock:
+            payload = _browser_camera_frames.get(safe_id)
+            if payload is None:
+                payload = {}
+                _browser_camera_frames[safe_id] = payload
+            payload.setdefault('registered_at', now)
+            payload['last_register_at'] = now
+            if (request.args.get('client') or '').strip().lower() == 'bridge':
+                payload['last_bridge_control_at'] = now
+
         camera_info = io_manager.get_stream_info(io_id)
         if camera_info is None:
             camera_info = io_manager.add_network_camera(snapshot_url, f"Browser FaceTime Camera ({safe_id})", io_id=io_id)
-        try:
-            task_manager.ensure_device_ingestor(camera_info["io_id"])
-        except Exception as warm_exc:
-            flask_logger.warning(
-                "Browser camera %s was registered, but its preview ingestor did not start yet: %s",
-                camera_info.get("io_id"),
-                warm_exc,
-                exc_info=True,
-            )
+        if _active_browser_camera_task_count(safe_id) > 0:
+            try:
+                task_manager.ensure_device_ingestor(camera_info["io_id"])
+            except Exception as warm_exc:
+                flask_logger.warning(
+                    "Browser camera %s was registered, but its preview ingestor did not start yet: %s",
+                    camera_info.get("io_id"),
+                    warm_exc,
+                    exc_info=True,
+                )
         return jsonify({
             'status': 'success',
             'device': camera_info,
@@ -2662,7 +2801,11 @@ def health_check():
         device_count = -1
     
     try:
-        task_count = len(task_manager.list_tasks())
+        task_count = sum(
+            1
+            for task in task_manager.list_tasks()
+            if task.get('status') == 'active' and not task.get('done')
+        )
     except Exception:
         task_count = -1
     
