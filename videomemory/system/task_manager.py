@@ -1,6 +1,7 @@
 """Task Manager for managing tasks associated with IO streams."""
 
 import asyncio
+import inspect
 import logging
 import os
 import sys
@@ -458,15 +459,25 @@ class TaskManager:
             pass
 
         try:
-            loop = asyncio.get_running_loop()
-            asyncio.create_task(ingestor.stop())
-        except RuntimeError:
-            ingestor_module = sys.modules.get(VideoStreamIngestor.__module__)
-            bg_loop = getattr(ingestor_module, "_flask_background_loop", None)
-            if bg_loop and bg_loop.is_running():
-                asyncio.run_coroutine_threadsafe(ingestor.stop(), bg_loop)
-            else:
-                logger.warning("Could not stop ingestor for %s - no event loop", io_id)
+            stop_result = ingestor.stop()
+        except Exception:
+            logger.warning("Could not stop ingestor for %s", io_id, exc_info=True)
+            return True
+
+        if inspect.isawaitable(stop_result):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(stop_result)
+            except RuntimeError:
+                ingestor_module = sys.modules.get(VideoStreamIngestor.__module__)
+                bg_loop = getattr(ingestor_module, "_flask_background_loop", None)
+                if bg_loop and bg_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(stop_result, bg_loop)
+                else:
+                    close = getattr(stop_result, "close", None)
+                    if callable(close):
+                        close()
+                    logger.warning("Could not stop ingestor for %s - no event loop", io_id)
 
         return True
     
@@ -882,6 +893,36 @@ class TaskManager:
         }
         logger.info(
             "Reloaded video chunk settings (updated_ingestors=%d, failed=%d)",
+            updated_ingestors,
+            len(failed_ingestors),
+        )
+        return result
+
+    def reload_binary_monitor_settings(self) -> Dict[str, Any]:
+        """Hot-reload binary monitor voting settings on active ingestors."""
+
+        updated_ingestors = 0
+        failed_ingestors: List[str] = []
+
+        for io_id, ingestor in self._ingestors.items():
+            try:
+                ingestor.reload_binary_monitor_settings()
+                updated_ingestors += 1
+            except Exception as exc:
+                failed_ingestors.append(io_id)
+                logger.error(
+                    "Failed to update binary monitor settings for io_id=%s: %s",
+                    io_id,
+                    exc,
+                    exc_info=True,
+                )
+
+        result = {
+            "updated_ingestors": updated_ingestors,
+            "failed_ingestors": failed_ingestors,
+        }
+        logger.info(
+            "Reloaded binary monitor settings (updated_ingestors=%d, failed=%d)",
             updated_ingestors,
             len(failed_ingestors),
         )

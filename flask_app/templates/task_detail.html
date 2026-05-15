@@ -51,9 +51,36 @@
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
+            gap: 16px;
             margin-bottom: 20px;
             padding-bottom: 20px;
             border-bottom: 1px solid #404040;
+        }
+
+        .task-info-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .debug-button {
+            padding: 7px 12px;
+            background: rgba(25, 195, 125, 0.12);
+            color: #b8f7d8;
+            border: 1px solid rgba(25, 195, 125, 0.38);
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 650;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .debug-button:hover {
+            background: rgba(25, 195, 125, 0.2);
+            color: #eafff4;
         }
         
         .task-id {
@@ -277,9 +304,12 @@
                     <div class="task-info-card">
                         <div class="task-info-header">
                             <span class="task-id">Task #${task.task_id || 'N/A'}</span>
-                            <span class="task-status ${status}">
-                                ${statusLabels[status] || status}
-                            </span>
+                            <div class="task-info-actions">
+                                ${task.debug_url ? `<a class="debug-button" href="${encodeURI(task.debug_url)}">Debug</a>` : ''}
+                                <span class="task-status ${status}">
+                                    ${statusLabels[status] || status}
+                                </span>
+                            </div>
                         </div>
                         <div class="task-device">
                             <span class="device-icon">&#9654;</span>

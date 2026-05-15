@@ -8,6 +8,7 @@ They are meant for fast local done/not-done task completion, not rich captioning
 from __future__ import annotations
 
 import logging
+import math
 import os
 import tempfile
 import threading
@@ -23,9 +24,14 @@ logger = logging.getLogger("BinaryMonitor")
 
 DEFAULT_FASTVLM_BINARY_MODEL = "mlx-community/FastVLM-0.5B-bf16"
 DEFAULT_FASTVLM_BINARY_RESIZE = 256
-DEFAULT_FASTVLM_BINARY_THRESHOLD = 0.5
-DEFAULT_FASTVLM_BINARY_REQUIRED_HITS = 2
-DEFAULT_FASTVLM_BINARY_WINDOW = 3
+DEFAULT_FASTVLM_BINARY_THRESHOLD = 0.7
+DEFAULT_FASTVLM_BINARY_REQUIRED_HITS = 4
+DEFAULT_FASTVLM_BINARY_WINDOW = 5
+DEFAULT_FASTVLM_BINARY_THRESHOLD_MODE = "adaptive"
+DEFAULT_FASTVLM_BINARY_ADAPTIVE_Z = 3.0
+DEFAULT_FASTVLM_BINARY_ADAPTIVE_MIN_SAMPLES = 10
+DEFAULT_FASTVLM_BINARY_ADAPTIVE_WINDOW = 10
+DEFAULT_FASTVLM_BINARY_ADAPTIVE_FLOOR = 0.5
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,16 @@ class BinaryMonitorDecision:
     window: int
     hits: int
     done: bool
+    threshold_mode: str = "fixed"
+    effective_threshold: float = DEFAULT_FASTVLM_BINARY_THRESHOLD
+    baseline_mean: Optional[float] = None
+    baseline_variance: Optional[float] = None
+    baseline_stddev: Optional[float] = None
+    baseline_samples: int = 0
+    adaptive_ready: bool = False
+    calibrating: bool = False
+    adaptive_z: float = DEFAULT_FASTVLM_BINARY_ADAPTIVE_Z
+    adaptive_floor: float = DEFAULT_FASTVLM_BINARY_ADAPTIVE_FLOOR
 
 
 class FastVLMBinaryRuntime:
@@ -234,24 +250,101 @@ class BinaryFrameMonitor:
 
     def __init__(self, runtime: Optional[FastVLMBinaryRuntime] = None) -> None:
         self.runtime = runtime or FastVLMBinaryRuntime()
+        self._votes: Dict[str, Deque[bool]] = {}
+        self._probability_history: Dict[str, Deque[float]] = {}
+        self.reload_settings_from_env(reset_votes=False)
+
+    def reload_settings_from_env(self, *, reset_votes: bool = True) -> Dict[str, Any]:
+        """Reload threshold/voting knobs from environment-backed settings."""
+
+        self.threshold_mode = _env_choice(
+            "VIDEOMEMORY_FASTVLM_THRESHOLD_MODE",
+            DEFAULT_FASTVLM_BINARY_THRESHOLD_MODE,
+            {"adaptive", "fixed"},
+        )
         self.threshold = _env_float("VIDEOMEMORY_FASTVLM_THRESHOLD", DEFAULT_FASTVLM_BINARY_THRESHOLD, 0.0, 1.0)
         self.resize = _env_int("VIDEOMEMORY_FASTVLM_VISION_SIZE", DEFAULT_FASTVLM_BINARY_RESIZE, 64, 2048)
         self.required_hits = _env_int("VIDEOMEMORY_FASTVLM_REQUIRED_HITS", DEFAULT_FASTVLM_BINARY_REQUIRED_HITS, 1, 30)
         self.window = _env_int("VIDEOMEMORY_FASTVLM_WINDOW", DEFAULT_FASTVLM_BINARY_WINDOW, 1, 30)
         self.required_hits = min(self.required_hits, self.window)
-        self._votes: Dict[str, Deque[bool]] = {}
+        self.adaptive_z = _env_float(
+            "VIDEOMEMORY_FASTVLM_ADAPTIVE_Z",
+            DEFAULT_FASTVLM_BINARY_ADAPTIVE_Z,
+            0.0,
+            10.0,
+        )
+        self.adaptive_min_samples = _env_int(
+            "VIDEOMEMORY_FASTVLM_ADAPTIVE_MIN_SAMPLES",
+            DEFAULT_FASTVLM_BINARY_ADAPTIVE_MIN_SAMPLES,
+            2,
+            1000,
+        )
+        # Kept as a reported setting for compatibility; adaptive mode now freezes after calibration.
+        self.adaptive_window = self.adaptive_min_samples
+        self.adaptive_floor = _env_float(
+            "VIDEOMEMORY_FASTVLM_ADAPTIVE_FLOOR",
+            DEFAULT_FASTVLM_BINARY_ADAPTIVE_FLOOR,
+            0.0,
+            1.0,
+        )
+        if reset_votes:
+            self._votes.clear()
+            self._probability_history.clear()
+        return self.get_settings()
+
+    def get_settings(self) -> Dict[str, Any]:
+        """Return the active threshold/voting knobs."""
+
+        return {
+            "threshold_mode": str(self.threshold_mode),
+            "threshold": float(self.threshold),
+            "required_hits": int(self.required_hits),
+            "window": int(self.window),
+            "resize": int(self.resize),
+            "adaptive_z": float(self.adaptive_z),
+            "adaptive_min_samples": int(self.adaptive_min_samples),
+            "adaptive_window": int(self.adaptive_window),
+            "adaptive_floor": float(self.adaptive_floor),
+        }
 
     def reset_task(self, task_id: str) -> None:
-        self._votes.pop(str(task_id), None)
+        task_key = str(task_id)
+        self._votes.pop(task_key, None)
+        self._probability_history.pop(task_key, None)
 
     def score_task(self, frame_bgr: Any, task: Any) -> BinaryMonitorDecision:
+        task_id = str(task.task_id)
         score = self.runtime.score_bgr_frame(frame_bgr, str(task.task_desc), resize=self.resize)
-        hit = score.p_true >= self.threshold
-        history = self._votes.setdefault(str(task.task_id), deque(maxlen=self.window))
+        probability_history = self._probability_history.setdefault(task_id, deque(maxlen=self.adaptive_min_samples))
+        baseline_samples, baseline_mean, baseline_variance, baseline_stddev = _probability_stats(probability_history)
+        adaptive_ready = self.threshold_mode == "adaptive" and baseline_samples >= self.adaptive_min_samples
+        calibrating = self.threshold_mode == "adaptive" and not adaptive_ready
+        if adaptive_ready and baseline_mean is not None and baseline_stddev is not None:
+            effective_threshold = max(
+                self.adaptive_floor,
+                min(1.0, baseline_mean + (self.adaptive_z * baseline_stddev)),
+            )
+            hit = score.p_true > effective_threshold
+        elif calibrating:
+            probability_history.append(float(score.p_true))
+            baseline_samples, baseline_mean, baseline_variance, baseline_stddev = _probability_stats(probability_history)
+            if baseline_mean is not None and baseline_stddev is not None:
+                effective_threshold = max(
+                    self.adaptive_floor,
+                    min(1.0, baseline_mean + (self.adaptive_z * baseline_stddev)),
+                )
+            else:
+                effective_threshold = self.threshold
+            hit = False
+        else:
+            effective_threshold = self.threshold
+            hit = score.p_true >= effective_threshold
+
+        history = self._votes.setdefault(task_id, deque(maxlen=self.window))
         history.append(hit)
         hits = sum(1 for value in history if value)
         return BinaryMonitorDecision(
-            task_id=str(task.task_id),
+            task_id=task_id,
             criterion=str(task.task_desc),
             score=score,
             threshold=self.threshold,
@@ -259,7 +352,26 @@ class BinaryFrameMonitor:
             window=self.window,
             hits=hits,
             done=hits >= self.required_hits,
+            threshold_mode=self.threshold_mode,
+            effective_threshold=float(effective_threshold),
+            baseline_mean=baseline_mean,
+            baseline_variance=baseline_variance,
+            baseline_stddev=baseline_stddev,
+            baseline_samples=baseline_samples,
+            adaptive_ready=adaptive_ready,
+            calibrating=calibrating,
+            adaptive_z=float(self.adaptive_z),
+            adaptive_floor=float(self.adaptive_floor),
         )
+
+
+def _probability_stats(values: Deque[float]) -> tuple[int, Optional[float], Optional[float], Optional[float]]:
+    samples = len(values)
+    if samples == 0:
+        return 0, None, None, None
+    mean = sum(values) / samples
+    variance = sum((value - mean) ** 2 for value in values) / samples
+    return samples, float(mean), float(variance), float(math.sqrt(variance))
 
 
 def _env_float(key: str, default: float, minimum: float, maximum: float) -> float:
@@ -276,3 +388,8 @@ def _env_int(key: str, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         value = default
     return max(minimum, min(maximum, value))
+
+
+def _env_choice(key: str, default: str, choices: set[str]) -> str:
+    value = str(os.getenv(key, default) or default).strip().lower()
+    return value if value in choices else default

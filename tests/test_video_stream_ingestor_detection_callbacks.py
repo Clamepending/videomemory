@@ -5,13 +5,121 @@ import unittest
 import numpy as np
 
 from videomemory.system.stream_ingestors.frame_utils import subsample_frames
-from videomemory.system.stream_ingestors.binary_monitor import BinaryMonitorDecision, BinaryMonitorScore
+from videomemory.system.stream_ingestors.binary_monitor import (
+    BinaryFrameMonitor,
+    BinaryMonitorDecision,
+    BinaryMonitorScore,
+)
 from videomemory.system.stream_ingestors.video_stream_ingestor import VideoStreamIngestor
 from videomemory.system.stream_ingestors.prompting import TaskUpdate, VideoIngestorOutput
 from videomemory.system.task_types import MONITOR_TYPE_BINARY, MONITOR_TYPE_GENERAL, Task
 
 
 class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
+    def test_binary_monitor_defaults_require_stronger_temporal_consensus(self):
+        with patch.dict(
+            os.environ,
+            {
+                "VIDEOMEMORY_FASTVLM_THRESHOLD": "",
+                "VIDEOMEMORY_FASTVLM_REQUIRED_HITS": "",
+                "VIDEOMEMORY_FASTVLM_WINDOW": "",
+                "VIDEOMEMORY_FASTVLM_THRESHOLD_MODE": "",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_Z": "",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_MIN_SAMPLES": "",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_WINDOW": "",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_FLOOR": "",
+            },
+        ):
+            monitor = BinaryFrameMonitor(runtime=Mock())
+
+        self.assertEqual(monitor.threshold_mode, "adaptive")
+        self.assertEqual(monitor.threshold, 0.7)
+        self.assertEqual(monitor.required_hits, 4)
+        self.assertEqual(monitor.window, 5)
+        self.assertEqual(monitor.adaptive_z, 3.0)
+        self.assertEqual(monitor.adaptive_min_samples, 10)
+        self.assertEqual(monitor.adaptive_window, 10)
+        self.assertEqual(monitor.adaptive_floor, 0.5)
+
+    def test_binary_monitor_env_settings_can_be_reloaded(self):
+        monitor = BinaryFrameMonitor(runtime=Mock())
+
+        with patch.dict(
+            os.environ,
+            {
+                "VIDEOMEMORY_FASTVLM_THRESHOLD_MODE": "fixed",
+                "VIDEOMEMORY_FASTVLM_THRESHOLD": "0.6",
+                "VIDEOMEMORY_FASTVLM_REQUIRED_HITS": "6",
+                "VIDEOMEMORY_FASTVLM_WINDOW": "5",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_Z": "2.5",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_MIN_SAMPLES": "4",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_WINDOW": "10",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_FLOOR": "0.4",
+            },
+        ):
+            settings = monitor.reload_settings_from_env()
+
+        self.assertEqual(settings["threshold_mode"], "fixed")
+        self.assertEqual(settings["threshold"], 0.6)
+        self.assertEqual(settings["required_hits"], 5)
+        self.assertEqual(settings["window"], 5)
+        self.assertEqual(settings["adaptive_z"], 2.5)
+        self.assertEqual(settings["adaptive_min_samples"], 4)
+        self.assertEqual(settings["adaptive_window"], 4)
+        self.assertEqual(settings["adaptive_floor"], 0.4)
+
+    def test_binary_monitor_adaptive_threshold_uses_frozen_initial_calibration(self):
+        class SequenceRuntime:
+            def __init__(self):
+                self.values = [0.10, 0.12, 0.11, 0.20, 0.90]
+
+            def score_bgr_frame(self, frame, criterion, resize=None):
+                p_true = self.values.pop(0)
+                return BinaryMonitorScore(
+                    answer="True" if p_true >= 0.5 else "False",
+                    p_true=p_true,
+                    p_false=1.0 - p_true,
+                    raw_text="",
+                    inference_ms=1.0,
+                    model="fake-fastvlm",
+                    resize=resize or 256,
+                )
+
+        with patch.dict(
+            os.environ,
+            {
+                "VIDEOMEMORY_FASTVLM_THRESHOLD_MODE": "adaptive",
+                "VIDEOMEMORY_FASTVLM_THRESHOLD": "0.9",
+                "VIDEOMEMORY_FASTVLM_REQUIRED_HITS": "1",
+                "VIDEOMEMORY_FASTVLM_WINDOW": "1",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_Z": "3.0",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_MIN_SAMPLES": "3",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_WINDOW": "10",
+                "VIDEOMEMORY_FASTVLM_ADAPTIVE_FLOOR": "0.0",
+            },
+        ):
+            monitor = BinaryFrameMonitor(runtime=SequenceRuntime())
+
+        frame = np.zeros((12, 16, 3), dtype=np.uint8)
+        task = self._binary_task()
+        decisions = [monitor.score_task(frame, task) for _ in range(4)]
+
+        self.assertFalse(decisions[2].done)
+        self.assertTrue(decisions[2].calibrating)
+        self.assertFalse(decisions[2].adaptive_ready)
+        final = decisions[3]
+        self.assertTrue(final.adaptive_ready)
+        self.assertFalse(final.calibrating)
+        self.assertEqual(final.baseline_samples, 3)
+        self.assertAlmostEqual(final.baseline_mean, 0.11)
+        self.assertAlmostEqual(final.baseline_variance, 0.00006666666666666667)
+        self.assertAlmostEqual(final.baseline_stddev, 0.00816496580927726)
+        self.assertAlmostEqual(final.effective_threshold, 0.13449489742783178)
+        self.assertTrue(final.done)
+        after_trigger = monitor.score_task(frame, task)
+        self.assertAlmostEqual(after_trigger.baseline_mean, 0.11)
+        self.assertAlmostEqual(after_trigger.effective_threshold, final.effective_threshold)
+
     def _task(self):
         return Task(
             task_id="task-1",
@@ -308,9 +416,9 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
 
     def test_binary_monitor_done_updates_task_without_general_provider(self):
         class FakeBinaryMonitor:
-            threshold = 0.5
-            required_hits = 2
-            window = 3
+            threshold = 0.7
+            required_hits = 4
+            window = 5
             resize = 256
 
             def __init__(self):
@@ -329,10 +437,10 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
                         model="fake-fastvlm",
                         resize=256,
                     ),
-                    threshold=0.5,
-                    required_hits=2,
-                    window=3,
-                    hits=2,
+                    threshold=0.7,
+                    required_hits=4,
+                    window=5,
+                    hits=4,
                     done=True,
                 )
 

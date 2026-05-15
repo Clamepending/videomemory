@@ -223,6 +223,154 @@
             line-height: 1.45;
         }
 
+        .binary-monitor-panel {
+            border-color: rgba(25, 195, 125, 0.38);
+            background: #252c28;
+        }
+
+        .binary-monitor-panel[hidden] {
+            display: none;
+        }
+
+        .binary-monitor-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .binary-monitor-title {
+            min-width: 0;
+        }
+
+        .binary-monitor-task {
+            color: #ececec;
+            font-size: 13px;
+            font-weight: 650;
+            overflow-wrap: anywhere;
+        }
+
+        .binary-monitor-criterion {
+            margin-top: 3px;
+            color: #aaa;
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .binary-trigger-state {
+            min-width: 118px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            color: #b8f7d8;
+            background: rgba(25, 195, 125, 0.12);
+            border: 1px solid rgba(25, 195, 125, 0.3);
+            font-size: 12px;
+            font-weight: 700;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        .binary-trigger-state.triggered {
+            color: #241300;
+            background: #ffb020;
+            border-color: #ffcf73;
+        }
+
+        .binary-trigger-state.calibrating {
+            color: #ffe8a3;
+            background: rgba(246, 211, 101, 0.12);
+            border-color: rgba(246, 211, 101, 0.36);
+        }
+
+        .binary-monitor-body {
+            display: grid;
+            grid-template-columns: minmax(260px, 1fr) minmax(260px, 0.85fr);
+            gap: 16px;
+            align-items: start;
+        }
+
+        .binary-prob-stack {
+            display: grid;
+            gap: 12px;
+        }
+
+        .binary-prob-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            color: #ececec;
+            font-size: 13px;
+            font-weight: 650;
+        }
+
+        .binary-prob-bar {
+            position: relative;
+            height: 18px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #111;
+            border: 1px solid #3a3a3a;
+        }
+
+        .binary-prob-fill {
+            width: 0%;
+            height: 100%;
+            border-radius: inherit;
+            background: #19c37d;
+            transition: width 0.2s ease;
+        }
+
+        .binary-prob-fill.false {
+            background: #f25f5c;
+        }
+
+        .binary-threshold-marker {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0%;
+            width: 2px;
+            background: #ffb020;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8);
+            transition: left 0.2s ease;
+        }
+
+        .binary-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .binary-stat {
+            min-width: 0;
+            padding: 10px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+        }
+
+        .binary-stat-label {
+            color: #888;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .binary-stat-value {
+            margin-top: 4px;
+            color: #ececec;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 13px;
+            overflow-wrap: anywhere;
+        }
+
+        .binary-monitor-note {
+            margin-top: 12px;
+            color: #aaa;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
         .chunk-queue-bar {
             position: relative;
             width: 100%;
@@ -582,6 +730,9 @@
             .pipeline-stage-body {
                 grid-template-columns: 1fr;
             }
+            .binary-monitor-body {
+                grid-template-columns: 1fr;
+            }
             .semantic-output-pair {
                 grid-template-columns: 1fr;
             }
@@ -607,8 +758,12 @@
 {% block extra_scripts %}
     <script>
         const IO_ID = '{{ io_id }}';
+        const DEBUG_TASK_ID = new URLSearchParams(window.location.search).get('task_id') || '';
+        const DEBUG_MONITOR_TYPE = new URLSearchParams(window.location.search).get('monitor_type') || '';
         const DEFAULT_SEMANTIC_THRESHOLD = 0.3;
         let deviceName = IO_ID;
+        let latestDebugTasks = [];
+        let latestDebugStatus = null;
 
         function fetchNoStore(url, options) {
             const mergedOptions = Object.assign({ cache: 'no-store' }, options || {});
@@ -693,6 +848,47 @@
         function renderDebugPanels() {
             document.getElementById('debugContent').innerHTML = `
                 <div class="debug-grid">
+                    <div id="binaryMonitorPanel" class="debug-panel full-width binary-monitor-panel" hidden>
+                        <h2>Binary Monitor</h2>
+                        <div class="binary-monitor-head">
+                            <div class="binary-monitor-title">
+                                <div id="binaryTaskLabel" class="binary-monitor-task">No binary task selected</div>
+                                <div id="binaryCriterion" class="binary-monitor-criterion">Waiting for the first binary evaluation.</div>
+                            </div>
+                            <div id="binaryTriggerState" class="binary-trigger-state">Waiting</div>
+                        </div>
+                        <div class="binary-monitor-body">
+                            <div class="binary-prob-stack">
+                                <div>
+                                    <div class="binary-prob-head"><span>True</span><span id="binaryTrueValue">-</span></div>
+                                    <div class="binary-prob-bar">
+                                        <div id="binaryTrueFill" class="binary-prob-fill"></div>
+                                        <div id="binaryThresholdMarker" class="binary-threshold-marker" hidden></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="binary-prob-head"><span>False</span><span id="binaryFalseValue">-</span></div>
+                                    <div class="binary-prob-bar">
+                                        <div id="binaryFalseFill" class="binary-prob-fill false"></div>
+                                    </div>
+                                </div>
+                                <div id="binaryMonitorMetrics" class="semantic-live-metrics">
+                                    <span class="semantic-live-metric">waiting for binary monitor…</span>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="binary-stat-grid">
+                                    <div class="binary-stat"><div class="binary-stat-label">Threshold</div><div id="binaryThresholdValue" class="binary-stat-value">-</div></div>
+                                    <div class="binary-stat"><div class="binary-stat-label">Hits</div><div id="binaryHitsValue" class="binary-stat-value">-</div></div>
+                                    <div class="binary-stat"><div class="binary-stat-label">Baseline mean</div><div id="binaryMeanValue" class="binary-stat-value">-</div></div>
+                                    <div class="binary-stat"><div class="binary-stat-label">Baseline std</div><div id="binaryStdValue" class="binary-stat-value">-</div></div>
+                                    <div class="binary-stat"><div class="binary-stat-label">Calibration</div><div id="binaryCalibrationValue" class="binary-stat-value">-</div></div>
+                                    <div class="binary-stat"><div class="binary-stat-label">Inference</div><div id="binaryInferenceValue" class="binary-stat-value">-</div></div>
+                                </div>
+                                <div id="binaryMonitorNote" class="binary-monitor-note">Start with the trigger absent; calibration freezes before the monitor can trigger.</div>
+                            </div>
+                        </div>
+                    </div>
                     <div class="debug-panel full-width">
                         <h2>Live Ingestor Pipeline</h2>
                         <div class="pipeline-stack">
@@ -1049,6 +1245,138 @@
             return `${(value / 1000).toFixed(1)} s`;
         }
 
+        function formatNumber(value, digits) {
+            const number = Number(value);
+            if (!Number.isFinite(number)) return '-';
+            return number.toFixed(digits);
+        }
+
+        function probabilityPercent(value) {
+            const number = Number(value);
+            if (!Number.isFinite(number)) return 0;
+            return Math.max(0, Math.min(100, number * 100));
+        }
+
+        function findDebugTask(taskId) {
+            const needle = String(taskId || '');
+            if (!needle) return null;
+            return latestDebugTasks.find(task => String(task.task_id || '') === needle) || null;
+        }
+
+        function selectedBinaryTask(binaryStatus) {
+            const selected = findDebugTask(DEBUG_TASK_ID);
+            if (selected && selected.monitor_type === 'binary') return selected;
+            if (DEBUG_MONITOR_TYPE === 'binary' && selected) return selected;
+            const latestTaskId = String((binaryStatus || {}).last_task_id || '');
+            const latestTask = findDebugTask(latestTaskId);
+            if (latestTask && latestTask.monitor_type === 'binary') return latestTask;
+            return latestDebugTasks.find(task => task.monitor_type === 'binary' && !task.done)
+                || latestDebugTasks.find(task => task.monitor_type === 'binary')
+                || null;
+        }
+
+        function renderBinaryMonitorStatus(data) {
+            const panel = document.getElementById('binaryMonitorPanel');
+            if (!panel) return;
+            const binary = (data && data.binary_monitor) || {};
+            const task = selectedBinaryTask(binary);
+            const shouldShow = Boolean(task || DEBUG_MONITOR_TYPE === 'binary' || binary.enabled || binary.last_task_id);
+            panel.hidden = !shouldShow;
+            if (!shouldShow) return;
+
+            const selectedTaskId = task ? String(task.task_id || '') : String(binary.last_task_id || '');
+            const latestTaskId = String(binary.last_task_id || '');
+            const hasMatchingEvaluation = Boolean(latestTaskId && selectedTaskId && latestTaskId === selectedTaskId);
+            const pTrue = hasMatchingEvaluation ? probabilityPercent(binary.last_p_true) : 0;
+            const pFalse = hasMatchingEvaluation ? probabilityPercent(binary.last_p_false) : 0;
+            const effectiveThreshold = Number(firstDefined(binary.last_effective_threshold, binary.threshold));
+            const thresholdPercent = probabilityPercent(effectiveThreshold);
+            const calibrating = Boolean(hasMatchingEvaluation && binary.last_calibrating);
+            const adaptiveReady = Boolean(hasMatchingEvaluation && binary.last_adaptive_ready);
+            const triggered = Boolean((task && task.done) || (hasMatchingEvaluation && binary.last_done));
+
+            const taskLabel = document.getElementById('binaryTaskLabel');
+            const criterion = document.getElementById('binaryCriterion');
+            const triggerState = document.getElementById('binaryTriggerState');
+            const trueValue = document.getElementById('binaryTrueValue');
+            const falseValue = document.getElementById('binaryFalseValue');
+            const trueFill = document.getElementById('binaryTrueFill');
+            const falseFill = document.getElementById('binaryFalseFill');
+            const marker = document.getElementById('binaryThresholdMarker');
+            const thresholdValue = document.getElementById('binaryThresholdValue');
+            const hitsValue = document.getElementById('binaryHitsValue');
+            const meanValue = document.getElementById('binaryMeanValue');
+            const stdValue = document.getElementById('binaryStdValue');
+            const calibrationValue = document.getElementById('binaryCalibrationValue');
+            const inferenceValue = document.getElementById('binaryInferenceValue');
+            const metrics = document.getElementById('binaryMonitorMetrics');
+            const note = document.getElementById('binaryMonitorNote');
+
+            if (taskLabel) taskLabel.textContent = selectedTaskId ? `Task ${selectedTaskId} · Binary local monitor` : 'Binary local monitor';
+            if (criterion) criterion.textContent = (task && task.task_desc) || binary.last_criterion || 'Waiting for the first binary evaluation.';
+            if (trueValue) trueValue.textContent = hasMatchingEvaluation ? `${pTrue.toFixed(1)}%` : '-';
+            if (falseValue) falseValue.textContent = hasMatchingEvaluation ? `${pFalse.toFixed(1)}%` : '-';
+            if (trueFill) trueFill.style.width = `${pTrue}%`;
+            if (falseFill) falseFill.style.width = `${pFalse}%`;
+            if (marker) {
+                marker.hidden = !Number.isFinite(effectiveThreshold);
+                marker.style.left = `${thresholdPercent}%`;
+            }
+            if (thresholdValue) thresholdValue.textContent = Number.isFinite(effectiveThreshold) ? formatNumber(effectiveThreshold, 3) : '-';
+            if (hitsValue) {
+                const hits = hasMatchingEvaluation ? firstDefined(binary.last_hits, 0) : 0;
+                hitsValue.textContent = `${hits}/${firstDefined(binary.required_hits, '?')} in ${firstDefined(binary.window, '?')}`;
+            }
+            if (meanValue) meanValue.textContent = hasMatchingEvaluation ? formatNumber(binary.last_baseline_mean, 3) : '-';
+            if (stdValue) stdValue.textContent = hasMatchingEvaluation ? formatNumber(binary.last_baseline_stddev, 3) : '-';
+            if (calibrationValue) {
+                const samples = hasMatchingEvaluation ? firstDefined(binary.last_baseline_samples, 0) : 0;
+                calibrationValue.textContent = `${samples}/${firstDefined(binary.adaptive_min_samples, '?')}`;
+            }
+            if (inferenceValue) {
+                const inferenceMs = hasMatchingEvaluation ? Number(binary.last_inference_ms) : NaN;
+                inferenceValue.textContent = Number.isFinite(inferenceMs) ? `${inferenceMs.toFixed(1)} ms` : '-';
+            }
+            if (triggerState) {
+                triggerState.className = 'binary-trigger-state';
+                if (triggered) {
+                    triggerState.textContent = 'Triggered';
+                    triggerState.classList.add('triggered');
+                } else if (calibrating) {
+                    triggerState.textContent = 'Calibrating';
+                    triggerState.classList.add('calibrating');
+                } else if (adaptiveReady) {
+                    triggerState.textContent = 'Armed';
+                } else {
+                    triggerState.textContent = 'Waiting';
+                }
+            }
+            if (metrics) {
+                const chips = [];
+                chips.push(binary.enabled ? 'binary active' : 'binary idle');
+                chips.push(adaptiveReady ? 'calibration frozen' : (calibrating ? 'collecting baseline' : 'no baseline yet'));
+                if (binary.evaluations != null) chips.push(`${binary.evaluations} evals`);
+                if (binary.evaluation_fps) chips.push(`${Number(binary.evaluation_fps).toFixed(1)} fps`);
+                if (binary.adaptive_z != null) chips.push(`${formatNumber(binary.adaptive_z, 1)} std devs`);
+                if (binary.adaptive_floor != null) chips.push(`${formatNumber(binary.adaptive_floor, 2)} floor`);
+                if (binary.latest_error) chips.push(`error: ${binary.latest_error}`);
+                metrics.innerHTML = chips
+                    .map(chip => `<span class="semantic-live-metric">${escapeHtml(chip)}</span>`)
+                    .join('');
+            }
+            if (note) {
+                if (!hasMatchingEvaluation && selectedTaskId) {
+                    note.textContent = 'Waiting for this selected task to receive its first binary evaluation.';
+                } else if (calibrating) {
+                    note.textContent = 'Calibration is collecting the initial no-trigger baseline. Triggers are suppressed until it completes.';
+                } else if (adaptiveReady) {
+                    note.textContent = 'Calibration is complete. The threshold is fixed for this task and will not adapt to later trigger frames.';
+                } else {
+                    note.textContent = 'Waiting for binary monitor activity on this device.';
+                }
+            }
+        }
+
         function renderChunkQueueMetrics(queue) {
             const metrics = document.getElementById('chunkQueueMetrics');
             const fill = document.getElementById('chunkQueueFill');
@@ -1352,7 +1680,9 @@
                     renderSemanticLiveMetrics({ has_frame: false, has_heatmap: false, semantic_filter: { last_error: data.error || 'Failed to load semantic preview' } });
                     return;
                 }
+                latestDebugStatus = data;
                 renderPipelineStageMetrics(data);
+                renderBinaryMonitorStatus(data);
                 const semanticEnabled = Boolean(data.semantic_filter && data.semantic_filter.enabled);
                 if (semanticEnabled) {
                     startSemanticLiveStream();
@@ -1685,6 +2015,8 @@
                 if (!container) return;
 
                 const tasks = data.tasks || [];
+                latestDebugTasks = tasks;
+                renderBinaryMonitorStatus(latestDebugStatus || {});
                 if (tasks.length === 0) {
                     container.innerHTML = '<span class="no-data">No tasks on this ingestor.</span>';
                     return;
@@ -1694,7 +2026,9 @@
                     const doneClass = task.done ? ' done' : '';
                     const taskLabel = firstDefined(task.task_number, task.task_id);
                     html += `<div class="task-item${doneClass}">`;
+                    const monitorLabel = task.monitor_type === 'binary' ? 'Binary' : 'General';
                     html += `<strong>Task ${escapeHtml(String(taskLabel))}:</strong> ${escapeHtml(task.task_desc)}`;
+                    html += `<span class="task-done-badge">${escapeHtml(monitorLabel)}</span>`;
                     html += `<span class="task-done-badge">(${task.done ? 'Done' : 'Active'})</span>`;
                     if (task.latest_note) {
                         html += `<div class="task-note">${escapeHtml(task.latest_note.content)} <span class="note-ts">(${task.latest_note.timestamp || ''})</span></div>`;

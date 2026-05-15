@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 from flask_app import app as app_module
-from videomemory.system.task_types import NoteEntry, Task
+from videomemory.system.task_types import MONITOR_TYPE_BINARY, NoteEntry, Task
 
 
 class IngestorDebugApiTests(unittest.TestCase):
@@ -317,6 +317,55 @@ class IngestorDebugApiTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.get_data(as_text=True)
         self.assertNotIn("??", html)
+
+    def test_task_debug_route_redirects_to_scoped_device_debug(self):
+        with patch.object(
+            app_module.task_manager,
+            "get_task",
+            return_value={"task_id": "42", "io_id": "net0", "monitor_type": MONITOR_TYPE_BINARY},
+        ):
+            resp = self.client.get("/task/42/debug")
+
+        self.assertEqual(resp.status_code, 302)
+        location = resp.headers["Location"]
+        self.assertIn("/device/net0/debug", location)
+        self.assertIn("task_id=42", location)
+        self.assertIn("monitor_type=binary", location)
+
+    def test_task_api_includes_debug_urls_for_agents(self):
+        with patch.object(
+            app_module.task_manager,
+            "get_task",
+            return_value={"task_id": "42", "io_id": "net0", "monitor_type": MONITOR_TYPE_BINARY},
+        ):
+            resp = self.client.get("/api/task/42")
+
+        self.assertEqual(resp.status_code, 200)
+        task = resp.get_json()["task"]
+        self.assertEqual(task["debug_url"], "/task/42/debug")
+        self.assertIn("/device/net0/debug", task["device_debug_url"])
+        self.assertIn("task_id=42", task["device_debug_url"])
+
+    def test_debug_tasks_endpoint_exposes_binary_monitor_context(self):
+        task = Task(
+            task_number=0,
+            task_id="42",
+            task_desc="phone is visible",
+            task_note=[],
+            done=False,
+            io_id="net0",
+            monitor_type=MONITOR_TYPE_BINARY,
+        )
+        ingestor = SimpleNamespace(get_tasks_list=lambda: [task])
+
+        with patch.object(app_module.task_manager, "peek_ingestor", return_value=ingestor):
+            resp = self.client.get("/api/device/net0/debug/tasks")
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json()["tasks"][0]
+        self.assertEqual(payload["monitor_type"], MONITOR_TYPE_BINARY)
+        self.assertEqual(payload["debug_url"], "/task/42/debug")
+        self.assertIn("monitor_type=binary", payload["device_debug_url"])
 
     def test_debug_routes_disable_browser_caching(self):
         html_resp = self.client.get("/device/net0/debug")

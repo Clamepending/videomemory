@@ -279,6 +279,13 @@ class VideoStreamIngestor:
             self._queued_semantic_frame_created_at.popleft()
         return self.get_video_chunk_settings()
 
+    def reload_binary_monitor_settings(self) -> Dict[str, Any]:
+        """Reload binary monitor threshold/voting settings for active ingestors."""
+
+        self._latest_binary_decision = None
+        self._latest_binary_monitor_error = None
+        return self._binary_monitor.reload_settings_from_env()
+
     def get_video_chunk_settings(self) -> Dict[str, Any]:
         """Return active video chunking settings."""
 
@@ -972,7 +979,9 @@ class VideoStreamIngestor:
 
             note = (
                 f"Binary criterion met: {task.task_desc} "
-                f"(p_true={decision.score.p_true:.3f}, hits={decision.hits}/{decision.window})."
+                f"(p_true={decision.score.p_true:.3f}, "
+                f"threshold={decision.effective_threshold:.3f}, "
+                f"hits={decision.hits}/{decision.window})."
             )
             self._process_ml_results(
                 {
@@ -995,6 +1004,16 @@ class VideoStreamIngestor:
                         "p_true": decision.score.p_true,
                         "p_false": decision.score.p_false,
                         "threshold": decision.threshold,
+                        "threshold_mode": decision.threshold_mode,
+                        "effective_threshold": decision.effective_threshold,
+                        "baseline_mean": decision.baseline_mean,
+                        "baseline_variance": decision.baseline_variance,
+                        "baseline_stddev": decision.baseline_stddev,
+                        "baseline_samples": decision.baseline_samples,
+                        "adaptive_ready": decision.adaptive_ready,
+                        "calibrating": decision.calibrating,
+                        "adaptive_z": decision.adaptive_z,
+                        "adaptive_floor": decision.adaptive_floor,
                         "hits": decision.hits,
                         "window": decision.window,
                         "required_hits": decision.required_hits,
@@ -1774,10 +1793,15 @@ class VideoStreamIngestor:
             "evaluation_fps": float(self._binary_monitor_fps_ema),
             "queued_frames": int(queue_size),
             "dropped_frames": int(self._binary_queue_frames_dropped),
+            "threshold_mode": str(self._binary_monitor.threshold_mode),
             "threshold": float(self._binary_monitor.threshold),
             "required_hits": int(self._binary_monitor.required_hits),
             "window": int(self._binary_monitor.window),
             "resize": int(self._binary_monitor.resize),
+            "adaptive_z": float(self._binary_monitor.adaptive_z),
+            "adaptive_min_samples": int(self._binary_monitor.adaptive_min_samples),
+            "adaptive_window": int(self._binary_monitor.adaptive_window),
+            "adaptive_floor": float(self._binary_monitor.adaptive_floor),
             "latest_error": self._latest_binary_monitor_error,
         }
         if decision is not None:
@@ -1790,6 +1814,20 @@ class VideoStreamIngestor:
                     "last_p_false": float(decision.score.p_false),
                     "last_hits": int(decision.hits),
                     "last_done": bool(decision.done),
+                    "last_threshold_mode": decision.threshold_mode,
+                    "last_effective_threshold": float(decision.effective_threshold),
+                    "last_baseline_mean": (
+                        float(decision.baseline_mean) if decision.baseline_mean is not None else None
+                    ),
+                    "last_baseline_variance": (
+                        float(decision.baseline_variance) if decision.baseline_variance is not None else None
+                    ),
+                    "last_baseline_stddev": (
+                        float(decision.baseline_stddev) if decision.baseline_stddev is not None else None
+                    ),
+                    "last_baseline_samples": int(decision.baseline_samples),
+                    "last_adaptive_ready": bool(decision.adaptive_ready),
+                    "last_calibrating": bool(decision.calibrating),
                     "last_inference_ms": float(decision.score.inference_ms),
                     "last_model": decision.score.model,
                     "last_resize": int(decision.score.resize),

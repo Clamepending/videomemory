@@ -603,6 +603,40 @@ def task_detail(task_id):
     """Render the task detail page."""
     return render_template('task_detail.html', task_id=task_id)
 
+@app.route('/task/<task_id>/debug')
+def task_debug(task_id):
+    """Open the device debug page scoped to one task."""
+    task = task_manager.get_task(task_id)
+    if task is None:
+        return "Task not found", 404
+    io_id = str(task.get('io_id') or '').strip()
+    if not io_id:
+        return "Task has no device", 404
+    return redirect(
+        url_for(
+            'device_debug',
+            io_id=io_id,
+            task_id=task_id,
+            monitor_type=task.get('monitor_type', ''),
+        )
+    )
+
+def _with_task_debug_urls(task: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach stable UI debug links for user and agent consumers."""
+    payload = dict(task)
+    task_id = str(payload.get('task_id') or '')
+    io_id = str(payload.get('io_id') or '')
+    if task_id:
+        payload['debug_url'] = url_for('task_debug', task_id=task_id)
+    if task_id and io_id:
+        payload['device_debug_url'] = url_for(
+            'device_debug',
+            io_id=io_id,
+            task_id=task_id,
+            monitor_type=payload.get('monitor_type', ''),
+        )
+    return payload
+
 @app.route('/devices')
 def devices():
     """Render the devices page."""
@@ -679,7 +713,7 @@ def get_tasks():
     """
     try:
         io_id = request.args.get('io_id', None)
-        tasks_list = task_manager.list_tasks(io_id)
+        tasks_list = [_with_task_debug_urls(task) for task in task_manager.list_tasks(io_id)]
         return jsonify({'status': 'success', 'tasks': tasks_list, 'count': len(tasks_list)})
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
@@ -745,7 +779,7 @@ def get_task(task_id):
         task = task_manager.get_task(task_id)
         if task is None:
             return jsonify({'status': 'error', 'error': 'Task not found'}), 404
-        return jsonify({'status': 'success', 'task': task})
+        return jsonify({'status': 'success', 'task': _with_task_debug_urls(task)})
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
@@ -2582,6 +2616,17 @@ def get_ingestor_tasks(io_id):
                 'task_id': task.task_id,
                 'task_desc': task.task_desc,
                 'done': task.done,
+                'status': getattr(task, 'status', 'done' if task.done else 'active'),
+                'io_id': task.io_id,
+                'monitor_type': getattr(task, 'monitor_type', MONITOR_TYPE_GENERAL),
+                'bot_id': getattr(task, 'bot_id', None),
+                'debug_url': url_for('task_debug', task_id=task.task_id),
+                'device_debug_url': url_for(
+                    'device_debug',
+                    io_id=task.io_id,
+                    task_id=task.task_id,
+                    monitor_type=getattr(task, 'monitor_type', MONITOR_TYPE_GENERAL),
+                ),
                 'latest_note': None
             }
             if task.task_note and len(task.task_note) > 0:
@@ -3344,6 +3389,15 @@ _DEFAULT_SETTINGS = {
     'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES': '9',
     'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE': '10',
     'VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE': '3',
+    'VIDEOMEMORY_FASTVLM_THRESHOLD_MODE': 'adaptive',
+    'VIDEOMEMORY_FASTVLM_THRESHOLD': '0.70',
+    'VIDEOMEMORY_FASTVLM_REQUIRED_HITS': '4',
+    'VIDEOMEMORY_FASTVLM_WINDOW': '5',
+    'VIDEOMEMORY_FASTVLM_VISION_SIZE': '256',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_Z': '3.0',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_MIN_SAMPLES': '10',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_WINDOW': '10',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_FLOOR': '0.50',
 }
 
 # All known setting keys (for the settings page)
@@ -3362,9 +3416,14 @@ _KNOWN_SETTINGS = [
     'VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE',
     'VIDEOMEMORY_FASTVLM_MODEL',
     'VIDEOMEMORY_FASTVLM_VISION_SIZE',
+    'VIDEOMEMORY_FASTVLM_THRESHOLD_MODE',
     'VIDEOMEMORY_FASTVLM_THRESHOLD',
     'VIDEOMEMORY_FASTVLM_REQUIRED_HITS',
     'VIDEOMEMORY_FASTVLM_WINDOW',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_Z',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_MIN_SAMPLES',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_WINDOW',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_FLOOR',
     'LOCAL_MODEL_BASE_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_URL',
     'VIDEOMEMORY_OPENCLAW_WEBHOOK_TOKEN',
@@ -3393,6 +3452,18 @@ _VIDEO_CHUNK_RUNTIME_KEYS = {
     'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES',
     'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE',
     'VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE',
+}
+
+_BINARY_MONITOR_RUNTIME_KEYS = {
+    'VIDEOMEMORY_FASTVLM_THRESHOLD_MODE',
+    'VIDEOMEMORY_FASTVLM_THRESHOLD',
+    'VIDEOMEMORY_FASTVLM_REQUIRED_HITS',
+    'VIDEOMEMORY_FASTVLM_WINDOW',
+    'VIDEOMEMORY_FASTVLM_VISION_SIZE',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_Z',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_MIN_SAMPLES',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_WINDOW',
+    'VIDEOMEMORY_FASTVLM_ADAPTIVE_FLOOR',
 }
 
 
@@ -3677,6 +3748,13 @@ def _apply_runtime_setting_change(changed_key: str) -> None:
         reload_result = task_manager.reload_video_chunk_settings()
         flask_logger.info(
             "Applied video chunk runtime settings update for %s (ingestors=%d)",
+            changed_key,
+            reload_result.get('updated_ingestors', 0),
+        )
+    if changed_key in _BINARY_MONITOR_RUNTIME_KEYS:
+        reload_result = task_manager.reload_binary_monitor_settings()
+        flask_logger.info(
+            "Applied binary monitor runtime settings update for %s (ingestors=%d)",
             changed_key,
             reload_result.get('updated_ingestors', 0),
         )

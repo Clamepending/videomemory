@@ -377,6 +377,22 @@
             border-color: rgba(246, 211, 101, 0.45);
         }
 
+        .debug-task-btn {
+            color: #b8f7d8;
+            border: 1px solid rgba(25, 195, 125, 0.32);
+            font-size: 12px;
+            font-weight: 600;
+            padding: 5px 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .debug-task-btn:hover {
+            color: #eafff4;
+            background: rgba(25, 195, 125, 0.12);
+            border-color: rgba(25, 195, 125, 0.52);
+        }
+
         .delete-task-btn {
             color: #666;
             font-size: 18px;
@@ -670,6 +686,13 @@
             }
         }
 
+        function openTaskDebug(taskId, event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!taskId) return;
+            window.location.href = `/task/${encodeURIComponent(taskId)}/debug`;
+        }
+
         async function loadTasks() {
             const contentDiv = document.getElementById('tasksContent');
 
@@ -724,6 +747,9 @@
                     const monitorLabel = monitorType === 'binary' ? 'Binary local monitor' : 'General VLM monitor';
                     const botLabel = task.bot_id ? `Bot: ${escapeHtml(task.bot_id)}` : '';
                     const safeTaskIdArg = JSON.stringify(String(taskId));
+                    const debugButton = task.io_id
+                        ? `<button class="task-control-btn debug-task-btn" onclick='openTaskDebug(${safeTaskIdArg}, event)' title="Open live debug for this task">Debug</button>`
+                        : '';
                     const pauseButton = status === 'active'
                         ? `<button class="task-control-btn pause-task-btn" onclick='stopTask(${safeTaskIdArg}, event)' title="Pause task: stop monitoring and keep history">Pause</button>`
                         : '';
@@ -740,6 +766,7 @@
                                     ${statusLabels[status] || status}
                                 </span>
                                 <span class="task-action-buttons">
+                                    ${debugButton}
                                     ${pauseButton}
                                     <button class="task-control-btn delete-task-btn" onclick='deleteTask(${safeTaskIdArg}, event)' title="Delete task permanently">&#x2715;</button>
                                 </span>
