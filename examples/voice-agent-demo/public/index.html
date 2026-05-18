@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VideoMemory Voice Agent Example</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div>
+          <h1>VideoMemory Voice Agent Example</h1>
+          <p id="statusLine">Starting...</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="refreshStatus" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <section class="live-stage">
+        <div class="camera-shell">
+          <video id="liveVideo" autoplay playsinline muted></video>
+          <audio id="remoteAudio" autoplay hidden></audio>
+          <canvas id="liveCanvas" hidden></canvas>
+          <div id="cameraOverlay">Click Start live agent</div>
+        </div>
+        <div class="live-controls">
+          <div>
+            <h2>Live agent</h2>
+            <p id="liveStatus">Nothing is armed. Start the live agent, then just speak.</p>
+          </div>
+          <div class="big-actions">
+            <button id="startLive" class="primary big" type="button">Start live agent</button>
+            <button id="talkButton" class="big" type="button">Stop</button>
+            <button id="resetDemo" class="big" type="button">Reset demo</button>
+          </div>
+          <form id="chatForm" class="composer quick-composer">
+            <textarea id="chatInput" rows="3" spellcheck="true" placeholder="Typed fallback. Example: Be a shopkeeper. Watch these apples and wake up if someone takes one."></textarea>
+            <div class="composer-actions">
+              <button type="submit">Send to live agent</button>
+            </div>
+          </form>
+          <div id="transcript" class="transcript compact-transcript" aria-live="off" aria-atomic="false"></div>
+        </div>
+      </section>
+
+      <details class="advanced-shell">
+        <summary>Advanced/debug</summary>
+        <section class="grid">
+        <section class="panel conversation">
+          <div class="panel-header">
+            <h2>Conversation</h2>
+            <div class="segmented">
+              <button id="liveCameraMode" class="selected" type="button">Live camera</button>
+              <button id="fakeCameraMode" type="button">Fake camera</button>
+            </div>
+          </div>
+          <p class="muted">The main live transcript is shown above. This panel only exposes camera mode controls for tests.</p>
+          <button id="shopkeeperButton" type="button">Arm apple shopkeeper demo</button>
+        </section>
+
+        <aside class="panel side">
+          <div class="panel-header">
+            <h2>Wakeup</h2>
+            <span id="wakeState" class="pill">idle</span>
+          </div>
+          <dl class="facts">
+            <div><dt>VideoMemory</dt><dd id="vmUrl">-</dd></div>
+            <div><dt>Webhook</dt><dd id="webhookUrl">-</dd></div>
+            <div><dt>Task</dt><dd id="taskId">none</dd></div>
+            <div><dt>Readiness</dt><dd id="readiness">not armed</dd></div>
+          </dl>
+          <div class="button-row">
+            <button id="simulateWakeup" type="button">Simulate wakeup</button>
+            <button id="registerFakeCamera" type="button">Register fake camera</button>
+            <button id="copyDebugSnapshot" type="button">Copy debug snapshot</button>
+          </div>
+          <div class="fake-camera">
+            <div class="panel-header compact">
+              <h3>Fake Camera</h3>
+              <select id="fakeScene">
+                <option value="apple_counter">Apple counter</option>
+                <option value="customer">Customer</option>
+                <option value="apple_taken">Apple taken</option>
+              </select>
+            </div>
+            <img id="fakePreview" src="/fake-camera/preview.svg" alt="Fake apple counter camera preview">
+          </div>
+        </aside>
+
+        <section class="panel ledger-panel">
+          <div class="panel-header">
+            <h2>Ledger</h2>
+            <button id="clearLedger" type="button">Clear</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Apples</th>
+                <th>Due</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody id="ledgerBody">
+              <tr><td colspan="4">No entries</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel events-panel">
+          <div class="panel-header">
+            <h2>Events</h2>
+          </div>
+          <div id="events" class="events"></div>
+        </section>
+        </section>
+      </details>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

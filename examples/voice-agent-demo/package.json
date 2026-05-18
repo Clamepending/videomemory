@@ -1,0 +1,12 @@
+{
+  "name": "videomemory-voice-agent-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Readable live voice/video agent example for VideoMemory webhooks and monitors.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check lib.mjs && node --check server.mjs && node --check public/app.js",
+    "test": "node --test test/*.test.mjs"
+  }
+}

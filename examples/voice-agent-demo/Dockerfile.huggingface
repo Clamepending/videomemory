@@ -1,0 +1,36 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    libglib2.0-0 \
+    libgl1 \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock ./
+COPY videomemory ./videomemory
+COPY flask_app ./flask_app
+COPY examples/voice-agent-demo ./examples/voice-agent-demo
+
+RUN uv sync --frozen --no-dev
+
+WORKDIR /app/examples/voice-agent-demo
+RUN npm install --omit=dev
+
+WORKDIR /app
+RUN chmod +x /app/examples/voice-agent-demo/start-huggingface.sh
+
+EXPOSE 7860
+
+CMD ["bash", "/app/examples/voice-agent-demo/start-huggingface.sh"]
