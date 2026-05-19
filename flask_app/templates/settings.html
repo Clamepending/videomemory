@@ -466,27 +466,14 @@
                 <div class="setting-status" id="status-LOCAL_MODEL_BASE_URL"></div>
             </div>
 
-            <div class="setting-row" data-key="VIDEOMEMORY_VIDEO_CHUNK_SECONDS">
-                <div class="setting-label">
-                    <label>Video Chunk Length (seconds)</label>
-                    <span class="badge" id="badge-VIDEOMEMORY_VIDEO_CHUNK_SECONDS"></span>
-                </div>
-                <div class="setting-hint">How long to collect motion-filtered frames before sending a chunk to the model. Default: 2.0.</div>
-                <div class="setting-input-row">
-                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_SECONDS" placeholder="2.0" min="0.1" step="0.1">
-                    <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_VIDEO_CHUNK_SECONDS')">Save</button>
-                </div>
-                <div class="setting-status" id="status-VIDEOMEMORY_VIDEO_CHUNK_SECONDS"></div>
-            </div>
-
             <div class="setting-row" data-key="VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES">
                 <div class="setting-label">
                     <label>Max Frames Per Model Contact Sheet</label>
                     <span class="badge" id="badge-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES"></span>
                 </div>
-                <div class="setting-hint">Uses all valid frames when the chunk has this many or fewer; otherwise evenly samples down to this max before building the contact sheet. Default: 9.</div>
+                <div class="setting-hint">Uses all valid frames when the batch has this many or fewer; otherwise evenly samples down to this max before building the contact sheet. Default: 12.</div>
                 <div class="setting-input-row">
-                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES" placeholder="9" min="1" step="1">
+                    <input type="number" class="setting-input" id="input-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES" placeholder="12" min="1" step="1">
                     <button class="btn btn-save" onclick="saveSetting('VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES')">Save</button>
                 </div>
                 <div class="setting-status" id="status-VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES"></div>

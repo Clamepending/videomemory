@@ -37,7 +37,6 @@ from .frame_utils import (
     build_frame_contact_sheet,
     frame_to_base64,
     frame_to_jpeg_bytes,
-    is_chunk_complete,
     mean_absolute_frame_difference,
     normalize_frames,
     subsample_frames,
@@ -79,8 +78,9 @@ class VideoStreamIngestor:
     DEFAULT_EVIDENCE_CLIP_PREROLL_SECONDS = 4.0
     DEFAULT_EVIDENCE_CLIP_END_HOLD_SECONDS = 1.0
     DEFAULT_VIDEO_CHUNK_SECONDS = 2.0
-    DEFAULT_VIDEO_CHUNK_SUBSAMPLE_FRAMES = 9
+    DEFAULT_VIDEO_CHUNK_SUBSAMPLE_FRAMES = 12
     DEFAULT_VIDEO_CHUNK_QUEUE_MAXSIZE = 10
+    DEFAULT_PENDING_VLM_FRAME_MULTIPLIER = 5
     DEFAULT_SEMANTIC_FRAME_QUEUE_MAXSIZE = 3
     DEFAULT_SNAPSHOT_POLL_SECONDS = 0.5
     
@@ -129,6 +129,9 @@ class VideoStreamIngestor:
         self._latest_model_input: Optional[Dict[str, Any]] = None
         self._queued_chunk_created_at: deque = deque()
         self._queued_chunk_frame_counts: deque = deque()
+        self._chunk_processing_busy: bool = False
+        self._pending_vlm_frame_records: deque = deque()
+        self._pending_vlm_frames_dropped: int = 0
         self._queued_semantic_frame_created_at: deque = deque()
         self._semantic_queue_frames_dropped: int = 0
         self._binary_queue_frames_dropped: int = 0
@@ -157,6 +160,7 @@ class VideoStreamIngestor:
         self._frames_skipped: int = 0  # Total frames skipped (lifetime)
         self._consecutive_skips: int = 0  # Frames skipped since last VLM call (for UI)
         self._load_video_chunk_settings_from_env()
+        self._pending_vlm_frame_records = deque(maxlen=self._pending_vlm_frame_limit())
         self._semantic_filter = SemanticFrameFilter()
         self._semantic_frames_skipped: int = 0
         self._semantic_consecutive_skips: int = 0
@@ -263,10 +267,26 @@ class VideoStreamIngestor:
             int(os.getenv("VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE", self.DEFAULT_SEMANTIC_FRAME_QUEUE_MAXSIZE)),
         )
 
+    def _pending_vlm_frame_limit(self) -> int:
+        """Return the bounded frame FIFO size used while VLM inference is busy."""
+
+        return max(
+            int(self._video_chunk_subsample_frames),
+            int(self._video_chunk_subsample_frames) * self.DEFAULT_PENDING_VLM_FRAME_MULTIPLIER,
+        )
+
+    def _resize_pending_vlm_frame_buffer(self) -> None:
+        """Apply the current pending-frame limit without preserving excess old frames."""
+
+        limit = self._pending_vlm_frame_limit()
+        existing_records = list(self._pending_vlm_frame_records)[-limit:]
+        self._pending_vlm_frame_records = deque(existing_records, maxlen=limit)
+
     def reload_video_chunk_settings(self) -> Dict[str, Any]:
         """Reload chunking settings for active ingestors."""
 
         self._load_video_chunk_settings_from_env()
+        self._resize_pending_vlm_frame_buffer()
         if self._chunk_queue is not None and hasattr(self._chunk_queue, "_maxsize"):
             self._chunk_queue._maxsize = self._video_chunk_queue_maxsize
         if self._semantic_frame_queue is not None and hasattr(self._semantic_frame_queue, "_maxsize"):
@@ -293,6 +313,7 @@ class VideoStreamIngestor:
             "video_chunk_seconds": float(self._video_chunk_seconds),
             "video_chunk_subsample_frames": int(self._video_chunk_subsample_frames),
             "video_chunk_queue_maxsize": int(self._video_chunk_queue_maxsize),
+            "pending_vlm_frame_maxsize": int(self._pending_vlm_frame_limit()),
             "semantic_frame_queue_maxsize": int(self._semantic_frame_queue_maxsize),
         }
 
@@ -312,6 +333,9 @@ class VideoStreamIngestor:
             "oldest_queued_chunk_age_ms": oldest_age_ms,
             "newest_queued_chunk_age_ms": newest_age_ms,
             "queued_chunk_frame_counts": list(self._queued_chunk_frame_counts),
+            "vlm_inference_busy": bool(self._chunk_processing_busy),
+            "pending_vlm_frames": int(len(self._pending_vlm_frame_records)),
+            "dropped_pending_vlm_frames": int(self._pending_vlm_frames_dropped),
         }
 
     def get_semantic_frame_queue_status(self) -> Dict[str, Any]:
@@ -613,12 +637,13 @@ class VideoStreamIngestor:
         self,
         frames,
         evidence_buffer_snapshot: Optional[List[EvidenceFrameRecord]] = None,
+        duration_seconds: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """Run VLM processing on a motion-triggered frame chunk.
 
         Synchronous — calls the model provider's _sync_generate_content directly.
-        The capture loop decides whether a chunk contains enough motion to send,
-        but the chunk itself contains frames from the whole time window.
+        The capture loop dispatches immediately when inference is idle, then
+        batches frames captured while inference is busy into the next call.
 
         Returns:
             Results dict with task_updates, processing_time_ms, prompt, and frame
@@ -634,7 +659,8 @@ class VideoStreamIngestor:
         self._process_loop_ticks += 1
         self._log_periodic_frame_debug(frames[-1])
 
-        model_input = self._prepare_model_input(frames)
+        effective_duration_seconds = self._effective_batch_duration_seconds(duration_seconds)
+        model_input = self._prepare_model_input(frames, duration_seconds=effective_duration_seconds)
         if model_input is None:
             return None
         sampled_frames, model_frame, prompt, image_base64 = model_input
@@ -648,6 +674,7 @@ class VideoStreamIngestor:
             sampled_frames=sampled_frames,
             raw_frame_count=len(frames),
             prompt=prompt,
+            duration_seconds=effective_duration_seconds,
         )
         results = self._call_model(image_base64, prompt)
         self._consecutive_skips = 0
@@ -661,6 +688,7 @@ class VideoStreamIngestor:
                 prompt=prompt,
                 started_at=t0,
                 evidence_buffer_snapshot=evidence_buffer_snapshot,
+                duration_seconds=effective_duration_seconds,
             )
 
         return results
@@ -672,6 +700,7 @@ class VideoStreamIngestor:
         sampled_frames: List[Any],
         raw_frame_count: int,
         prompt: str,
+        duration_seconds: float,
     ) -> None:
         """Store the exact model input image before the provider call returns."""
 
@@ -681,7 +710,7 @@ class VideoStreamIngestor:
             "evidence_frame": sampled_frames[-1].copy(),
             "prompt": prompt,
             "chunk": build_chunk_metadata(
-                duration_seconds=self._video_chunk_seconds,
+                duration_seconds=duration_seconds,
                 sampled_frame_count=len(sampled_frames),
                 raw_frame_count=raw_frame_count,
             ),
@@ -698,9 +727,21 @@ class VideoStreamIngestor:
             f"mean={frame_mean:.2f}, min={frame.min()}, max={frame.max()}"
         )
 
+    def _effective_batch_duration_seconds(self, duration_seconds: Optional[float]) -> float:
+        """Return duration metadata for a model batch."""
+
+        if duration_seconds is None:
+            return float(self._video_chunk_seconds)
+        try:
+            return max(0.0, float(duration_seconds))
+        except (TypeError, ValueError):
+            return float(self._video_chunk_seconds)
+
     def _prepare_model_input(
         self,
         frames: List[Any],
+        *,
+        duration_seconds: Optional[float] = None,
     ) -> Optional[Tuple[List[Any], Any, str, str]]:
         """Build a contact sheet from every valid chunk frame and encode it."""
 
@@ -711,6 +752,7 @@ class VideoStreamIngestor:
 
         prompt = self._build_prompt(
             frame_count=len(sampled_frames),
+            duration_seconds=duration_seconds,
         )
         image_base64 = self._frame_to_base64(model_frame)
         if not image_base64:
@@ -752,6 +794,7 @@ class VideoStreamIngestor:
         prompt: str,
         started_at: float,
         evidence_buffer_snapshot: Optional[List[EvidenceFrameRecord]],
+        duration_seconds: float,
     ) -> None:
         """Attach debug metadata, store history, and apply task updates."""
 
@@ -765,7 +808,7 @@ class VideoStreamIngestor:
         )
         results["prompt"] = prompt
         results["chunk"] = build_chunk_metadata(
-            duration_seconds=self._video_chunk_seconds,
+            duration_seconds=duration_seconds,
             sampled_frame_count=len(sampled_frames),
             raw_frame_count=raw_frame_count,
         )
@@ -792,17 +835,21 @@ class VideoStreamIngestor:
                     self._queued_chunk_frame_counts.popleft()
             except asyncio.TimeoutError:
                 continue
+            self._chunk_processing_busy = True
             try:
                 if isinstance(chunk_item, dict):
                     chunk = chunk_item.get("frames") or []
                     evidence_buffer_snapshot = chunk_item.get("evidence_buffer")
+                    duration_seconds = chunk_item.get("duration_seconds")
                 else:
                     chunk = chunk_item
                     evidence_buffer_snapshot = None
+                    duration_seconds = None
                 await asyncio.to_thread(
                     self._VLM_processing,
                     chunk,
                     evidence_buffer_snapshot,
+                    duration_seconds,
                 )
             except Exception as e:
                 logger.error(
@@ -812,14 +859,12 @@ class VideoStreamIngestor:
                     exc_info=True,
                 )
             finally:
+                self._chunk_processing_busy = False
                 queue.task_done()
+                self._enqueue_pending_vlm_frames_if_available()
 
     async def _semantic_frame_processing_loop(self) -> None:
         """Score frame-diff outputs without blocking capture."""
-
-        chunk_frames: List[Any] = []
-        chunk_has_motion = False
-        chunk_start_monotonic = time.monotonic()
 
         while self._running:
             queue = self._semantic_frame_queue
@@ -831,15 +876,6 @@ class VideoStreamIngestor:
                 if self._queued_semantic_frame_created_at:
                     self._queued_semantic_frame_created_at.popleft()
             except asyncio.TimeoutError:
-                if chunk_frames and chunk_has_motion and is_chunk_complete(
-                    chunk_start_monotonic,
-                    time.monotonic(),
-                    self._video_chunk_seconds,
-                ):
-                    self._enqueue_frame_chunk(chunk_frames)
-                    chunk_frames = []
-                    chunk_has_motion = False
-                    chunk_start_monotonic = time.monotonic()
                 continue
             try:
                 semantic_result = self._apply_semantic_filter(frame)
@@ -848,19 +884,7 @@ class VideoStreamIngestor:
                     continue
 
                 if self._general_tasks():
-                    if not chunk_frames:
-                        chunk_start_monotonic = frame_monotonic
-                    chunk_frames.append(frame.copy())
-                    chunk_has_motion = True
-                    if is_chunk_complete(chunk_start_monotonic, frame_monotonic, self._video_chunk_seconds):
-                        self._enqueue_frame_chunk(chunk_frames)
-                        chunk_frames = []
-                        chunk_has_motion = False
-                        chunk_start_monotonic = frame_monotonic
-                else:
-                    chunk_frames = []
-                    chunk_has_motion = False
-                    chunk_start_monotonic = frame_monotonic
+                    self._submit_frame_for_general_vlm(frame, frame_monotonic)
             except Exception:
                 logger.error(
                     "Error in semantic frame processing loop [camera=%s]",
@@ -869,9 +893,6 @@ class VideoStreamIngestor:
                 )
             finally:
                 queue.task_done()
-
-        if chunk_frames and chunk_has_motion:
-            self._enqueue_frame_chunk(chunk_frames)
 
     async def _binary_frame_processing_loop(self) -> None:
         """Run local binary monitors on latest motion-filtered frames."""
@@ -1068,25 +1089,89 @@ class VideoStreamIngestor:
                 break
         self._queued_semantic_frame_created_at.clear()
 
-    def _enqueue_frame_chunk(self, frames: List[Any]) -> None:
-        """Queue a completed motion-triggered chunk without blocking capture."""
+    def _vlm_inference_is_available(self) -> bool:
+        """Return True when a new general VLM batch can start immediately."""
+
+        queue = self._chunk_queue
+        return bool(queue is not None and not self._chunk_processing_busy and queue.empty())
+
+    def _append_pending_vlm_frame(self, frame: Any, frame_monotonic: Optional[float] = None) -> None:
+        """Append one frame to the bounded pending FIFO used while inference is busy."""
+
+        if frame is None or getattr(frame, "size", 0) <= 0:
+            return
+        if len(self._pending_vlm_frame_records) == self._pending_vlm_frame_records.maxlen:
+            self._pending_vlm_frames_dropped += 1
+        timestamp = frame_monotonic if frame_monotonic is not None else time.monotonic()
+        self._pending_vlm_frame_records.append((frame.copy(), float(timestamp)))
+
+    def _clear_pending_vlm_frames(self) -> None:
+        """Drop pending VLM frames that no longer have an active general task."""
+
+        self._pending_vlm_frame_records.clear()
+
+    def _batch_duration_from_records(self, frame_records: List[Tuple[Any, float]]) -> float:
+        """Return the observed monotonic duration covered by frame records."""
+
+        if len(frame_records) <= 1:
+            return 0.0
+        timestamps = [float(record[1]) for record in frame_records]
+        return max(0.0, timestamps[-1] - timestamps[0])
+
+    def _enqueue_frame_records(self, frame_records: List[Tuple[Any, float]]) -> bool:
+        """Queue one already-decided VLM batch without blocking capture."""
+
+        if not frame_records or not self._general_tasks():
+            return False
+        frames = [record[0] for record in frame_records]
+        duration_seconds = self._batch_duration_from_records(frame_records)
+        return self._enqueue_frame_chunk(frames, duration_seconds=duration_seconds)
+
+    def _enqueue_pending_vlm_frames_if_available(self) -> bool:
+        """Dispatch buffered frames as the next batch when inference becomes free."""
+
+        if not self._general_tasks():
+            self._clear_pending_vlm_frames()
+            return False
+        if not self._pending_vlm_frame_records or not self._vlm_inference_is_available():
+            return False
+        frame_records = list(self._pending_vlm_frame_records)
+        self._pending_vlm_frame_records.clear()
+        return self._enqueue_frame_records(frame_records)
+
+    def _submit_frame_for_general_vlm(self, frame: Any, frame_monotonic: Optional[float] = None) -> bool:
+        """Send a frame immediately if VLM is idle, otherwise buffer it."""
+
+        if not self._general_tasks():
+            self._clear_pending_vlm_frames()
+            return False
+        if self._vlm_inference_is_available() and not self._pending_vlm_frame_records:
+            timestamp = frame_monotonic if frame_monotonic is not None else time.monotonic()
+            return self._enqueue_frame_records([(frame.copy(), float(timestamp))])
+        self._append_pending_vlm_frame(frame, frame_monotonic)
+        return False
+
+    def _enqueue_frame_chunk(self, frames: List[Any], *, duration_seconds: Optional[float] = None) -> bool:
+        """Queue a VLM batch without blocking capture."""
 
         if not frames or not self._general_tasks():
-            return
+            return False
 
         queue = self._chunk_queue
         if queue is None:
-            return
+            return False
 
         chunk = [frame.copy() for frame in frames]
         chunk_payload = {
             "frames": chunk,
             "evidence_buffer": snapshot_evidence_buffer(self._evidence_frame_buffer),
+            "duration_seconds": self._effective_batch_duration_seconds(duration_seconds),
         }
         try:
             queue.put_nowait(chunk_payload)
             self._queued_chunk_created_at.append(time.time())
             self._queued_chunk_frame_counts.append(len(chunk))
+            return True
         except asyncio.QueueFull:
             try:
                 queue.get_nowait()
@@ -1104,6 +1189,7 @@ class VideoStreamIngestor:
                 "Dropped oldest queued video chunk for camera=%s because inference is behind capture",
                 self.camera_index,
             )
+            return True
 
     async def _capture_loop(self):
         """Capture frames and run VLM processing in a single loop.
@@ -1141,9 +1227,6 @@ class VideoStreamIngestor:
                     await asyncio.sleep(0.1)
 
             self._consecutive_capture_failures = 0
-            chunk_frames: List[Any] = []
-            chunk_has_motion = False
-            chunk_start_monotonic = time.monotonic()
 
             while self._running:
                 try:
@@ -1155,28 +1238,17 @@ class VideoStreamIngestor:
                     now_monotonic = time.monotonic()
                     if not self._tasks_list:
                         self._update_filter_preview(frame)
-                        chunk_frames = []
-                        chunk_has_motion = False
-                        chunk_start_monotonic = now_monotonic
+                        self._clear_pending_vlm_frames()
                         await asyncio.sleep(0.05)
                         continue
 
-                    chunk_has_motion = self._add_frame_to_chunk(chunk_frames, frame, now_monotonic) or chunk_has_motion
+                    self._process_captured_frame_for_monitors(frame, now_monotonic)
 
-                    if is_chunk_complete(chunk_start_monotonic, now_monotonic, self._video_chunk_seconds):
-                        if chunk_has_motion:
-                            self._enqueue_frame_chunk(chunk_frames)
-                        chunk_frames = []
-                        chunk_has_motion = False
-                        chunk_start_monotonic = now_monotonic
                     if self.is_snapshot_source:
                         await asyncio.sleep(self._snapshot_poll_interval_s)
                 except Exception as e:
                     logger.error(f"Error in capture/process loop for camera index={self.camera_index}: {e}", exc_info=True)
                     await asyncio.sleep(0.1)
-
-            if chunk_frames and chunk_has_motion:
-                self._enqueue_frame_chunk(chunk_frames)
 
             logger.info(f"Stopped capture loop for camera index={self.camera_index}")
 
@@ -1230,6 +1302,31 @@ class VideoStreamIngestor:
 
         chunk_frames.append(frame.copy())
         return True
+
+    def _process_captured_frame_for_monitors(self, frame: Any, frame_monotonic: Optional[float] = None) -> bool:
+        """Route a captured frame to binary, semantic, or general VLM processing."""
+
+        if self._is_frame_duplicate(frame):
+            self._record_duplicate_skip()
+            if self._semantic_refresh_during_frame_diff_skips and self._semantic_preview_needs_refresh():
+                semantic_result = self._apply_semantic_filter(frame)
+                if not semantic_result.should_keep:
+                    self._record_semantic_skip()
+            return False
+
+        self._remember_frame_for_diff(frame)
+        if self._binary_monitor_is_active():
+            self._enqueue_binary_frame(frame)
+
+        if not self._general_tasks():
+            self._clear_pending_vlm_frames()
+            return False
+
+        if self._semantic_filter_is_active():
+            self._enqueue_semantic_frame(frame, frame_monotonic)
+            return False
+
+        return self._submit_frame_for_general_vlm(frame, frame_monotonic)
 
     def _is_frame_duplicate(self, frame: Any) -> bool:
         """Check if a frame is effectively identical to the last processed frame.
@@ -1382,16 +1479,18 @@ class VideoStreamIngestor:
         self,
         *,
         frame_count: int = 1,
+        duration_seconds: Optional[float] = None,
     ) -> str:
         """Build the prompt for the LLM based on tasks and history."""
         visual_context = None
         if frame_count > 1:
+            effective_duration_seconds = self._effective_batch_duration_seconds(duration_seconds)
             visual_context = (
                 f"The attached image is a chronological contact sheet of {frame_count} "
-                f"frames from one {self._video_chunk_seconds:.2f}s video chunk. "
+                f"frames from one {effective_duration_seconds:.2f}s video batch. "
                 "Frame labels count upward in time from earliest to latest. "
                 f"If more than {self._video_chunk_subsample_frames} frames were available, "
-                "these frames were evenly sampled from the chunk. "
+                "these frames were evenly sampled from the batch. "
                 "Use all frames to detect short actions or state changes that may appear in only one frame."
             )
         return build_video_ingestor_prompt(
@@ -1614,6 +1713,10 @@ class VideoStreamIngestor:
                 pass
         self._chunk_processor_task = None
         self._chunk_queue = None
+        self._chunk_processing_busy = False
+        self._queued_chunk_created_at.clear()
+        self._queued_chunk_frame_counts.clear()
+        self._clear_pending_vlm_frames()
 
         if self._semantic_processor_task and not self._semantic_processor_task.done():
             self._semantic_processor_task.cancel()

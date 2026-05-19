@@ -1978,9 +1978,9 @@ def ingestor_semantic_preview_status(io_id):
             except (TypeError, ValueError):
                 chunk_seconds = 2.0
             try:
-                max_frames = int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES", "9"))
+                max_frames = int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES", "12"))
             except (TypeError, ValueError):
-                max_frames = 9
+                max_frames = 12
             try:
                 max_queue = int(os.getenv("VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE", "10"))
             except (TypeError, ValueError):
@@ -3386,7 +3386,7 @@ _DEFAULT_SETTINGS = {
     'VIDEOMEMORY_SAVE_NOTE_FRAMES': '1',
     'VIDEOMEMORY_SAVE_NOTE_VIDEOS': '0',
     'VIDEOMEMORY_VIDEO_CHUNK_SECONDS': '2.0',
-    'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES': '9',
+    'VIDEOMEMORY_VIDEO_CHUNK_SUBSAMPLE_FRAMES': '12',
     'VIDEOMEMORY_VIDEO_CHUNK_QUEUE_MAXSIZE': '10',
     'VIDEOMEMORY_SEMANTIC_FRAME_QUEUE_MAXSIZE': '3',
     'VIDEOMEMORY_FASTVLM_THRESHOLD_MODE': 'adaptive',

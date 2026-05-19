@@ -745,29 +745,6 @@ export function createVoiceDemoServer(options = {}) {
     return `${base} Treat this as a persistent monitor: complete only for a new occurrence after the previous wakeup, not merely because the same unchanged scene is still visible.`;
   }
 
-  async function captionVisualMemoryObservation(ioId, registryEntry, memory = null) {
-    const spec = registryEntry.visual_memory || memory || {};
-    const prompt = [
-      "Update a visual-memory state from the current camera frame.",
-      `Original user request: ${cleanText(spec.original_request || registryEntry.original_request)}`,
-      `Visual event to look for: ${cleanText(spec.event_condition || registryEntry.trigger_condition)}`,
-      `Extraction rule: ${cleanText(spec.extraction_instruction) || "Extract the value or concise observation for this single event."}`,
-      "Return JSON only with this exact shape: {\"observed\": boolean, \"value\": number|string|null, \"confidence\": \"high\"|\"medium\"|\"low\", \"reason\": string}.",
-      "If the requested event is not clearly visible, unchanged from the prior observation, or ambiguous, return observed=false and value=null.",
-      "For totals/counts/sums, value must be the numeric amount to add for this single observation, not the cumulative total.",
-    ].join(" ");
-    const response = await fetchJson(`${videomemoryBaseUrl}/api/caption_frame`, {
-      method: "POST",
-      body: JSON.stringify({ io_id: ioId, prompt }),
-    });
-    const text = cleanText(response.analysis || response.caption || response.description || response.text || response.result || response.raw);
-    return {
-      response,
-      text,
-      parsed: parseVisualMemoryObservation(text, spec),
-    };
-  }
-
   async function rearmPersistentMonitor(state, registryEntry, previousValue = null) {
     const nextPlan = {
       ...registryEntry,
@@ -1193,69 +1170,53 @@ export function createVoiceDemoServer(options = {}) {
         started_at: new Date().toISOString(),
         last_value: null,
       };
-      try {
-        const caption = await captionVisualMemoryObservation(
-          cleanText(payload.io_id || registryEntry.io_id) || "browser_facetime",
-          registryEntry,
-          state.visual_memory,
-        );
-        recordToolCall(state, "caption_visual_memory_observation", {
+      const noteText = cleanText(payload.note);
+      const parsed = parseVisualMemoryObservation(noteText, state.visual_memory);
+      recordToolCall(state, "parse_visual_memory_task_note", {
+        task_id: taskId,
+        io_id: cleanText(payload.io_id || registryEntry.io_id),
+      }, {
+        parsed,
+        text: noteText,
+      });
+      if (parsed.observed && parsed.value !== null && parsed.value !== undefined && parsed.value !== "") {
+        const observation = {
+          id: `visual-${Date.now()}`,
+          value: parsed.value,
+          confidence: parsed.confidence,
+          reason: parsed.reason,
+          evidence_url: cleanText(payload.note_frame_api_url || payload.note_video_api_url),
           task_id: taskId,
-          io_id: cleanText(payload.io_id || registryEntry.io_id),
-        }, {
-          parsed: caption.parsed,
-          text: caption.text,
-        });
-        if (caption.parsed.observed && caption.parsed.value !== null && caption.parsed.value !== undefined && caption.parsed.value !== "") {
-          const observation = {
-            id: `visual-${Date.now()}`,
-            value: caption.parsed.value,
-            confidence: caption.parsed.confidence,
-            reason: caption.parsed.reason,
-            evidence_url: cleanText(payload.note_frame_api_url || payload.note_video_api_url),
-            task_id: taskId,
-            event_id: eventId,
-            caption: caption.text,
-            at: new Date().toISOString(),
-          };
-          state.visual_memory.observations.push(observation);
-          if ((state.visual_memory.mode || state.visual_memory.spec?.mode) === "numeric_total") {
-            state.visual_memory.total = state.visual_memory.observations.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
-          }
-          state.visual_memory.last_value = caption.parsed.value;
-          state.visual_memory.last_observation_at = observation.at;
-          visualMemoryResult = {
-            status: "recorded",
-            value: caption.parsed.value,
-            total: state.visual_memory.total,
-            observation,
-          };
-          message = summarizeVisualMemory(state.visual_memory);
-          recordToolCall(state, "record_visual_memory_observation", {
-            task_id: taskId,
-            event_id: eventId,
-          }, visualMemoryResult);
-        } else {
-          visualMemoryResult = {
-            status: "unclear",
-            value: null,
-            total: state.visual_memory.total || 0,
-            caption: caption.text,
-            parsed: caption.parsed,
-          };
-          message = `Visual memory woke up, but the observation was unclear. ${summarizeVisualMemory(state.visual_memory)}`;
-        }
-      } catch (error) {
-        visualMemoryResult = {
-          status: "error",
-          error: cleanText(error.message),
-          total: state.visual_memory.total || 0,
+          event_id: eventId,
+          caption: noteText,
+          at: new Date().toISOString(),
         };
-        message = `Visual memory woke up, but could not caption the frame: ${cleanText(error.message)}.`;
-        recordToolCall(state, "caption_visual_memory_observation", {
+        state.visual_memory.observations.push(observation);
+        if ((state.visual_memory.mode || state.visual_memory.spec?.mode) === "numeric_total") {
+          state.visual_memory.total = state.visual_memory.observations.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
+        }
+        state.visual_memory.last_value = parsed.value;
+        state.visual_memory.last_observation_at = observation.at;
+        visualMemoryResult = {
+          status: "recorded",
+          value: parsed.value,
+          total: state.visual_memory.total,
+          observation,
+        };
+        message = summarizeVisualMemory(state.visual_memory);
+        recordToolCall(state, "record_visual_memory_observation", {
           task_id: taskId,
-          io_id: cleanText(payload.io_id || registryEntry.io_id),
-        }, visualMemoryResult, "error");
+          event_id: eventId,
+        }, visualMemoryResult);
+      } else {
+        visualMemoryResult = {
+          status: "unclear",
+          value: null,
+          total: state.visual_memory.total || 0,
+          caption: noteText,
+          parsed,
+        };
+        message = `Visual memory woke up, but the task note did not contain a clear extracted value. ${summarizeVisualMemory(state.visual_memory)}`;
       }
     }
     if (acceptedActiveGeneralNote) {

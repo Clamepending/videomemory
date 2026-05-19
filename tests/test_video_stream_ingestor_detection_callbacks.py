@@ -1,3 +1,4 @@
+import asyncio
 import os
 from unittest.mock import AsyncMock, Mock, patch
 import unittest
@@ -320,6 +321,7 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
         provider._sync_generate_content.return_value = VideoIngestorOutput(task_updates=[])
         ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=provider)
         ingestor._tasks_list = [self._task()]
+        ingestor._video_chunk_seconds = 2.0
         ingestor._video_chunk_subsample_frames = 3
 
         frames = []
@@ -336,7 +338,7 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
         self.assertEqual(result["chunk"]["raw_frame_count"], 5)
         self.assertEqual(result["frame"].shape, (480, 640, 3))
         self.assertIn("chronological contact sheet of 3", provider._sync_generate_content.call_args.kwargs["prompt"])
-        self.assertIn("2.00s video chunk", provider._sync_generate_content.call_args.kwargs["prompt"])
+        self.assertIn("2.00s video batch", provider._sync_generate_content.call_args.kwargs["prompt"])
 
         latest_model_input = ingestor.get_latest_model_input()
         self.assertIsNotNone(latest_model_input)
@@ -361,6 +363,62 @@ class VideoStreamIngestorDetectionCallbackTests(unittest.TestCase):
         self.assertEqual(result["chunk"]["sampled_frame_count"], 5)
         self.assertEqual(result["chunk"]["raw_frame_count"], 5)
         self.assertIn("chronological contact sheet of 5", provider._sync_generate_content.call_args.kwargs["prompt"])
+
+    def test_general_vlm_frame_dispatches_immediately_when_idle(self):
+        ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=object())
+        ingestor._tasks_list = [self._task()]
+        ingestor._chunk_queue = asyncio.Queue(maxsize=1)
+
+        frame = np.zeros((12, 16, 3), dtype=np.uint8)
+
+        dispatched = ingestor._submit_frame_for_general_vlm(frame, frame_monotonic=10.0)
+
+        self.assertTrue(dispatched)
+        self.assertEqual(ingestor._chunk_queue.qsize(), 1)
+        self.assertEqual(len(ingestor._pending_vlm_frame_records), 0)
+        payload = ingestor._chunk_queue.get_nowait()
+        self.assertEqual(len(payload["frames"]), 1)
+        self.assertEqual(payload["duration_seconds"], 0.0)
+
+    def test_general_vlm_buffers_while_busy_then_drains_as_one_twelve_frame_batch(self):
+        provider = Mock()
+        provider._sync_generate_content.return_value = VideoIngestorOutput(task_updates=[])
+        ingestor = VideoStreamIngestor("http://camera.example/snapshot.jpg", model_provider=provider)
+        ingestor._tasks_list = [self._task()]
+        ingestor._video_chunk_subsample_frames = 12
+        ingestor._resize_pending_vlm_frame_buffer()
+        ingestor._chunk_queue = asyncio.Queue(maxsize=1)
+        ingestor._chunk_processing_busy = True
+
+        for index in range(15):
+            frame = np.zeros((12, 16, 3), dtype=np.uint8)
+            frame[:, :] = index
+            dispatched = ingestor._submit_frame_for_general_vlm(frame, frame_monotonic=20.0 + (index * 0.1))
+            self.assertFalse(dispatched)
+
+        self.assertEqual(len(ingestor._pending_vlm_frame_records), 15)
+        self.assertEqual(ingestor._chunk_queue.qsize(), 0)
+
+        ingestor._chunk_processing_busy = False
+        drained = ingestor._enqueue_pending_vlm_frames_if_available()
+
+        self.assertTrue(drained)
+        self.assertEqual(len(ingestor._pending_vlm_frame_records), 0)
+        payload = ingestor._chunk_queue.get_nowait()
+        self.assertEqual(len(payload["frames"]), 15)
+        self.assertAlmostEqual(payload["duration_seconds"], 1.4)
+
+        result = ingestor._VLM_processing(
+            payload["frames"],
+            payload["evidence_buffer"],
+            payload["duration_seconds"],
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["chunk"]["sampled_frame_count"], 12)
+        self.assertEqual(result["chunk"]["raw_frame_count"], 15)
+        self.assertIn("chronological contact sheet of 12", provider._sync_generate_content.call_args.kwargs["prompt"])
+        self.assertIn("1.40s video batch", provider._sync_generate_content.call_args.kwargs["prompt"])
 
     def test_vlm_processing_records_model_input_when_provider_fails(self):
         provider = Mock()

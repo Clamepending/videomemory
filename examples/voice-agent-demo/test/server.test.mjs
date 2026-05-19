@@ -852,6 +852,7 @@ test("visual-memory setup creates a persistent silent monitor with the extracted
     assert.equal(body.registry_entry.silent_wakeup, true);
     assert.match(vm.calls.tasks[0].task_description, /hold up fingers/i);
     assert.doesNotMatch(vm.calls.tasks[0].task_description, /asks for the total/i);
+    assert.match(vm.calls.tasks[0].task_description, /write task_note as JSON only/i);
     assert.equal(status.body.visual_memory.total, 0);
     assert.equal(status.body.visual_memory.active_task_id, "task_1");
   } finally {
@@ -861,8 +862,8 @@ test("visual-memory setup creates a persistent silent monitor with the extracted
   }
 });
 
-test("visual-memory wakeup captions the frame, records total, and re-arms silently", async () => {
-  const vm = createFakeVideoMemory({ caption: '{"observed": true, "value": 5, "confidence": "high"}' });
+test("visual-memory wakeup parses task note, records total, and re-arms silently", async () => {
+  const vm = createFakeVideoMemory();
   const vmBase = await listen(vm.server);
   const stateDir = await mkdtemp(join(tmpdir(), "voice-demo-"));
   const demo = createVoiceDemoServer({ videomemoryBaseUrl: vmBase, stateDir });
@@ -885,7 +886,7 @@ test("visual-memory wakeup captions the frame, records total, and re-arms silent
         event_id: "finger-evt-1",
         task_id: "task_1",
         io_id: "browser_facetime",
-        note: "Binary criterion met.",
+        note: '{"observed": true, "value": 5, "confidence": "high", "reason": "clear hand"}',
       }),
     });
     const total = await requestJson(`${demoBase}/api/realtime/tool`, {
@@ -898,9 +899,10 @@ test("visual-memory wakeup captions the frame, records total, and re-arms silent
     assert.equal(wake.body.event.visual_memory.value, 5);
     assert.equal(wake.body.event.visual_memory.total, 5);
     assert.equal(wake.body.event.visual_memory.rearmed_task_id, "task_2");
-    assert.equal(vm.calls.captions.length, 1);
+    assert.equal(vm.calls.captions.length, 0);
     assert.equal(vm.calls.tasks.length, 2);
     assert.match(vm.calls.tasks[1].task_description, /previous extracted value: 5/);
+    assert.match(vm.calls.tasks[1].task_description, /write task_note as JSON only/i);
     assert.equal(total.body.summary, "Finger count total: 5. Observations: 5.");
   } finally {
     await close(demo);

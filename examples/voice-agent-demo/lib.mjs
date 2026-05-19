@@ -207,7 +207,17 @@ export function buildVideoMemoryTaskPayload(plan) {
   }
   const monitorType = cleanText(plan.monitor_type) || DEFAULT_MONITOR_TYPE;
   const triggerCondition = cleanText(plan.trigger_condition);
-  const taskDescription = monitorType === "general"
+  const isVisualMemory = cleanText(plan.persona) === "visual_memory" && plan.visual_memory;
+  const taskDescription = monitorType === "general" && isVisualMemory
+    ? [
+      `Visual trigger: ${triggerCondition}`,
+      "Set task_done=true as soon as the visual trigger is clearly satisfied.",
+      `Extraction rule: ${cleanText(plan.visual_memory.extraction_instruction) || "Extract the value or concise observation for this single event."}`,
+      "When task_done=true, write task_note as JSON only with this exact shape: {\"observed\":true,\"value\":number|string,\"confidence\":\"high\"|\"medium\"|\"low\",\"reason\":string}.",
+      "For totals/counts/sums, value must be the numeric amount for this single observation, not the cumulative total.",
+      "If the trigger is absent, unclear, ambiguous, partially obscured, or unchanged, keep task_done=false and write a concise note about what is visible.",
+    ].join(" ")
+    : monitorType === "general"
     ? [
       `Visual trigger: ${triggerCondition}`,
       "Set task_done=true as soon as the visual trigger is clearly satisfied.",
